@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>設定 (試作)</title>
+<link rel="stylesheet" href="../generated/tokens.css">
+<link rel="stylesheet" href="common.css">
+<style>
+  /* 細かい設定は、すべてここにまとめる (設計書 4.5)。専門用語は説明を添える */
+  .page { display: grid; grid-template-columns: 200px 1fr; gap: var(--space-xl); max-width: 980px; margin: 0 auto; padding: var(--space-xxl); }
+  .top { grid-column: 1 / -1; display: flex; align-items: center; gap: var(--space-md); }
+  .top h1 { margin: 0; font-size: var(--font-size-heading); font-weight: 600; }
+
+  nav { display: flex; flex-direction: column; gap: var(--space-xs); }
+  nav a {
+    padding: var(--space-sm) var(--space-md);
+    border-radius: var(--radius-sm);
+    color: var(--color-text);
+    text-decoration: none;
+    border-left: 3px solid transparent;
+  }
+  nav a[aria-current="true"] { background: var(--color-surface); border-left-color: var(--color-accent); font-weight: 600; }
+
+  .sections { display: flex; flex-direction: column; gap: var(--space-lg); }
+  .section { display: flex; flex-direction: column; gap: var(--space-md); padding: var(--space-lg); }
+  .section h2 { margin: 0; font-size: var(--font-size-title); font-weight: 600; }
+  .field { display: grid; grid-template-columns: 200px 1fr; align-items: center; gap: var(--space-md); }
+  .field .hint { grid-column: 2; font-size: var(--font-size-caption); color: var(--color-text-muted); margin-top: calc(-1 * var(--space-sm)); }
+  select {
+    min-height: var(--size-button-height); padding: 0 var(--space-md);
+    border: 1px solid var(--color-border); border-radius: var(--radius-sm);
+    background: var(--color-background);
+  }
+  .meter { display: grid; grid-template-columns: repeat(20, 1fr); gap: 2px; height: 10px; }
+  .meter i { background: var(--color-border); border-radius: 2px; }
+  .meter i.on { background: var(--color-accent); }
+  .plugins { display: flex; flex-direction: column; gap: var(--space-sm); }
+  .plugin { display: flex; align-items: center; justify-content: space-between; padding: var(--space-sm) var(--space-md); border: 1px solid var(--color-border); border-radius: var(--radius-sm); }
+</style>
+</head>
+<body>
+<main class="page">
+  <header class="top">
+    <button class="btn" onclick="location.href='session-list.html'">◀ 戻る</button>
+    <h1>設定</h1>
+  </header>
+
+  <nav>
+    <a href="#audio" aria-current="true">音の入出力</a>
+    <a href="#tone">外部の音色</a>
+    <a href="#theme">見た目</a>
+    <a href="#other">そのほか</a>
+  </nav>
+
+  <div class="sections">
+    <section class="section surface" id="audio">
+      <h2>音の入出力</h2>
+      <div class="field">
+        <label for="device">使う機器</label>
+        <select id="device"><option>Focusrite USB ASIO</option><option>スピーカー (Realtek)</option></select>
+      </div>
+      <div class="field">
+        <label>ギターの入力</label>
+        <div class="meter" aria-label="入力の大きさ"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+      </div>
+      <div class="field">
+        <label for="latency">音の遅れ</label>
+        <select id="latency"><option>短い (約 11ms)</option><option selected>ふつう (約 26ms)</option><option>安定重視 (約 48ms)</option></select>
+        <div class="hint">音が途切れるときは「安定重視」にしてください</div>
+      </div>
+    </section>
+
+    <section class="section surface" id="tone">
+      <h2>外部の音色 <span class="muted" style="font-size: var(--font-size-body)">(上級者向け・VST3)</span></h2>
+      <div class="plugins">
+        <div class="plugin"><span>Neural Amp Modeler</span><span class="muted">C:\Program Files\Common Files\VST3</span></div>
+        <div class="plugin"><span>TSE 808</span><span class="muted">C:\Program Files\Common Files\VST3</span></div>
+      </div>
+      <div><button class="btn">音色を探す</button></div>
+    </section>
+
+    <section class="section surface" id="theme">
+      <h2>見た目</h2>
+      <div class="field">
+        <label>テーマ</label>
+        <div class="seg">
+          <button aria-pressed="true">Windows に合わせる</button>
+          <button aria-pressed="false">ライト (昼)</button>
+          <button aria-pressed="false">ダーク (夜)</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="section surface" id="other">
+      <h2>そのほか</h2>
+      <div class="field">
+        <label for="count">カウントイン</label>
+        <select id="count"><option>なし</option><option selected>1小節</option><option>2小節</option></select>
+      </div>
+      <div class="field">
+        <label for="skip">戻る・進むの幅</label>
+        <select id="skip"><option>3秒</option><option selected>5秒</option><option>10秒</option></select>
+      </div>
+    </section>
+  </div>
+</main>
+<script src="common.js"></script>
+</body>
+</html>

@@ -45,8 +45,20 @@ public:
 
     //==== メトロノーム ====
     void setMetronomeEnabled (bool enabled) noexcept;
+
+    // メトロノームだけを鳴らす (音源を再生していないときに、自前の時計で鳴らす)。
+    // 基本は音源に同期する。音源や YouTube を再生している間は、そちらの時計が優先される
+    void setMetronomeSolo (bool solo) noexcept;
+    bool isMetronomeSolo() const noexcept { return metronomeSolo.load(); }
     void setBpm (double bpm) noexcept { metronomeBpm.store (juce::jlimit (20.0, 400.0, bpm)); }
     void setSyncOffsetSeconds (double seconds) noexcept { syncOffsetSeconds.store (seconds); }
+
+    //==== 外部の時計 (YouTube。設計書 5.2) ====
+    // YouTube の再生位置が届くたびに、メッセージスレッドから呼ぶ。
+    // 再生中はメトロノームがこの時計に合わせる。オーディオスレッドは届いた値の間を自分で進め、
+    // 小さなずれは少しずつ寄せる (いきなり飛ばすと、拍が二重に鳴ったり抜けたりするため)
+    void setExternalClock (double positionSeconds, double rate, bool isPlaying) noexcept;
+    void clearExternalClock() noexcept { externalActive.store (false); }
 
     //==== ミキサー (3系統) と音色 ====
     void setSourceGain (float gain) noexcept    { sourceGain.store (gain); }
@@ -101,12 +113,15 @@ private:
     std::atomic<double> speed { 1.0 };
     std::atomic<double> loopStartSeconds { 0.0 }, loopEndSeconds { 0.0 };
     std::atomic<bool> loopEnabled { false };
-    std::atomic<bool> metronomeEnabled { false }, metronomeResetRequested { false };
+    std::atomic<bool> metronomeEnabled { false }, metronomeResetRequested { false }, metronomeSolo { false };
     std::atomic<double> metronomeBpm { 120.0 };
     std::atomic<double> syncOffsetSeconds { 0.0 };
     std::atomic<float> sourceGain { 1.0f }, guitarGain { 1.0f }, metronomeGain { 0.8f };
     std::atomic<int> tone { (int) ToneType::clean };
     std::atomic<bool> tunerActive { false };
+    std::atomic<bool> externalActive { false }, externalPlaying { false };
+    std::atomic<double> externalPosition { 0.0 }, externalRate { 1.0 };
+    std::atomic<juce::uint32> externalSerial { 0 };
 
     // チューナー用のロックフリー FIFO (オーディオスレッド → UI スレッド)
     static constexpr int tunerFifoSize = 16384;
@@ -115,8 +130,10 @@ private:
 
     // オーディオスレッドだけが触る
     double readPosition = 0.0;  // 音源のサンプル位置
-    double freeClockSeconds = 0.0;  // 音源を再生していないときのメトロノームの時計
+    double externalClockSeconds = 0.0;  // 外部の時計 (YouTube) を、届いた値の間で進めたもの
+    juce::uint32 lastExternalSerial = 0;
     juce::int64 lastBeat = -1;
+    double soloClockSeconds = 0.0;  // メトロノームだけを鳴らすときの時計
     int clickSamplesRemaining = 0;
     double clickPhase = 0.0, clickPhaseDelta = 0.0;
     float clickEnvelope = 0.0f, clickDecay = 0.0f;

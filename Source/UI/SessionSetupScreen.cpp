@@ -1,4 +1,5 @@
 #include "SessionSetupScreen.h"
+#include "../Model/YouTubeUrl.h"
 #include "../Model/TonePresets.h"
 #include "../Text.h"
 
@@ -6,7 +7,8 @@ namespace
 {
     bool looksLikeYouTubeUrl (const juce::String& text)
     {
-        return text.startsWith ("http") && (text.contains ("youtube.com/") || text.contains ("youtu.be/"));
+        // 動画 ID を取り出せる URL だけを受け付ける (再生時に ID が必要なため)
+        return YouTubeUrl::extractVideoId (text).isNotEmpty();
     }
 }
 

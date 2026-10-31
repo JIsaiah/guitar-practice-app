@@ -1,0 +1,169 @@
+#include "ScoreViewer.h"
+#include "WebResources.h"
+
+namespace
+{
+    juce::var makeCommand (const char* type, std::initializer_list<std::pair<const char*, juce::var>> values = {})
+    {
+        auto* object = new juce::DynamicObject();
+        object->setProperty ("type", type);
+        for (const auto& [key, value] : values)
+            object->setProperty (key, value);
+        return juce::var (object);
+    }
+
+    juce::String css (juce::Colour c) { return "#" + c.toDisplayString (false); }
+}
+
+ScoreViewer::ScoreViewer()
+{
+    setInterceptsMouseClicks (false, true);
+}
+
+ScoreViewer::~ScoreViewer() = default;
+
+void ScoreViewer::prepare()
+{
+    if (browser != nullptr)
+        return;
+
+    const auto userData = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
+                              .getChildFile ("GuitarPractice").getChildFile ("WebView2");
+
+    auto options = juce::WebBrowserComponent::Options()
+                       .withBackend (juce::WebBrowserComponent::Options::Backend::webview2)
+                       .withWinWebView2Options (juce::WebBrowserComponent::Options::WinWebView2()
+                                                    .withUserDataFolder (userData)
+                                                    .withBackgroundColour (juce::Colour (0xff1b1c1f)))
+                       .withNativeIntegrationEnabled()
+                       .withKeepPageLoadedWhenBrowserIsHidden()
+                       .withResourceProvider ([this] (const juce::String& path) { return provide (path); })
+                       .withEventListener ("score", [this] (const juce::var& event) { handleEvent (event); });
+
+    browser = std::make_unique<juce::WebBrowserComponent> (options);
+    addAndMakeVisible (*browser);
+    browser->setBounds (getLocalBounds());
+    browser->goToURL (juce::WebBrowserComponent::getResourceProviderRoot() + "score-view.html");
+}
+
+std::optional<juce::WebBrowserComponent::Resource> ScoreViewer::provide (const juce::String& path)
+{
+    // タブ譜のファイルそのもの。/score?n=番号 (番号は、同じファイルでも読み直させるため)
+    if (path.startsWith ("/score?") || path == "/score")
+    {
+        const juce::ScopedLock lock (fileLock);
+        juce::MemoryBlock data;
+        if (scoreFile.loadFileAsData (data))
+            return WebResources::fromMemory (data.getData(), data.getSize(), "application/octet-stream");
+        return std::nullopt;
+    }
+
+    return WebResources::findBundled (path);
+}
+
+void ScoreViewer::resized()
+{
+    if (browser != nullptr)
+        browser->setBounds (getLocalBounds());
+}
+
+void ScoreViewer::placeOver (juce::Component& target)
+{
+    prepare();
+
+    if (auto* parent = getParentComponent())
+        setBounds (parent->getLocalArea (&target, target.getLocalBounds()));
+
+    setVisible (true);
+    toFront (false);
+}
+
+void ScoreViewer::hide()
+{
+    setVisible (false);
+}
+
+//==============================================================================
+void ScoreViewer::send (const juce::var& command)
+{
+    if (browser == nullptr || ! pageReady)
+    {
+        pending.push_back (command);
+        return;
+    }
+
+    browser->evaluateJavascript ("window.scoreCommand && window.scoreCommand(" + juce::JSON::toString (command, true) + ")");
+}
+
+void ScoreViewer::load (const juce::File& file, int trackIndex)
+{
+    {
+        const juce::ScopedLock lock (fileLock);
+        scoreFile = file;
+    }
+
+    rendered = false;
+    scoreTempo = 0.0;
+    lastSentSeconds = -1.0;
+    pending.erase (std::remove_if (pending.begin(), pending.end(),
+                                   [] (const juce::var& c) { return c["type"] == "load" || c["type"] == "clear"; }),
+                   pending.end());
+
+    if (file.existsAsFile())
+        send (makeCommand ("load", { { "url", "/score?n=" + juce::String (++loadCount) }, { "track", trackIndex } }));
+    else
+        send (makeCommand ("clear"));
+}
+
+void ScoreViewer::setPosition (double seconds, double bpm, double offsetSeconds)
+{
+    // 画面の更新 (1秒に30回) のたびに送ると多いので、変わったときだけ送る
+    if (! rendered || std::abs (seconds - lastSentSeconds) < 0.01)
+        return;
+
+    lastSentSeconds = seconds;
+    send (makeCommand ("position", { { "seconds", seconds }, { "bpm", bpm }, { "offset", offsetSeconds } }));
+}
+
+void ScoreViewer::setColours (const Palette& p)
+{
+    // タブ譜の色をテーマに合わせる (設計書 v0.7 4.10)。同じ種類の命令は最新のものだけ残す
+    pending.erase (std::remove_if (pending.begin(), pending.end(),
+                                   [] (const juce::var& c) { return c["type"] == "colours"; }),
+                   pending.end());
+
+    send (makeCommand ("colours", { { "text", css (p.text) }, { "muted", css (p.textMuted) }, { "line", css (p.border.contrasting (0.15f)) } }));
+}
+
+void ScoreViewer::handleEvent (const juce::var& event)
+{
+    const auto type = event["type"].toString();
+
+    if (type == "pageReady")
+    {
+        pageReady = true;
+        auto queued = std::move (pending);
+        pending.clear();
+        for (auto& command : queued)
+            send (command);
+        return;
+    }
+
+    if (type == "loaded")
+    {
+        scoreTempo = (double) event["tempo"];
+        if (onLoaded != nullptr)
+            onLoaded (scoreTempo);
+        return;
+    }
+
+    if (type == "rendered")
+    {
+        rendered = true;
+        lastSentSeconds = -1.0;
+        return;
+    }
+
+    if (type == "error" && onError != nullptr)
+        onError (event["message"].toString());
+}

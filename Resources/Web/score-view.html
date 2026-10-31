@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="ja" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<!-- タブ譜の表示 (設計書 #5、PoC-3)。alphaTab (MPL-2.0) で描く。ファイルはすべてアプリに同梱し、ネットから読まない -->
+<link rel="stylesheet" href="tokens.css">
+<style>
+  html, body { margin: 0; height: 100%; background: var(--color-surface); color: var(--color-text);
+               font-family: var(--font-ui); font-size: var(--font-size-body); }
+  #scroller { position: absolute; inset: 0; overflow-y: auto; overflow-x: hidden; }
+  #score { position: relative; }
+  #cursor { position: absolute; width: 3px; border-radius: 2px; background: var(--color-accent);
+            opacity: 0; transition: opacity 0.15s; pointer-events: none; z-index: 5; }
+  #barHighlight { position: absolute; background: var(--color-accent); opacity: 0; pointer-events: none; z-index: 4; }
+  #message { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+             color: var(--color-text-muted); text-align: center; padding: 24px; box-sizing: border-box; }
+</style>
+</head>
+<body>
+<div id="message">タブ譜を準備しています…</div>
+<div id="scroller"><div id="score"></div></div>
+<script src="alphatab/alphaTab.min.js"></script>
+<script>
+  function send(type, data) {
+    if (window.__JUCE__ && window.__JUCE__.backend)
+      window.__JUCE__.backend.emitEvent("score", Object.assign({ type: type }, data || {}));
+  }
+  function showMessage(text) {
+    const m = document.getElementById("message");
+    m.textContent = text;
+    m.style.display = text ? "flex" : "none";
+  }
+
+  const scroller = document.getElementById("scroller");
+  const scoreElement = document.getElementById("score");
+  const cursor = document.createElement("div"); cursor.id = "cursor";
+  const barHighlight = document.createElement("div"); barHighlight.id = "barHighlight";
+
+  let api = null, score = null, colours = null;
+  let barStartBeats = [];   // 各小節の始まりの拍 (4分音符の数)
+
+  function createApi() {
+    api = new alphaTab.AlphaTabApi(scoreElement, {
+      core: { fontDirectory: "/alphatab/font/", useWorkers: false },
+      player: { playerMode: "disabled" },
+      display: { staveProfile: "tab", scale: 1.0, resources: colourResources() }
+    });
+
+    api.scoreLoaded.on(function (s) {
+      score = s;
+      // 拍子から、各小節が何拍目から始まるかを計算しておく (テンポは一定とみなす。設計書 3.1 の「一定テンポ」)
+      barStartBeats = [];
+      let beats = 0;
+      for (const mb of s.masterBars) {
+        barStartBeats.push(beats);
+        beats += mb.timeSignatureNumerator * 4 / mb.timeSignatureDenominator;
+      }
+      send("loaded", {
+        title: s.title || "", artist: s.artist || "", tempo: s.tempo || 0,
+        tracks: s.tracks.map(function (t) { return t.name || ""; })
+      });
+    });
+
+    api.renderFinished.on(function () {
+      showMessage("");
+      scoreElement.appendChild(barHighlight);
+      scoreElement.appendChild(cursor);
+      send("rendered");
+    });
+
+    api.error.on(function (e) {
+      showMessage("タブ譜を読み込めませんでした");
+      send("error", { message: String(e && e.message ? e.message : e) });
+    });
+  }
+
+  function colourResources() {
+    if (!colours) return {};
+    return {
+      staffLineColor: colours.line, barSeparatorColor: colours.muted, barNumberColor: colours.muted,
+      mainGlyphColor: colours.text, secondaryGlyphColor: colours.muted, scoreInfoColor: colours.text
+    };
+  }
+
+  // ---- アプリからの命令 ----
+  window.scoreCommand = function (cmd) {
+    switch (cmd.type) {
+      case "load": load(cmd.url, cmd.track || 0); break;
+      case "clear": clearScore(); break;
+      case "position": setPosition(cmd.seconds, cmd.bpm, cmd.offset); break;
+      case "colours":
+        colours = cmd;
+        if (api) {
+          Object.assign(api.settings.display.resources, colourResources());
+          api.updateSettings();
+          if (score) api.render();
+        }
+        break;
+    }
+  };
+
+  function load(url, track) {
+    showMessage("タブ譜を読み込んでいます…");
+    cursor.style.opacity = 0; barHighlight.style.opacity = 0;
+    fetch(url).then(function (r) {
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      return r.arrayBuffer();
+    }).then(function (buffer) {
+      if (!api) createApi();
+      api.load(new Uint8Array(buffer), [track]);
+    }).catch(function (e) {
+      showMessage("タブ譜のファイルを開けませんでした");
+      send("error", { message: String(e) });
+    });
+  }
+
+  function clearScore() {
+    score = null; barStartBeats = [];
+    scoreElement.innerHTML = "";
+    if (api) { api.destroy(); api = null; }
+    showMessage("");
+  }
+
+  // 再生位置 (秒) から、今の小節と小節の中の位置を求めて、カーソルを動かす
+  function setPosition(seconds, bpm, offset) {
+    if (!api || !score || !api.renderer || !api.renderer.boundsLookup || barStartBeats.length === 0) return;
+
+    const beats = Math.max(0, (seconds - offset) * bpm / 60);
+    let index = 0;
+    while (index + 1 < barStartBeats.length && barStartBeats[index + 1] <= beats) index++;
+
+    const barLength = (index + 1 < barStartBeats.length ? barStartBeats[index + 1] : barStartBeats[index] + 4) - barStartBeats[index];
+    const fraction = Math.min(1, Math.max(0, (beats - barStartBeats[index]) / barLength));
+
+    const bounds = api.renderer.boundsLookup.findMasterBarByIndex(index);
+    if (!bounds) return;
+
+    const v = bounds.visualBounds, line = bounds.lineAlignedBounds || bounds.realBounds;
+    cursor.style.left = (v.x + v.w * fraction) + "px";
+    cursor.style.top = line.y + "px";
+    cursor.style.height = line.h + "px";
+    cursor.style.opacity = 1;
+
+    barHighlight.style.left = v.x + "px"; barHighlight.style.top = line.y + "px";
+    barHighlight.style.width = v.w + "px"; barHighlight.style.height = line.h + "px";
+    barHighlight.style.opacity = 0.08;
+
+    // カーソルの行が見えなくなりそうなら、自動でスクロールする
+    const top = line.y, bottom = line.y + line.h;
+    if (top < scroller.scrollTop + 20 || bottom > scroller.scrollTop + scroller.clientHeight - 20)
+      scroller.scrollTo({ top: Math.max(0, top - 40), behavior: "smooth" });
+  }
+
+  document.addEventListener("DOMContentLoaded", function () { showMessage(""); send("pageReady"); });
+</script>
+</body>
+</html>

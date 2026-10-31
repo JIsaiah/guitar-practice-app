@@ -4,13 +4,51 @@
 #include "SessionListScreen.h"
 #include "SessionScreen.h"
 #include "SessionSetupScreen.h"
+#include "SettingsPanel.h"
+#include "../Theme/Dev/MetalLogoTuner.h"
+#include "../TimingLog.h"
 
-MainComponent::MainComponent (AudioEngine& e, SessionStore& s)
-    : engine (e), store (s)
+MainComponent::MainComponent (AudioEngine& e, SessionStore& s, ThemeManager& t, AppSettings& a)
+    : engine (e), store (s), theme (t), settings (a)
 {
+    addChildComponent (youtubePlayer);
+    addChildComponent (scoreViewer);
+
+    youtubePlayer.onApiReady = [this]
+    {
+        if (listShownAtMs > 0.0)
+            TimingLog::mark ("2. 一覧の表示 → WebView (YouTube) の準備完了"_jp, listShownAtMs);
+    };
+
     setSize (1280, 800);
     showList();
 }
+
+void MainComponent::paintOverChildren (juce::Graphics&)
+{
+    if (! pendingPaintMark.has_value())
+        return;
+
+    const auto mark = *pendingPaintMark;
+    pendingPaintMark.reset();
+    TimingLog::mark (mark.label, mark.startMs);
+
+    if (mark.isFirstList)
+    {
+        // 一覧を表示した直後に、裏で WebView を準備する (描画を待たせないよう、次のメッセージで)
+        listShownAtMs = TimingLog::now();
+        juce::MessageManager::callAsync ([safe = juce::Component::SafePointer (this)]
+        {
+            if (safe != nullptr)
+            {
+                safe->youtubePlayer.prepare();
+                safe->scoreViewer.prepare();
+            }
+        });
+    }
+}
+
+MainComponent::~MainComponent() = default;
 
 void MainComponent::resized()
 {
@@ -21,16 +59,21 @@ void MainComponent::resized()
 //==============================================================================
 void MainComponent::showList()
 {
-    auto screen = std::make_unique<SessionListScreen> (store);
+    auto screen = std::make_unique<SessionListScreen> (store, theme);
 
     screen->onNewSession = [this] { navigate ([] (MainComponent& m) { m.showSetup(); }); };
-    screen->onOpenSettings = [this] { openAudioSettings(); };
+    screen->onOpenSettings = [this] { openSettings(); };
     screen->onOpenSession = [this] (const juce::String& id)
     {
-        navigate ([id] (MainComponent& m)
+        const auto clickedAt = TimingLog::now();
+        navigate ([id, clickedAt] (MainComponent& m)
         {
             if (auto session = m.store.load (id))
+            {
                 m.showSession (std::move (*session));
+                m.pendingPaintMark = PendingMark { "3. 開く → 練習画面の表示"_jp, clickedAt, false };
+                m.sessionOpenedAtMs = clickedAt;
+            }
             else
                 juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon,
                                                         "開けませんでした"_jp,
@@ -39,6 +82,12 @@ void MainComponent::showList()
     };
 
     setScreen (std::move (screen));
+
+    if (! firstListShown)
+    {
+        firstListShown = true;
+        pendingPaintMark = PendingMark { "1. 起動 → 一覧の表示"_jp, TimingLog::processStart(), true };
+    }
 }
 
 void MainComponent::showSetup()
@@ -64,31 +113,48 @@ void MainComponent::showSetup()
 
 void MainComponent::showSession (Session session)
 {
-    auto screen = std::make_unique<SessionScreen> (engine, store, std::move (session));
+    auto screen = std::make_unique<SessionScreen> (engine, store, theme, settings, youtubePlayer, scoreViewer, std::move (session));
 
     screen->onBackToList = [this] { navigate ([] (MainComponent& m) { m.showList(); }); };
-    screen->onOpenSettings = [this] { openAudioSettings(); };
+    screen->onOpenSettings = [this] { openSettings(); };
+    screen->onVideoReady = [this]
+    {
+        if (sessionOpenedAtMs > 0.0)
+            TimingLog::mark ("3b. 開く → YouTube の動画を再生できる状態"_jp, sessionOpenedAtMs);
+        sessionOpenedAtMs = 0.0;
+    };
 
     setScreen (std::move (screen));
 }
 
-void MainComponent::openAudioSettings()
+void MainComponent::openSettings()
 {
-    auto* selector = new juce::AudioDeviceSelectorComponent (engine.getDeviceManager(),
-                                                             0, 2,     // 入力チャンネル数 (最小, 最大)
-                                                             2, 2,     // 出力チャンネル数
-                                                             false, false,
-                                                             true, false);
-    selector->setSize (560, 440);
-
+    // 上: 一般 (テーマ、戻る・進むの秒数、ホイールの量)、下: 詳細設定 (オーディオ)
     juce::DialogWindow::LaunchOptions options;
-    options.content.setOwned (selector);
-    options.dialogTitle = "オーディオ設定"_jp;
+    // 設定画面は縦に長いので、スクロールできる枠に入れる
+    auto* panel = new SettingsPanel (settings, theme, engine.getDeviceManager());
+    panel->onOpenLogoTuner = [this] { openLogoTuner(); };
+
+    auto* viewport = new juce::Viewport();
+    viewport->setViewedComponent (panel, true);
+    viewport->setScrollBarsShown (true, false);
+    viewport->setSize (panel->getWidth() + viewport->getScrollBarThickness(), juce::jmin (panel->getHeight(), 760));
+    options.content.setOwned (viewport);
+    options.dialogTitle = "設定"_jp;
     options.dialogBackgroundColour = getLookAndFeel().findColour (juce::ResizableWindow::backgroundColourId);
     options.useNativeTitleBar = true;
     options.resizable = false;
     options.componentToCentreAround = this;
     options.launchAsync();
+}
+
+void MainComponent::openLogoTuner()
+{
+    if (logoTuner == nullptr)
+        logoTuner = std::make_unique<MetalLogoTunerWindow> (theme);
+
+    logoTuner->setVisible (true);
+    logoTuner->toFront (true);
 }
 
 //==============================================================================

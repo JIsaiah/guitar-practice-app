@@ -1,6 +1,12 @@
 # ビルド方法
 
+起動後の使い方は `クイックスタート.md` を見てください。
+
 必要なもの: Visual Studio 2022 Build Tools (C++ ワークロード)、CMake 3.22 以上。JUCE は初回の構成時に自動で取得されます。
+
+WebView2 SDK (YouTube の埋め込みに使う) も、初回の構成時に `build\webview2\` へ自動で取得されます (NuGet から。ハッシュで確認)。実行には WebView2 ランタイムが必要です (Windows 11 には標準で入っています)。
+
+デザイントークン (`design/tokens.json`) を変えたときは、ビルドの前に `python design/generate_tokens.py` を実行します (`design/README.md`)。
 
 ```powershell
 cmake -S . -B build -G "Visual Studio 17 2022" -A x64
@@ -10,7 +16,8 @@ cmake --build build --config Debug
 実行ファイル: `build\GuitarPractice_artefacts\Debug\Guitar Practice.exe`
 
 - セッションの保存先: `ドキュメント\GuitarPractice\Sessions\*.gppractice`
-- オーディオ設定の保存先: `%APPDATA%\GuitarPractice\GuitarPractice.settings`
+- アプリの設定の保存先: `%APPDATA%\GuitarPractice\GuitarPractice.settings` (オーディオ設定、デスメタルモード)
+- 時間の計測の記録: `%APPDATA%\GuitarPractice\timing.log`。WebView のデータ: `%APPDATA%\GuitarPractice\WebView2\`
 - VC++ ランタイムは静的リンクしているため、配布先に追加のインストールは不要です
 
 ## ソースの構成
@@ -26,3 +33,10 @@ cmake --build build --config Debug
 | `Source/UI/SessionSetupScreen` | 新しいセッションの作成 |
 | `Source/UI/SessionScreen` | 練習画面。操作はすべて `Commands.h` のコマンド経由 |
 | `Source/UI/TunerPanel` | チューナー (セッション画面の上に重ねる) |
+| `Source/Theme/` | 見た目のモード (通常／デスメタル)、ロゴの生成。`death-metal-mode.md` |
+| `Source/DevSnapshots` | 開発用 (Debug のみ): `--render-logos <フォルダ>` で画面とロゴを PNG に書き出す |
+| `Source/Web/YouTubePlayer` | YouTube の埋め込みプレイヤー (WebView2)。一覧の表示後に裏で準備し、練習画面で使い回す |
+| `Source/TimingLog` | 起動・画面遷移の時間の記録 |
+| `Resources/Web/` | YouTube のプレイヤーのページ (実行ファイルに埋め込み、`https://juce.backend/` で開く) |
+| `design/` | デザイントークンと HTML の試作 (`design/README.md`) |
+| `Resources/Fonts/` | Dela Gothic One (SIL Open Font License。`OFL.txt`)。実行ファイルに埋め込む |

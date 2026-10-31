@@ -168,6 +168,14 @@ void AudioEngine::setMetronomeEnabled (bool enabled) noexcept
     metronomeEnabled.store (enabled);
 }
 
+void AudioEngine::setMetronomeSolo (bool solo) noexcept
+{
+    if (solo && ! metronomeSolo.load())
+        metronomeResetRequested.store (true);   // 1拍目から鳴らし始める
+
+    metronomeSolo.store (solo);
+}
+
 int AudioEngine::readTunerInput (float* destination, int maxSamples) noexcept
 {
     const auto scope = tunerFifo.read (maxSamples);
@@ -185,6 +193,15 @@ int AudioEngine::readTunerInput (float* destination, int maxSamples) noexcept
 void AudioEngine::audioDeviceAboutToStart (juce::AudioIODevice* device)
 {
     deviceSampleRate.store (device->getCurrentSampleRate());
+}
+
+void AudioEngine::setExternalClock (double position, double rate, bool isPlaying) noexcept
+{
+    externalPosition.store (position);
+    externalRate.store (juce::jlimit (0.25, 2.0, rate));
+    externalPlaying.store (isPlaying);
+    externalActive.store (true);
+    externalSerial.fetch_add (1);   // 最後に増やす: オーディオスレッドは、これが変わったら新しい値を読む
 }
 
 void AudioEngine::audioDeviceIOCallbackWithContext (const float* const* inputs, int numInputs,
@@ -221,15 +238,34 @@ void AudioEngine::audioDeviceIOCallbackWithContext (const float* const* inputs, 
 
     if (metronomeResetRequested.exchange (false))
     {
-        freeClockSeconds = 0.0;
         lastBeat = -1;
+        soloClockSeconds = 0.0;
     }
+
+    const bool solo = metronomeSolo.load();
 
     const double seek = pendingSeekSeconds.exchange (-1.0);
     if (source != nullptr && seek >= 0.0)
         readPosition = juce::jlimit (0.0, (double) (source->buffer.getNumSamples() - 1), seek * source->sampleRate);
 
     bool sourcePlaying = source != nullptr && playing.load();
+
+    // 外部の時計 (YouTube)
+    const bool externalRunning = externalActive.load() && externalPlaying.load();
+    const double externalStep = externalRate.load() / sampleRate;
+
+    if (const auto serial = externalSerial.load(); serial != lastExternalSerial)
+    {
+        lastExternalSerial = serial;
+        const auto reported = externalPosition.load();
+        const auto difference = reported - externalClockSeconds;
+
+        // シークや停止のときは合わせ直し、小さなずれ (通信の遅れなど) は2割ずつ寄せる
+        if (! externalRunning || std::abs (difference) > 0.15)
+            externalClockSeconds = reported;
+        else
+            externalClockSeconds += difference * 0.2;
+    }
 
     double step = 0.0, loopStart = 0.0, loopEnd = 0.0, lastIndex = 0.0;
     bool loopOn = false;
@@ -284,14 +320,24 @@ void AudioEngine::audioDeviceIOCallbackWithContext (const float* const* inputs, 
             }
         }
 
-        // メトロノーム: 音源の再生中は音源の時計に、それ以外は自前の時計に合わせる (設計書 5.2)
-        if (! sourcePlaying)
+        // メトロノーム: 音源の再生中は音源の時計に、YouTube の再生中はその時計に合わせる (設計書 5.2)。
+        // 再生していないときは鳴らさない。ボタンでオンにしただけで鳴らすと、
+        // 自前の時計で鳴り始めてしまい、後から再生した音源と拍がずれるため (作者の指定)
+        if (externalRunning)
         {
-            musicTime = freeClockSeconds;
-            freeClockSeconds += 1.0 / sampleRate;
+            musicTime = externalClockSeconds - offset;
+            externalClockSeconds += externalStep;
         }
 
-        if (metronomeOn)
+        // 音源を再生していないときに「メトロノームだけ」なら、自前の時計で鳴らす
+        const bool soloRunning = solo && ! sourcePlaying && ! externalRunning;
+        if (soloRunning)
+        {
+            musicTime = soloClockSeconds;
+            soloClockSeconds += 1.0 / sampleRate;
+        }
+
+        if (metronomeOn && (sourcePlaying || externalRunning || soloRunning))
         {
             const auto beat = (juce::int64) std::floor (musicTime * bpm / 60.0);
 
@@ -300,6 +346,10 @@ void AudioEngine::audioDeviceIOCallbackWithContext (const float* const* inputs, 
                 triggerClick (beat % 4 == 0, sampleRate);
 
             lastBeat = beat;
+        }
+        else
+        {
+            lastBeat = -1;   // 次に再生したとき、曲の頭なら1拍目から鳴らす
         }
 
         const auto click = renderClick() * gainMetronome;

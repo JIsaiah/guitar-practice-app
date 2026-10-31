@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="ja" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<!-- YouTube の埋め込み再生 (設計書 v0.7 3.2、PoC-4)
+     このページはアプリに同梱し、https://juce.backend/ の住所で開く。
+     パソコン内のファイルとして開くと、YouTube に埋め込み先が伝わらず、再生を拒否される (エラー 153) -->
+<link rel="stylesheet" href="tokens.css">
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: var(--color-surface); color: var(--color-text-muted);
+               font-family: var(--font-ui); font-size: var(--font-size-body); }
+  #player, #message { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+  #message { display: flex; align-items: center; justify-content: center; text-align: center; padding: var(--space-lg); box-sizing: border-box; }
+</style>
+</head>
+<body>
+<div id="message">YouTube を準備しています…</div>
+<div id="player"></div>
+
+<script>
+  // アプリ (C++) へ知らせる。JUCE が window.__JUCE__ を用意している
+  function send(type, data) {
+    if (window.__JUCE__ && window.__JUCE__.backend)
+      window.__JUCE__.backend.emitEvent("player", Object.assign({ type: type }, data || {}));
+  }
+
+  function showMessage(text) {
+    const m = document.getElementById("message");
+    m.textContent = text;
+    m.style.display = text ? "flex" : "none";
+  }
+
+  let player = null, apiReady = false, playerReady = false, pending = null;
+  let loop = { a: 0, b: 0, on: false };
+  let volume = 100;
+
+  // ---- アプリからの命令 (C++ の evaluateJavascript で呼ばれる) ----
+  window.playerCommand = function (cmd) {
+    switch (cmd.type) {
+      case "load":   load(cmd.videoId, cmd.start || 0); break;
+      case "unload": pending = null; if (playerReady) player.stopVideo(); showMessage(""); break;
+      case "play":   if (playerReady) player.playVideo(); break;
+      case "pause":  if (playerReady) player.pauseVideo(); break;
+      case "seek":   if (playerReady) player.seekTo(Math.max(0, cmd.seconds), true); break;
+      case "rate":   if (playerReady) player.setPlaybackRate(cmd.rate); break;
+      case "volume": volume = cmd.volume; if (playerReady) { player.unMute(); player.setVolume(volume); } break;
+      case "loop":   loop = { a: cmd.a, b: cmd.b, on: cmd.on }; break;
+    }
+  };
+
+  function load(videoId, start) {
+    if (!apiReady) { pending = { videoId: videoId, start: start }; return; }
+
+    showMessage("");
+    if (player) {
+      player.cueVideoById({ videoId: videoId, startSeconds: start });
+      return;
+    }
+
+    player = new YT.Player("player", {
+      videoId: videoId,
+      playerVars: { playsinline: 1, rel: 0, start: Math.floor(start), origin: location.origin },
+      events: {
+        onReady: function () {
+          playerReady = true;
+          player.unMute();
+          player.setVolume(volume);
+          send("ready");
+        },
+        onStateChange: function (e) { send("state", status()); },
+        onPlaybackRateChange: function () { send("state", status()); },
+        onError: function (e) { send("error", { code: e.data }); }
+      }
+    });
+  }
+
+  function status() {
+    return {
+      state: player.getPlayerState(),        // -1 未開始, 0 終了, 1 再生中, 2 一時停止, 3 読み込み中, 5 頭出し済み
+      time: player.getCurrentTime(),
+      duration: player.getDuration(),
+      rate: player.getPlaybackRate()
+    };
+  }
+
+  // 50ms ごとに: A-B ループの確認と、再生位置の報告 (アプリはこの値でメトロノームとタイムラインを動かす)
+  setInterval(function () {
+    if (!playerReady) return;
+    const s = status();
+    if (loop.on && loop.b > loop.a && s.state === 1 && s.time >= loop.b) {
+      player.seekTo(loop.a, true);
+      s.time = loop.a;
+    }
+    send("tick", s);
+  }, 50);
+
+  window.onYouTubeIframeAPIReady = function () {
+    apiReady = true;
+    send("apiReady");
+    if (pending) { const p = pending; pending = null; load(p.videoId, p.start); }
+  };
+
+  document.addEventListener("DOMContentLoaded", function () { send("pageReady"); });
+</script>
+<!-- YouTube の公式プレイヤー API。これだけはネットから読む (YouTube を使うときはネット接続が必要) -->
+<script src="https://www.youtube.com/iframe_api" async
+        onerror="send('error', { code: 'offline' }); showMessage('YouTube に接続できません。インターネット接続を確認してください');"></script>
+</body>
+</html>

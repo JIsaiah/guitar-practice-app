@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>練習画面 (試作)</title>
+<link rel="stylesheet" href="../generated/tokens.css">
+<link rel="stylesheet" href="common.css">
+<style>
+  /* タブ譜が主役。演奏中に見るのはタブ譜と、再生・速度・ループだけ (設計書 4.5) */
+  body { overflow: hidden; }
+  .practice {
+    display: grid;
+    grid-template-columns: 1fr 360px;
+    grid-template-rows: auto 1fr auto;
+    grid-template-areas:
+      "top    top"
+      "score  side"
+      "bottom bottom";
+    gap: var(--space-md);
+    height: 100vh;
+    padding: var(--space-md);
+  }
+
+  .top { grid-area: top; display: flex; align-items: center; gap: var(--space-md); }
+  .top .title { flex: 1; font-size: var(--font-size-title); font-weight: 600; }
+
+  /* ---- タブ譜 (alphaTab の代わりの枠) ---- */
+  .score { grid-area: score; display: flex; flex-direction: column; padding: var(--space-lg); overflow: hidden; }
+  .score .staff { flex: 1; display: grid; grid-template-rows: repeat(3, 1fr); gap: var(--space-xl); padding: var(--space-lg) 0; }
+  .score .line {
+    display: grid;
+    grid-template-rows: repeat(6, 1fr);
+    border-left: 2px solid var(--color-text-muted);
+    border-right: 2px solid var(--color-text-muted);
+    position: relative;
+  }
+  .score .line span { border-top: 1px solid var(--color-border); }
+  .score .cursor {
+    position: absolute; top: -6px; bottom: -6px; left: 32%;
+    width: 3px; border-radius: 2px;
+    background: var(--color-accent);
+  }
+  .score .position { display: flex; gap: var(--space-xl); align-items: baseline; }
+  .score .position .num { font-size: var(--font-size-heading); }
+
+  /* ---- 右: 動画、音色、ミキサー ---- */
+  .side { grid-area: side; display: flex; flex-direction: column; gap: var(--space-md); min-height: 0; }
+  .video {
+    aspect-ratio: 16 / 9;
+    display: flex; align-items: center; justify-content: center;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    background: var(--color-surface);
+  }
+  .panel { padding: var(--space-md); display: flex; flex-direction: column; gap: var(--space-md); }
+  .panel h2 { margin: 0; font-size: var(--font-size-caption); font-weight: 600; color: var(--color-text-muted); }
+
+  /* バンドのメンバー: 音源・ギター・メトロノーム (設計書 4.4) */
+  .member { display: grid; grid-template-columns: 96px 1fr 44px; align-items: center; gap: var(--space-sm); }
+  .member .name { display: flex; align-items: center; gap: var(--space-sm); }
+  /* レベルメーターはアンプのランプのように (点の数と明るさで示す) */
+  .lamps { display: grid; grid-template-columns: repeat(10, 1fr); gap: 3px; height: 14px; }
+  .lamps i { border-radius: 3px; background: var(--color-border); }
+  .lamps i.on { background: var(--color-accent); }
+  .lamps i.dim { background: var(--color-accent); opacity: 0.45; }
+
+  /* ---- 下: 再生操作 ---- */
+  .bottom {
+    grid-area: bottom;
+    display: flex;
+    align-items: center;
+    gap: var(--space-lg);
+    padding: var(--space-md) var(--space-lg);
+  }
+  .bottom .group { display: flex; align-items: center; gap: var(--space-sm); }
+  .bottom .spacer { flex: 1; }
+  .big-value { display: flex; flex-direction: column; align-items: center; line-height: 1; }
+  .big-value .value { font-size: var(--font-size-heading); }
+  .big-value label { font-size: var(--font-size-caption); color: var(--color-text-muted); margin-top: 2px; }
+  .play { min-width: 140px; }
+  .loop { display: flex; align-items: center; gap: var(--space-xs); }
+  .loop .range { font-size: var(--font-size-caption); }
+
+  /* カウントイン: ドラマーのスティックの「1、2、3、4」 (設計書 4.4)。数字の位置で拍を示す */
+  .count { display: grid; grid-template-columns: repeat(4, 28px); gap: var(--space-xs); }
+  .count span {
+    height: 28px; display: flex; align-items: center; justify-content: center;
+    border: 1px solid var(--color-border); border-radius: var(--radius-sm);
+    font-size: var(--font-size-caption);
+  }
+  .count span.now { background: var(--color-accent); border-color: var(--color-accent); color: var(--color-on-accent); font-weight: 700; }
+</style>
+</head>
+<body>
+<div class="practice">
+  <header class="top">
+    <button class="btn" onclick="location.href='session-list.html'">◀ 一覧</button>
+    <div class="title">Hotel California (ソロ)</div>
+    <span class="muted">保存済み</span>
+    <button class="btn">保存</button>
+  </header>
+
+  <section class="score surface" aria-label="タブ譜">
+    <div class="position muted">
+      <span>小節 <span class="num">12</span></span>
+      <span>拍 <span class="num">3</span></span>
+      <span class="num">01:42.3 / 06:30.0</span>
+    </div>
+    <div class="staff">
+      <div class="line"><span></span><span></span><span></span><span></span><span></span><span></span><div class="cursor"></div></div>
+      <div class="line"><span></span><span></span><span></span><span></span><span></span><span></span></div>
+      <div class="line"><span></span><span></span><span></span><span></span><span></span><span></span></div>
+    </div>
+    <div class="muted" style="font-size: var(--font-size-caption)">※ タブ譜は alphaTab で描く (PoC-3)。ここは仮の枠</div>
+  </section>
+
+  <aside class="side">
+    <div class="video muted">YouTube の動画</div>
+
+    <div class="panel surface">
+      <h2>音色</h2>
+      <div class="seg">
+        <button aria-pressed="false">クリーン</button>
+        <button aria-pressed="true">クランチ</button>
+        <button aria-pressed="false">歪み</button>
+      </div>
+    </div>
+
+    <div class="panel surface">
+      <h2>バランス</h2>
+      <div class="member">
+        <span class="name">音源</span>
+        <div class="lamps"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="dim"></i><i></i><i></i><i></i></div>
+        <span class="num muted">70</span>
+      </div>
+      <div class="member">
+        <span class="name">ギター</span>
+        <div class="lamps"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="dim"></i><i></i></div>
+        <span class="num muted">90</span>
+      </div>
+      <div class="member">
+        <span class="name">メトロノーム</span>
+        <div class="lamps"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="dim"></i><i></i><i></i><i></i><i></i><i></i></div>
+        <span class="num muted">50</span>
+      </div>
+    </div>
+  </aside>
+
+  <footer class="bottom surface">
+    <div class="group">
+      <button class="btn btn-large" aria-label="5秒戻る">◀◀</button>
+      <button class="btn btn-primary btn-large play">▶ 再生</button>
+      <button class="btn btn-large" aria-label="5秒進む">▶▶</button>
+    </div>
+
+    <div class="wheel big-value" data-min="50" data-max="150" data-step="5" title="ホイールで変える">
+      <span class="value num">80</span><label>速度 %</label>
+    </div>
+    <div class="wheel big-value" data-min="40" data-max="300" data-step="1" title="ホイールで変える">
+      <span class="value num">120</span><label>BPM</label>
+    </div>
+    <button class="btn btn-large">TAP</button>
+
+    <div class="count" aria-label="カウント">
+      <span>1</span><span>2</span><span class="now">3</span><span>4</span>
+    </div>
+
+    <div class="loop">
+      <button class="btn">A</button>
+      <span class="range num muted">01:38.0 ─ 01:52.5</span>
+      <button class="btn">B</button>
+      <button class="btn" data-toggle aria-pressed="true">ループ</button>
+    </div>
+
+    <span class="spacer"></span>
+    <button class="btn btn-large">チューナー</button>
+  </footer>
+</div>
+<script src="common.js"></script>
+</body>
+</html>

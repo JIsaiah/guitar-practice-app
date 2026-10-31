@@ -3,6 +3,10 @@
 #include <juce_gui_basics/juce_gui_basics.h>
 #include "../Audio/AudioEngine.h"
 #include "../Model/SessionStore.h"
+#include "../Theme/ThemeManager.h"
+#include "../AppSettings.h"
+#include "../Web/YouTubePlayer.h"
+#include "../Web/ScoreViewer.h"
 
 // 画面の切り替えを担当する
 //   セッション一覧 ─(新規)→ セッション作成 ─(練習を始める)→ セッション画面
@@ -11,15 +15,18 @@
 class MainComponent final : public juce::Component
 {
 public:
-    MainComponent (AudioEngine& engine, SessionStore& store);
+    MainComponent (AudioEngine& engine, SessionStore& store, ThemeManager& theme, AppSettings& settings);
+    ~MainComponent() override;
 
     void resized() override;
+    void paintOverChildren (juce::Graphics&) override;
 
 private:
     void showList();
     void showSetup();
     void showSession (Session session);
-    void openAudioSettings();
+    void openSettings();
+    void openLogoTuner();
 
     // 画面のボタン処理の途中でその画面を破棄しないよう、切り替えは次のメッセージで行う
     void navigate (std::function<void (MainComponent&)> action);
@@ -27,7 +34,26 @@ private:
 
     AudioEngine& engine;
     SessionStore& store;
+    ThemeManager& theme;
+    AppSettings& settings;
     std::unique_ptr<juce::Component> currentScreen;
+
+    // YouTube のプレイヤー (WebView)。アプリの起動中に1つだけ作り、練習画面に貸す (実装指示 T5)
+    YouTubePlayer youtubePlayer;
+    ScoreViewer scoreViewer;   // タブ譜 (alphaTab) の WebView。これも1つだけ作って使い回す
+
+    // 時間の計測 (実装指示 T5): 次に描画されたときに記録する
+    struct PendingMark { juce::String label; double startMs; bool isFirstList; };
+    std::optional<PendingMark> pendingPaintMark;
+    double listShownAtMs = 0.0;
+    bool firstListShown = false;
+    double sessionOpenedAtMs = 0.0;
+
+    // デスメタルモードで、ロゴにしたボタンの元の文字列を出す
+    juce::TooltipWindow tooltipWindow;
+
+    // 開発用のロゴ調整ウィンドウ (Debug ビルドのみ)
+    std::unique_ptr<juce::DocumentWindow> logoTuner;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MainComponent)
 };
