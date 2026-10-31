@@ -25,12 +25,18 @@ public:
     void load (const juce::File& file, int trackIndex);
     void setPosition (double seconds, double bpm, double offsetSeconds);
     void setColours (const Palette& palette);
+    void setEqualBarWidths (bool equal);   // 小節を同じ幅で並べる
 
     bool hasScore() const noexcept { return scoreFile.existsAsFile(); }
     double getScoreTempo() const noexcept { return scoreTempo; }
 
+    // 各小節が曲の頭から何拍目 (4分音符の数) で始まるか。タブ譜の拍子から求める。タブ譜がなければ空
+    const std::vector<double>& getBarStartBeats() const noexcept { return barStartBeats; }
+
     std::function<void (double tempo)> onLoaded;   // 読み込めたとき (タブ譜のテンポ)
     std::function<void (const juce::String& message)> onError;
+    std::function<void (double barStartBeats)> onBarClicked;   // 小節をクリックした (その小節が曲の頭から何拍目で始まるか)
+    std::function<void (const juce::String& key)> onKey;      // タブ譜の上で押されたキー ("Space"、"ArrowLeft" など)
 
     void resized() override;
 
@@ -47,7 +53,8 @@ private:
     juce::File scoreFile;
     int loadCount = 0;
     double scoreTempo = 0.0;
-    double lastSentSeconds = -1.0;
+    std::vector<double> barStartBeats;
+    double lastSentSeconds = -1.0, lastSentBpm = 0.0, lastSentOffset = 0.0;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ScoreViewer)
 };

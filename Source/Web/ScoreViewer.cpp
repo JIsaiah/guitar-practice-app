@@ -104,6 +104,7 @@ void ScoreViewer::load (const juce::File& file, int trackIndex)
 
     rendered = false;
     scoreTempo = 0.0;
+    barStartBeats.clear();
     lastSentSeconds = -1.0;
     pending.erase (std::remove_if (pending.begin(), pending.end(),
                                    [] (const juce::var& c) { return c["type"] == "load" || c["type"] == "clear"; }),
@@ -117,11 +118,17 @@ void ScoreViewer::load (const juce::File& file, int trackIndex)
 
 void ScoreViewer::setPosition (double seconds, double bpm, double offsetSeconds)
 {
-    // 画面の更新 (1秒に30回) のたびに送ると多いので、変わったときだけ送る
-    if (! rendered || std::abs (seconds - lastSentSeconds) < 0.01)
+    // 画面の更新 (1秒に30回) のたびに送ると多いので、変わったときだけ送る。
+    // 止まっているときに BPM やずらしを変えても、カーソルが動くように、それらの変化も見る
+    const bool changed = std::abs (seconds - lastSentSeconds) >= 0.01
+                      || ! juce::approximatelyEqual (bpm, lastSentBpm)
+                      || ! juce::approximatelyEqual (offsetSeconds, lastSentOffset);
+    if (! rendered || ! changed)
         return;
 
     lastSentSeconds = seconds;
+    lastSentBpm = bpm;
+    lastSentOffset = offsetSeconds;
     send (makeCommand ("position", { { "seconds", seconds }, { "bpm", bpm }, { "offset", offsetSeconds } }));
 }
 
@@ -132,7 +139,25 @@ void ScoreViewer::setColours (const Palette& p)
                                    [] (const juce::var& c) { return c["type"] == "colours"; }),
                    pending.end());
 
-    send (makeCommand ("colours", { { "text", css (p.text) }, { "muted", css (p.textMuted) }, { "line", css (p.border.contrasting (0.15f)) } }));
+    // 楽譜は紙に近い見た目にする: ライトなら白い背景に黒い音符、ダークなら暗い背景に白い音符
+    const bool dark = p.background.getPerceivedBrightness() < 0.5f;
+    const auto background = dark ? p.panel : juce::Colours::white;
+    const auto notes = dark ? juce::Colours::white : juce::Colours::black;
+
+    send (makeCommand ("colours", { { "background", css (background) },
+                                    { "text", css (notes) },
+                                    { "muted", css (notes.interpolatedWith (background, 0.35f)) },
+                                    { "line", css (notes.interpolatedWith (background, 0.55f)) },
+                                    { "accent", css (p.accent) } }));
+}
+
+void ScoreViewer::setEqualBarWidths (bool equal)
+{
+    pending.erase (std::remove_if (pending.begin(), pending.end(),
+                                   [] (const juce::var& c) { return c["type"] == "layout"; }),
+                   pending.end());
+
+    send (makeCommand ("layout", { { "equalBars", equal } }));
 }
 
 void ScoreViewer::handleEvent (const juce::var& event)
@@ -152,6 +177,12 @@ void ScoreViewer::handleEvent (const juce::var& event)
     if (type == "loaded")
     {
         scoreTempo = (double) event["tempo"];
+
+        barStartBeats.clear();
+        if (const auto* bars = event["bars"].getArray())
+            for (const auto& beats : *bars)
+                barStartBeats.push_back ((double) beats);
+
         if (onLoaded != nullptr)
             onLoaded (scoreTempo);
         return;
@@ -161,6 +192,20 @@ void ScoreViewer::handleEvent (const juce::var& event)
     {
         rendered = true;
         lastSentSeconds = -1.0;
+        return;
+    }
+
+    if (type == "barClicked")
+    {
+        if (onBarClicked != nullptr)
+            onBarClicked ((double) event["beats"]);
+        return;
+    }
+
+    if (type == "key")
+    {
+        if (onKey != nullptr)
+            onKey (event["key"].toString());
         return;
     }
 

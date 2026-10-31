@@ -134,6 +134,46 @@ juce::String DevSnapshots::renderAll (const juce::File& folder)
                 tuner.setTestFrequency (110.2);   // ほぼ合っている
                 snap (tuner, TunerPanel::preferredWidth, TunerPanel::preferredHeight, "tuner_ok" + suffix);
             }
+
+            // 設定の「文字の大きさ」と「アクセントの色」を変えたとき (ダーク、120%、青)
+            {
+                theme.setTextScale (1.2f);
+                theme.setCustomAccent (ThemeManager::parseHex ("#3B82F6"));
+
+                SessionScreen practice (engine, store, theme, appSettings, youtube, scoreViewer, session);
+                snap (practice, 1280, 800, "practice_custom.png");
+
+                // 再生バーの針: ふだん / バーの上 / 針の近く (縦に並べて1枚にする)
+                {
+                    juce::Image strip (juce::Image::ARGB, 700, 3 * 50, true);
+                    {
+                        juce::Graphics g (strip);
+                        g.fillAll (theme.getPalette().background);
+                        TimelineView bar;
+                        bar.setSize (700, 44);
+                        bar.setState (95.0, 240.0, 60.0, 120.0, true);
+                        const std::pair<bool, bool> states[] { { false, false }, { true, false }, { true, true } };
+                        for (int i = 0; i < 3; ++i)
+                        {
+                            bar.setTestHover (states[i].first, states[i].second);
+                            g.drawImageAt (bar.createComponentSnapshot (bar.getLocalBounds(), true, 1.0f), 0, i * 50);
+                        }
+                    }
+                    if (savePng (strip, folder.getChildFile ("timeline_states.png")))
+                        log << "wrote timeline_states.png\n";
+                }
+
+                // チューナーを開いたとき (後ろが暗くなる)
+                practice.perform (Command::toggleTuner);
+                snap (practice, 1280, 800, "practice_tuner.png");
+                practice.perform (Command::toggleTuner);
+
+                SettingsPanel panel (appSettings, theme, engine.getDeviceManager());
+                snap (panel, panel.getWidth(), panel.getHeight(), "settings_custom.png");
+
+                theme.setTextScale (1.0f);
+                theme.setCustomAccent (std::nullopt);
+            }
         }
 
         // 細部の確認用に、いくつかの文言を大きく描く

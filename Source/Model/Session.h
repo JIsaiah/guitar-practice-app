@@ -37,7 +37,10 @@ struct Session
     TempoOrigin tempoOrigin = TempoOrigin::manual;
 
     int speedPercent = 100;
-    int syncOffsetMs = 0;
+    int syncOffsetMs = 0;    // 拍の位置: メトロノームとタブ譜を、音源に対してずらす
+    int scoreOffsetMs = 0;   // タブ譜だけをずらす (タブ譜の再生開始の位置合わせ)
+
+    bool videoInMainArea = false;   // タブ譜と動画を入れ替えて、動画を大きく表示する (タブ譜つきの動画で練習するとき)
 
     int loopStartMs = 0;
     int loopEndMs = 0;

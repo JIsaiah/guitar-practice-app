@@ -80,6 +80,9 @@ private:
     //==== 操作 ====
     void togglePlay();
     void skip (double seconds);
+    void skipBars (int direction);   // -1: 前の小節の頭、+1: 次の小節の頭
+    bool isBarMode() const;          // タブ譜モード (タブ譜を大きく表示している) なら、戻る・進むは小節単位
+    void updateSkipButtons();
     void tap();
     void setLoopPoint (bool isStart);
     void toggleLoop();
@@ -88,7 +91,24 @@ private:
     void toggleTuner();
     void selectTone (int index);
     void updateLoop();
-    void changeOffset (int deltaMs);
+
+    // 小節の頭 (ループの A・B を合わせる先)。タブ譜があればその拍子で、なければ 4/4 とみなす
+    bool usesScoreBars() const;
+    int barIndexNear (double seconds) const;     // いちばん近い小節の頭の番号 (0 = 1小節目)
+    int barIndexAt (double seconds) const;       // その位置を含む小節の番号
+    double barStartSeconds (int index) const;   // 小節の頭の位置 (秒)
+    void setSyncOffset (int ms);    // 拍の位置 (メトロノームとタブ譜)
+    void setScoreOffset (int ms);   // タブ譜だけ
+    double getScoreOffsetSeconds() const noexcept { return (session.syncOffsetMs + session.scoreOffsetMs) / 1000.0; }
+    void seekToBar (double barStartBeats);
+    void handlePageKey (const juce::String& key);   // WebView (タブ譜・動画) の上で押されたキー
+    void toggleSwap();
+    bool isSwapped() const noexcept { return session.videoInMainArea && isYouTube(); }
+    void updateSwapUi();
+    void updateMixerDefaults();     // ミキサーのスライダーをダブルクリックしたときに戻す値 (保存されている値)
+    void renameSession (const juce::String& newTitle);
+    void toggleSourceMute();
+    void applySourceGain();   // ミキサーの「音源」の値とミュートを、エンジン (と YouTube) に送る
 
     AudioEngine& engine;
     SessionStore& store;
@@ -103,6 +123,7 @@ private:
     bool sourceReady = false;
     double requestedRate = 1.0, rateRequestedAtMs = 0.0;   // YouTube に頼んだ速度 (YouTube 側での変更を見分けるため)
     bool metronomeOn = false, wasPlaying = false;
+    bool sourceMuted = false;   // 音源だけを消す (タブ譜だけを流したいとき)。セッションには保存しない
     bool sidePanelVisible = true;
     int sidePanelWidthAtDragStart = 0;
     std::unique_ptr<juce::FileChooser> fileChooser;
@@ -118,6 +139,8 @@ private:
     // 左: タブ譜と再生位置
     juce::Label scoreNameLabel, positionLabel;
     juce::TextButton scoreChooseButton, scoreRemoveButton;
+    juce::TextButton swapButton;        // タブ譜と動画の入れ替え
+    juce::TextButton equalBarsButton;   // 小節を同じ幅で並べる
     ScoreView scoreView;
     TimelineView timeline;
 
@@ -127,7 +150,7 @@ private:
     std::vector<juce::Rectangle<int>> sideCards;   // 右のパネルの区切り (paint で面を描く)
 
     SectionHeading sourceHeading { "音源"_jp }, toneHeading { "音色"_jp }, mixerHeading { "ミキサー (音量)"_jp },
-                   offsetHeading { "ずらし (音源とタブ譜・メトロノームの位置合わせ)"_jp };
+                   offsetHeading { "テンポとずらし (タブ譜・メトロノームの位置合わせ)"_jp };
     PlaceholderView videoView;
     juce::Label sourceInfoLabel;        // 動画の真下: YouTube の URL (ダブルクリックで変更) か、音源のファイル名
     TrashButton sourceRemoveButton;     // 音源を外す
@@ -135,19 +158,29 @@ private:
     std::array<juce::TextButton, 3> toneButtons;
     juce::Label sourceGainLabel, guitarGainLabel, metronomeGainLabel;
     WheelSlider sourceGainSlider, guitarGainSlider, metronomeGainSlider;
-    juce::TextButton offsetDownButton, offsetUpButton;
-    juce::Label offsetValueLabel;
+    juce::TextButton sourceMuteButton;   // 音源だけのミュート
+    juce::Label bpmLabel, scoreOffsetLabel, offsetLabel;
+    WheelSlider bpmSlider;
+    FixedTextButton tapButton;
+    OffsetControl scoreOffsetControl, offsetControl;
 
-    // 下部: 再生操作
-    juce::TextButton rewindButton;
+    // 上部: チューナー
+    FixedTextButton tunerButton;
+
+    // 下部: 再生操作。「再生／速度／メトロノーム／ループ」のグループに分け、それぞれに見出しを付ける
+    SectionHeading playHeading { "再生"_jp }, speedHeading { "速度 (%)"_jp },
+                   metronomeHeading { "メトロノーム"_jp }, loopHeading { "ループ (A〜B をくり返す)"_jp };
+    std::vector<int> bottomDividers;   // グループの区切り線の x 座標 (paint で描く)
+    static constexpr int bottomBarHeight = 84;
+    juce::TextButton toStartButton, rewindButton;
     FixedTextButton playButton;
     juce::TextButton forwardButton;
-    juce::Label speedLabel, bpmLabel;
-    WheelSlider speedSlider, bpmSlider;
-    FixedTextButton tapButton, metronomeButton;
+    WheelSlider speedSlider;
+    FixedTextButton metronomeButton;
     juce::TextButton metronomeSoloButton;
     juce::TextButton loopStartButton, loopEndButton;
-    FixedTextButton loopButton, tunerButton;
+    FixedTextButton loopButton;
 
     std::unique_ptr<TunerPanel> tunerPanel;
+    DimOverlay dimOverlay;   // チューナーの後ろを暗くする
 };

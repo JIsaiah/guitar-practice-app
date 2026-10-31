@@ -8,6 +8,7 @@ namespace
     constexpr const char* wheelVolumeKey = "wheelStepVolume";
     constexpr const char* wheelOffsetKey = "wheelStepOffset";
     constexpr const char* sidePanelWidthKey = "sidePanelWidth";
+    constexpr const char* scoreEqualBarsKey = "scoreEqualBars";
 }
 
 AppSettings::AppSettings (juce::PropertiesFile& f)
@@ -18,7 +19,15 @@ AppSettings::AppSettings (juce::PropertiesFile& f)
     wheel.bpm = juce::jlimit (1, 20, file.getIntValue (wheelBpmKey, 1));
     wheel.volumePercent = juce::jlimit (1, 50, file.getIntValue (wheelVolumeKey, 5));
     wheel.offsetMs = juce::jlimit (1, 500, file.getIntValue (wheelOffsetKey, 10));
-    sidePanelWidth = juce::jlimit (minSidePanelWidth, maxSidePanelWidth, file.getIntValue (sidePanelWidthKey, 360));
+    sidePanelWidth = juce::jlimit (minSidePanelWidth, maxSidePanelWidth, file.getIntValue (sidePanelWidthKey, 400));
+    scoreEqualBars = file.getBoolValue (scoreEqualBarsKey, false);
+}
+
+void AppSettings::setScoreEqualBars (bool equal)
+{
+    // 練習画面のトグルで変えるだけなので、知らせは出さずに保存する
+    scoreEqualBars = equal;
+    file.setValue (scoreEqualBarsKey, equal);
 }
 
 void AppSettings::setSkipSeconds (int seconds)

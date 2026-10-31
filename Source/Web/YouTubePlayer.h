@@ -53,6 +53,7 @@ public:
     std::function<void()> onStateChanged;                    // 位置や状態が届くたびに (約50msごと)
     std::function<void (const juce::String& message)> onError;
     std::function<void()> onApiReady;                        // 準備完了 (時間の計測用)
+    std::function<void (const juce::String& key)> onKey;     // ページの上で押された再生の操作キー
 
     void resized() override;
 

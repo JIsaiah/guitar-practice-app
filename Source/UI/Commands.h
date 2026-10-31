@@ -5,7 +5,8 @@
 enum class Command
 {
     togglePlay,
-    rewind,
+    goToStart,     // 曲の頭へ
+    rewind,        // タブ譜モードでは1小節、動画モードでは設定の秒数
     fastForward,
     tapTempo,
     setLoopStart,

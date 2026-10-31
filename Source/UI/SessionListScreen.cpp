@@ -124,12 +124,12 @@ void SessionListScreen::paintListBoxItem (int row, juce::Graphics& g, int width,
 
     const auto textColour = listBox.findColour (juce::ListBox::textColourId);
     g.setColour (textColour);
-    g.setFont (juce::FontOptions (17.0f));
+    g.setFont (AppLookAndFeel::scaled (juce::FontOptions (17.0f)));
     g.drawText (entry.title.isEmpty() ? "(無題)"_jp : entry.title,
                 12, 0, width - 220, height, juce::Justification::centredLeft);
 
     g.setColour (textColour.withAlpha (0.5f));
-    g.setFont (juce::FontOptions (13.0f));
+    g.setFont (AppLookAndFeel::scaled (juce::FontOptions (13.0f)));
     g.drawText (entry.modified.formatted ("%Y/%m/%d %H:%M"),
                 width - 200, 0, 188, height, juce::Justification::centredRight);
 }
@@ -151,7 +151,7 @@ void SessionListScreen::paintOverChildren (juce::Graphics& g)
         return;
 
     g.setColour (listBox.findColour (juce::ListBox::textColourId).withAlpha (0.6f));
-    g.setFont (juce::FontOptions (16.0f));
+    g.setFont (AppLookAndFeel::scaled (juce::FontOptions (16.0f)));
     g.drawFittedText ("セッションがありません。\n「+ 新しいセッション」から作成してください。"_jp,
                       listBox.getBounds(), juce::Justification::centred, 2);
 }

@@ -151,6 +151,13 @@ void YouTubePlayer::handleEvent (const juce::var& event)
         return;
     }
 
+    if (type == "key")
+    {
+        if (onKey != nullptr)
+            onKey (event["key"].toString());
+        return;
+    }
+
     if (type == "error")
     {
         if (onError != nullptr)

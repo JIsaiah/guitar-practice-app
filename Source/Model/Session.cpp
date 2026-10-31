@@ -81,7 +81,8 @@ juce::var Session::toVar() const
         { "score",    makeObject ({ { "path", scorePath }, { "track_index", scoreTrackIndex } }) },
         { "tempo",    makeObject ({ { "bpm", bpm }, { "origin", toString (tempoOrigin) } }) },
         { "playback", makeObject ({ { "speed_percent", speedPercent } }) },
-        { "sync",     makeObject ({ { "offset_ms", syncOffsetMs }, { "points", emptyArray() } }) },
+        { "sync",     makeObject ({ { "offset_ms", syncOffsetMs }, { "score_offset_ms", scoreOffsetMs }, { "points", emptyArray() } }) },
+        { "layout",   makeObject ({ { "video_in_main_area", videoInMainArea } }) },
         { "loop",     makeObject ({ { "a_ms", loopStartMs }, { "b_ms", loopEndMs }, { "enabled", loopEnabled } }) },
         { "mixer",    makeObject ({ { "source", mixSource }, { "guitar", mixGuitar }, { "metronome", mixMetronome } }) },
         { "tone",     makeObject ({ { "type", "builtin" }, { "preset_id", tonePresetId }, { "vst3", emptyArray() } }) },
@@ -109,6 +110,8 @@ Session Session::fromVar (const juce::var& value)
 
     s.speedPercent = getOr<int> (value["playback"]["speed_percent"], 100);
     s.syncOffsetMs = getOr<int> (value["sync"]["offset_ms"], 0);
+    s.scoreOffsetMs = getOr<int> (value["sync"]["score_offset_ms"], 0);
+    s.videoInMainArea = getOr<bool> (value["layout"]["video_in_main_area"], false);
 
     const auto& loop = value["loop"];
     s.loopStartMs = getOr<int> (loop["a_ms"], 0);

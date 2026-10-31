@@ -68,11 +68,16 @@ private:
     int bar = 0, beat = 0;
 };
 
-// 再生位置のバー。クリック・ドラッグでシークする。A-B ループの範囲と、経過時間 / 長さも表示する
+// 再生位置のバー。A-B ループの範囲と、経過時間 / 長さも表示する
+// - クリックでその位置へ移動する。ドラッグ中は表示だけを動かし、離したときに1回だけ移動する
+//   (ドラッグ中に何度も移動させると、YouTube では位置の報告が追いつかず、つまみが前後に飛ぶため)
+// - 現在位置は「針」で示す。マウスを乗せるとバーと針が太く長くなり (操作できることを伝える)、針の近くではさらに太くなる
 class TimelineView final : public juce::Component
 {
 public:
     std::function<void (double seconds)> onSeek;
+
+    TimelineView() { setMouseCursor (juce::MouseCursor::PointingHandCursor); }
 
     void setState (double positionSeconds, double lengthSeconds, double loopStart, double loopEnd, bool loopOn)
     {
@@ -86,54 +91,239 @@ public:
 
     void paint (juce::Graphics& g) override
     {
-        // 右端に「経過 / 長さ」。数字は等幅にして、値が変わっても揺れないようにする
+        const auto shown = dragging ? dragSeconds : position;
+
+        // 右端に「経過 / 長さ」
         g.setColour (findColour (juce::Label::textColourId));
         g.setFont (AppLookAndFeel::scaled (juce::FontOptions (24.0f, juce::Font::bold)));
-        g.drawText (formatTime (position) + " / " + formatTime (length), getTimeArea(), juce::Justification::centredRight);
+        g.drawText (formatTime (shown) + " / " + formatTime (length), getTimeArea(), juce::Justification::centredRight);
 
-        auto bar = getBarArea().toFloat().reduced (0.0f, 10.0f);
+        const bool active = hovering || dragging;
+        const auto thickness = active ? 8.0f : 4.0f;
+        const auto area = getBarArea().toFloat();
+        const auto bar = area.withSizeKeepingCentre (area.getWidth(), thickness);
+
         g.setColour (findColour (ThemeColourIds::border));
-        g.fillRoundedRectangle (bar, 4.0f);
+        g.fillRoundedRectangle (bar, thickness * 0.5f);
 
         if (length <= 0.0)
             return;
-
-        const auto xFor = [&] (double seconds)
-        { return bar.getX() + bar.getWidth() * (float) juce::jlimit (0.0, 1.0, seconds / length); };
 
         if (loopEndSeconds > loopStartSeconds)
         {
             g.setColour (loopEnabled ? findColour (ThemeColourIds::accent).withAlpha (0.35f)
                                      : findColour (ThemeColourIds::textMuted).withAlpha (0.3f));
-            g.fillRect (juce::Rectangle<float>::leftTopRightBottom (xFor (loopStartSeconds), bar.getY() - 4.0f,
-                                                                    xFor (loopEndSeconds), bar.getBottom() + 4.0f));
+            g.fillRect (juce::Rectangle<float>::leftTopRightBottom (xFor (loopStartSeconds), bar.getY() - 6.0f,
+                                                                    xFor (loopEndSeconds), bar.getBottom() + 6.0f));
         }
 
         g.setColour (findColour (ThemeColourIds::timelineProgress));
-        g.fillRoundedRectangle (bar.withRight (xFor (position)), 4.0f);
+        g.fillRoundedRectangle (bar.withRight (xFor (shown)), thickness * 0.5f);
 
-        g.setColour (findColour (juce::Label::textColourId));
-        g.fillRect (xFor (position) - 1.0f, 2.0f, 2.0f, (float) getHeight() - 4.0f);
+        // 現在位置の針。形は変えずに、太さ・長さ・色だけを変える
+        //   ふだん: 細い針 (2px)  /  バーの上: 太い針 (4px, アクセント色)  /  針の近く・ドラッグ中: さらに太く長い針 (6px)
+        const bool grabbing = dragging || nearKnob;
+        const auto needleWidth = grabbing ? 6.0f : (active ? 4.0f : 2.0f);
+        const auto needleHeight = grabbing ? (float) getHeight() - 2.0f : (active ? 28.0f : 20.0f);
+        const auto needle = juce::Rectangle<float> (needleWidth, needleHeight).withCentre ({ xFor (shown), area.getCentreY() });
+
+        if (active)
+        {
+            // 背景と区別できるよう、針の周りを面の色で縁取る
+            g.setColour (findColour (ThemeColourIds::panel));
+            g.fillRoundedRectangle (needle.expanded (1.5f), needleWidth * 0.5f + 1.5f);
+        }
+
+        g.setColour (active ? findColour (ThemeColourIds::accent) : findColour (juce::Label::textColourId));
+        g.fillRoundedRectangle (needle, needleWidth * 0.5f);
     }
 
-    void mouseDown (const juce::MouseEvent& e) override { seekTo (e.x); }
-    void mouseDrag (const juce::MouseEvent& e) override { seekTo (e.x); }
+   #if JUCE_DEBUG
+    // 開発用 (DevSnapshots): マウスを乗せた状態を再現する
+    void setTestHover (bool hover, bool nearNeedle) { hovering = hover; nearKnob = nearNeedle; repaint(); }
+   #endif
+
+    void mouseEnter (const juce::MouseEvent& e) override { mouseMove (e); }
+    void mouseExit (const juce::MouseEvent&) override    { hovering = nearKnob = false; repaint(); }
+
+    void mouseMove (const juce::MouseEvent& e) override
+    {
+        hovering = e.x <= getBarArea().getRight();
+        nearKnob = hovering && length > 0.0 && std::abs ((float) e.x - xFor (position)) < 16.0f;
+        repaint();
+    }
+
+    void mouseDown (const juce::MouseEvent& e) override
+    {
+        if (length <= 0.0 || e.x > getBarArea().getRight())
+            return;
+
+        dragging = true;
+        dragSeconds = secondsAt (e.x);
+        repaint();
+    }
+
+    void mouseDrag (const juce::MouseEvent& e) override
+    {
+        if (! dragging)
+            return;
+
+        dragSeconds = secondsAt (e.x);
+        repaint();
+    }
+
+    void mouseUp (const juce::MouseEvent& e) override
+    {
+        if (! dragging)
+            return;
+
+        dragging = false;
+        position = dragSeconds;   // 次の位置の報告が届くまで、離した位置を表示しておく
+        if (onSeek != nullptr)
+            onSeek (dragSeconds);
+        mouseMove (e);
+    }
 
 private:
     static constexpr int timeWidth = 230;
 
     juce::Rectangle<int> getTimeArea() const { return getLocalBounds().removeFromRight (timeWidth); }
-    juce::Rectangle<int> getBarArea() const  { return getLocalBounds().withTrimmedRight (timeWidth + 12); }
+    juce::Rectangle<int> getBarArea() const  { return getLocalBounds().withTrimmedRight (timeWidth + 12).reduced (12, 0); }
 
-    void seekTo (int x)
+    float xFor (double seconds) const
+    {
+        const auto bar = getBarArea().toFloat();
+        return bar.getX() + bar.getWidth() * (float) juce::jlimit (0.0, 1.0, length > 0.0 ? seconds / length : 0.0);
+    }
+
+    double secondsAt (int x) const
     {
         const auto bar = getBarArea();
-        if (length > 0.0 && onSeek != nullptr && x <= bar.getRight())
-            onSeek (length * juce::jlimit (0.0, 1.0, (x - bar.getX()) / (double) juce::jmax (1, bar.getWidth())));
+        return length * juce::jlimit (0.0, 1.0, (x - bar.getX()) / (double) juce::jmax (1, bar.getWidth()));
     }
 
     double position = 0.0, length = 0.0, loopStartSeconds = 0.0, loopEndSeconds = 0.0;
     bool loopEnabled = false;
+    bool hovering = false, nearKnob = false, dragging = false;
+    double dragSeconds = 0.0;
+};
+
+// ずらしの操作: 「◀ -10 ms」[値]「+10 ms ▶」
+// - ボタンを押し続けると、連続で変わる (setRepeatSpeed)
+// - 値をクリックすると、数値 (ms) を直接入力できる
+class OffsetControl final : public juce::Component
+{
+public:
+    std::function<void (int newMs)> onChange;
+    std::function<void()> onEditFinished;   // 数値の入力を終えたとき (キー操作を練習画面に戻すため)
+
+    static constexpr int minMs = -5000, maxMs = 5000;
+
+    OffsetControl()
+    {
+        for (auto* button : { &downButton, &upButton })
+        {
+            button->setRepeatSpeed (400, 50);   // 0.4 秒押し続けると、0.05 秒ごとにくり返す
+            button->setMouseClickGrabsKeyboardFocus (false);
+            button->setWantsKeyboardFocus (false);
+            addAndMakeVisible (button);
+        }
+        downButton.onClick = [this] { change (value - step); };
+        upButton.onClick = [this] { change (value + step); };
+
+        valueLabel.setEditable (true, false, false);
+        valueLabel.setJustificationType (juce::Justification::centred);
+        valueLabel.setFont (juce::FontOptions (15.0f, juce::Font::bold));
+        valueLabel.setTooltip ("クリックすると、数値 (ms) を入力できます"_jp);
+        valueLabel.setMouseCursor (juce::MouseCursor::IBeamCursor);
+        valueLabel.onEditorShow = [this]
+        {
+            if (auto* editor = valueLabel.getCurrentTextEditor())
+            {
+                editor->setInputRestrictions (6, "-+0123456789");
+                editor->setText (juce::String (value), false);
+                editor->selectAll();
+            }
+        };
+        valueLabel.onTextChange = [this] { change (valueLabel.getText().removeCharacters (" msMS+").getIntValue()); };
+        valueLabel.onEditorHide = [this]
+        {
+            show();
+            if (onEditFinished != nullptr)
+                onEditFinished();
+        };
+        addAndMakeVisible (valueLabel);
+
+        setStep (10);
+        show();
+    }
+
+    void setValue (int ms)
+    {
+        value = juce::jlimit (minMs, maxMs, ms);
+        show();
+    }
+
+    void setStep (int ms)
+    {
+        step = juce::jmax (1, ms);
+        downButton.setButtonText (juce::String::fromUTF8 ("◀ -") + juce::String (step) + " ms");
+        upButton.setButtonText ("+" + juce::String (step) + juce::String::fromUTF8 (" ms ▶"));
+    }
+
+    void setTooltips (const juce::String& down, const juce::String& up)
+    {
+        downButton.setTooltip (down);
+        upButton.setTooltip (up);
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        // 値の欄に薄い枠を描き、入力できることを示す
+        g.setColour (findColour (ThemeColourIds::border));
+        g.drawRoundedRectangle (valueLabel.getBounds().toFloat().reduced (2.0f, 1.5f), 5.0f, 1.0f);
+    }
+
+    void resized() override
+    {
+        auto r = getLocalBounds();
+        const auto buttonWidth = juce::jmin (96, r.getWidth() / 3);
+        downButton.setBounds (r.removeFromLeft (buttonWidth));
+        upButton.setBounds (r.removeFromRight (buttonWidth));
+        valueLabel.setBounds (r.reduced (6, 0));
+    }
+
+private:
+    void change (int ms)
+    {
+        ms = juce::jlimit (minMs, maxMs, ms);
+        if (ms != value)
+        {
+            value = ms;
+            if (onChange != nullptr)
+                onChange (value);
+        }
+        show();
+    }
+
+    void show()
+    {
+        valueLabel.setText ((value > 0 ? "+" : "") + juce::String (value) + " ms", juce::dontSendNotification);
+    }
+
+    int value = 0, step = 10;
+    juce::TextButton downButton, upButton;
+    juce::Label valueLabel;
+};
+
+// チューナーなどを開いている間、後ろの画面を少し暗くする幕。クリックすると onClick (閉じる)
+class DimOverlay final : public juce::Component
+{
+public:
+    std::function<void()> onClick;
+
+    void paint (juce::Graphics& g) override { g.fillAll (juce::Colours::black.withAlpha (0.45f)); }
+    void mouseDown (const juce::MouseEvent&) override { if (onClick != nullptr) onClick(); }
 };
 
 // ホイール1目盛りで、決まった量だけ値を変えるスライダー (設計書 4.3)

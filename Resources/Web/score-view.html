@@ -48,6 +48,7 @@
 
     api.scoreLoaded.on(function (s) {
       score = s;
+      applyLayout();   // 描く前に、小節の幅の決め方を設定する
       // 拍子から、各小節が何拍目から始まるかを計算しておく (テンポは一定とみなす。設計書 3.1 の「一定テンポ」)
       barStartBeats = [];
       let beats = 0;
@@ -57,6 +58,7 @@
       }
       send("loaded", {
         title: s.title || "", artist: s.artist || "", tempo: s.tempo || 0,
+        bars: barStartBeats,   // 各小節が曲の頭から何拍目で始まるか (アプリがループを小節の頭に合わせるのに使う)
         tracks: s.tracks.map(function (t) { return t.name || ""; })
       });
     });
@@ -82,16 +84,55 @@
     };
   }
 
+  // 小節を同じ幅にするか。
+  //   切: alphaTab の標準 (音符の多い小節ほど広い)
+  //   入: すべての小節を同じ比率 (displayScale = 1) にし、1段に並べる小節の数を固定する (UseModelLayout)
+  let equalBars = false;
+  function applyLayout() {
+    if (!api) return;
+    if (score && equalBars) {
+      // 1小節 300px くらいを目安に (狭いと、音符の多い小節で数字が重なる)
+      const perRow = Math.max(2, Math.min(6, Math.floor(scroller.clientWidth / 300)));
+      score.defaultSystemsLayout = perRow; score.systemsLayout = [];
+      for (const mb of score.masterBars) mb.displayScale = 1;
+      for (const t of score.tracks) {
+        t.defaultSystemsLayout = perRow; t.systemsLayout = [];
+        for (const st of t.staves) for (const b of st.bars) b.displayScale = 1;
+      }
+    }
+    // SystemsLayoutMode: 0 = Automatic (標準), 1 = UseModelLayout (小節の比率と1段の小節数を、上で決めた値にする)
+    api.settings.display.systemsLayoutMode = equalBars ? 1 : 0;
+    api.updateSettings();
+  }
+
+  // ページの背景・カーソルの色も、アプリのテーマに合わせる
+  function applyPageColours() {
+    if (!colours) return;
+    document.documentElement.style.background = colours.background;
+    document.body.style.background = colours.background;
+    document.body.style.color = colours.text;
+    document.getElementById("message").style.color = colours.muted;
+    cursor.style.background = colours.accent;
+    barHighlight.style.background = colours.accent;
+  }
+
   // ---- アプリからの命令 ----
   window.scoreCommand = function (cmd) {
     switch (cmd.type) {
       case "load": load(cmd.url, cmd.track || 0); break;
       case "clear": clearScore(); break;
       case "position": setPosition(cmd.seconds, cmd.bpm, cmd.offset); break;
+      case "layout":
+        equalBars = !!cmd.equalBars;
+        applyLayout();
+        if (api && score) api.render();
+        break;
       case "colours":
         colours = cmd;
+        applyPageColours();
         if (api) {
-          Object.assign(api.settings.display.resources, colourResources());
+          // 色は文字列のまま settings に入れても alphaTab の色にならないので、JSON として読み込ませる
+          api.settings.fillFromJson({ display: { resources: colourResources() } });
           api.updateSettings();
           if (score) api.render();
         }
@@ -150,6 +191,25 @@
     if (top < scroller.scrollTop + 20 || bottom > scroller.scrollTop + scroller.clientHeight - 20)
       scroller.scrollTo({ top: Math.max(0, top - 40), behavior: "smooth" });
   }
+
+  // 小節をクリックしたら、その小節の頭から再生できるように、アプリに知らせる
+  scoreElement.addEventListener("click", function (e) {
+    if (!api || !score || !api.renderer || !api.renderer.boundsLookup || barStartBeats.length === 0) return;
+    const rect = scoreElement.getBoundingClientRect();
+    const beat = api.renderer.boundsLookup.getBeatAtPos(e.clientX - rect.left, e.clientY - rect.top);
+    if (!beat || !beat.voice || !beat.voice.bar || !beat.voice.bar.masterBar) return;
+    const index = beat.voice.bar.masterBar.index;
+    if (index >= 0 && index < barStartBeats.length)
+      send("barClicked", { bar: index, beats: barStartBeats[index] });
+  });
+
+  // 再生の操作キーは、タブ譜の上で押してもアプリに渡す (WebView がキーを受け取ってしまうため)
+  document.addEventListener("keydown", function (e) {
+    if (e.code === "Space" || e.code === "ArrowLeft" || e.code === "ArrowRight" || e.code === "Enter" || e.code === "Home") {
+      e.preventDefault();   // スペースでページがスクロールしないように
+      send("key", { key: e.code });
+    }
+  });
 
   document.addEventListener("DOMContentLoaded", function () { showMessage(""); send("pageReady"); });
 </script>

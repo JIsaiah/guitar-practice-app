@@ -100,6 +100,15 @@
     if (pending) { const p = pending; pending = null; load(p.videoId, p.start); }
   };
 
+  // 再生の操作キーは、アプリに渡す。
+  // ※ 動画 (YouTube の枠の中) をクリックした直後は、キーが YouTube に届き、ここでは受け取れない
+  document.addEventListener("keydown", function (e) {
+    if (e.code === "Space" || e.code === "ArrowLeft" || e.code === "ArrowRight" || e.code === "Enter" || e.code === "Home") {
+      e.preventDefault();
+      send("key", { key: e.code });
+    }
+  });
+
   document.addEventListener("DOMContentLoaded", function () { send("pageReady"); });
 </script>
 <!-- YouTube の公式プレイヤー API。これだけはネットから読む (YouTube を使うときはネット接続が必要) -->

@@ -28,7 +28,11 @@ public:
     // 練習画面の右パネル (動画・音色・ミキサー) の幅。境目のバーを引っ張って変える
     int getSidePanelWidth() const noexcept { return sidePanelWidth; }
     void setSidePanelWidth (int width);
-    static constexpr int minSidePanelWidth = 280, maxSidePanelWidth = 760;
+    static constexpr int minSidePanelWidth = 340, maxSidePanelWidth = 760;
+
+    // タブ譜の小節を同じ幅で並べるか (練習画面のトグル)
+    bool getScoreEqualBars() const noexcept { return scoreEqualBars; }
+    void setScoreEqualBars (bool equal);
 
     // 選べる範囲
     static constexpr int minSkipSeconds = 1, maxSkipSeconds = 30;
@@ -39,5 +43,6 @@ private:
     juce::PropertiesFile& file;
     int skipSeconds = 5;
     WheelSteps wheel;
-    int sidePanelWidth = 360;
+    int sidePanelWidth = 400;
+    bool scoreEqualBars = false;
 };

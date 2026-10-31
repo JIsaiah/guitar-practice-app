@@ -78,7 +78,7 @@ void MetalLogoLabel::paint (juce::Graphics& g)
     }
 
     g.setColour (findColour (juce::Label::textColourId));
-    g.setFont (font);
+    g.setFont (AppLookAndFeel::scaled (font));
     g.drawFittedText (text, getLocalBounds(), justification, 1);
 }
 
