@@ -1,0 +1,126 @@
+#include "Session.h"
+
+namespace
+{
+    juce::String toString (SourceType type)
+    {
+        switch (type)
+        {
+            case SourceType::local:   return "local";
+            case SourceType::youtube: return "youtube";
+            case SourceType::none:    break;
+        }
+        return "none";
+    }
+
+    SourceType sourceTypeFromString (const juce::String& text)
+    {
+        if (text == "local")   return SourceType::local;
+        if (text == "youtube") return SourceType::youtube;
+        return SourceType::none;
+    }
+
+    juce::String toString (TempoOrigin origin)
+    {
+        switch (origin)
+        {
+            case TempoOrigin::score:  return "score";
+            case TempoOrigin::online: return "online";
+            case TempoOrigin::tap:    return "tap";
+            case TempoOrigin::manual: break;
+        }
+        return "manual";
+    }
+
+    TempoOrigin tempoOriginFromString (const juce::String& text)
+    {
+        if (text == "score")  return TempoOrigin::score;
+        if (text == "online") return TempoOrigin::online;
+        if (text == "tap")    return TempoOrigin::tap;
+        return TempoOrigin::manual;
+    }
+
+    juce::var makeObject (std::initializer_list<std::pair<juce::Identifier, juce::var>> properties)
+    {
+        auto* object = new juce::DynamicObject();
+
+        for (const auto& [key, value] : properties)
+            object->setProperty (key, value);
+
+        return juce::var (object);
+    }
+
+    juce::var emptyArray()
+    {
+        return juce::var (juce::Array<juce::var>());
+    }
+
+    template <typename T>
+    T getOr (const juce::var& value, T fallback)
+    {
+        if (value.isVoid())
+            return fallback;
+
+        if constexpr (std::is_same_v<T, juce::String>)
+            return value.toString();
+        else
+            return static_cast<T> (value);
+    }
+}
+
+juce::var Session::toVar() const
+{
+    auto source = sourceType == SourceType::youtube
+                    ? makeObject ({ { "type", toString (sourceType) }, { "url", youtubeUrl } })
+                    : makeObject ({ { "type", toString (sourceType) }, { "path", sourcePath } });
+
+    return makeObject ({
+        { "version",  currentVersion },
+        { "title",    title },
+        { "source",   source },
+        { "score",    makeObject ({ { "path", scorePath }, { "track_index", scoreTrackIndex } }) },
+        { "tempo",    makeObject ({ { "bpm", bpm }, { "origin", toString (tempoOrigin) } }) },
+        { "playback", makeObject ({ { "speed_percent", speedPercent } }) },
+        { "sync",     makeObject ({ { "offset_ms", syncOffsetMs }, { "points", emptyArray() } }) },
+        { "loop",     makeObject ({ { "a_ms", loopStartMs }, { "b_ms", loopEndMs }, { "enabled", loopEnabled } }) },
+        { "mixer",    makeObject ({ { "source", mixSource }, { "guitar", mixGuitar }, { "metronome", mixMetronome } }) },
+        { "tone",     makeObject ({ { "type", "builtin" }, { "preset_id", tonePresetId }, { "vst3", emptyArray() } }) },
+    });
+}
+
+Session Session::fromVar (const juce::var& value)
+{
+    Session s;
+
+    s.title = getOr<juce::String> (value["title"], {});
+
+    const auto& source = value["source"];
+    s.sourceType = sourceTypeFromString (getOr<juce::String> (source["type"], "none"));
+    s.sourcePath = getOr<juce::String> (source["path"], {});
+    s.youtubeUrl = getOr<juce::String> (source["url"], {});
+
+    const auto& score = value["score"];
+    s.scorePath = getOr<juce::String> (score["path"], {});
+    s.scoreTrackIndex = getOr<int> (score["track_index"], 0);
+
+    const auto& tempo = value["tempo"];
+    s.bpm = getOr<double> (tempo["bpm"], 120.0);
+    s.tempoOrigin = tempoOriginFromString (getOr<juce::String> (tempo["origin"], "manual"));
+
+    s.speedPercent = getOr<int> (value["playback"]["speed_percent"], 100);
+    s.syncOffsetMs = getOr<int> (value["sync"]["offset_ms"], 0);
+
+    const auto& loop = value["loop"];
+    s.loopStartMs = getOr<int> (loop["a_ms"], 0);
+    s.loopEndMs = getOr<int> (loop["b_ms"], 0);
+    s.loopEnabled = getOr<bool> (loop["enabled"], false);
+
+    const auto& mixer = value["mixer"];
+    s.mixSource = getOr<double> (mixer["source"], 1.0);
+    s.mixGuitar = getOr<double> (mixer["guitar"], 1.0);
+    s.mixMetronome = getOr<double> (mixer["metronome"], 0.8);
+
+    s.tonePresetId = getOr<juce::String> (value["tone"]["preset_id"], "clean-01");
+
+    return s;
+}
