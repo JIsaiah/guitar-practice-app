@@ -168,6 +168,16 @@ juce::String DevSnapshots::renderAll (const juce::File& folder)
                 snap (practice, 1280, 800, "practice_tuner.png");
                 practice.perform (Command::toggleTuner);
 
+                // 音色の設定 (NAM)。ファイル名だけ入れる (ファイルは読まない)
+                {
+                    Session toneSession = session;
+                    toneSession.tonePresetId = namTonePresetId;
+                    toneSession.namModelPath = "C:/Models/Marsh 800_AgroTS9.nam";
+                    toneSession.irPath = "C:/IRs/BD_RH_GatesOfHell.wav";
+                    ToneDetailPanel tonePanel (engine, toneSession);
+                    snap (tonePanel, ToneDetailPanel::preferredWidth, ToneDetailPanel::preferredHeight, "tone_panel.png");
+                }
+
                 SettingsPanel panel (appSettings, theme, engine.getDeviceManager());
                 snap (panel, panel.getWidth(), panel.getHeight(), "settings_custom.png");
 

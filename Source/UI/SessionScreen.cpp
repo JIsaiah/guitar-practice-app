@@ -97,16 +97,22 @@ SessionScreen::SessionScreen (AudioEngine& e, SessionStore& s, ThemeManager& t, 
     chooseFileButton.onClick = [this] { chooseSourceFile(); };
     pasteUrlButton.onClick = [this] { pasteYouTubeUrl(); };
 
-    //==== 右: 音色 ====
+    //==== 右: 音色 (簡易な音色 3 つと、NAM) ====
     const auto& presets = getTonePresets();
     for (size_t i = 0; i < toneButtons.size(); ++i)
     {
         auto& button = toneButtons[i];
-        button.setButtonText (juce::String::fromUTF8 (presets[i].name));
+        button.setButtonText (i == namToneIndex ? juce::String ("NAM") : juce::String::fromUTF8 (presets[i].name));
         button.setClickingTogglesState (true);
         button.setRadioGroupId (1);
-        button.onClick = [this, i] { selectTone ((int) i); };
+        button.onClick = [this, i] { selectTone ((int) i, true); };
     }
+    toneButtons[namToneIndex].setTooltip ("NAM のアンプのモデル (.nam) とキャビネットの IR (.wav) で鳴らします"_jp);
+
+    toneSummaryLabel.setFont (juce::FontOptions (12.0f));
+    toneDetailButton.setButtonText ("音色の設定…"_jp);
+    toneDetailButton.setTooltip ("NAM のモデル・IR・入力の大きさ・メーター・オーディオデバイスの状態"_jp);
+    toneDetailButton.onClick = [this] { toggleTonePanel(); };
 
     //==== 右: ミキサー ====
     sourceGainLabel.setText ("音源"_jp, juce::dontSendNotification);
@@ -223,7 +229,7 @@ SessionScreen::SessionScreen (AudioEngine& e, SessionStore& s, ThemeManager& t, 
              &splitter, &sidePanelButton,
              &sourceHeading, &toneHeading, &mixerHeading, &offsetHeading,
              &videoView, &sourceInfoLabel, &sourceRemoveButton, &chooseFileButton, &pasteUrlButton,
-             &toneButtons[0], &toneButtons[1], &toneButtons[2],
+             &toneButtons[0], &toneButtons[1], &toneButtons[2], &toneButtons[3], &toneSummaryLabel, &toneDetailButton,
              &sourceGainLabel, &guitarGainLabel, &metronomeGainLabel,
              &sourceGainSlider, &guitarGainSlider, &metronomeGainSlider, &sourceMuteButton,
              &bpmLabel, &bpmSlider, &tapButton, &scoreOffsetLabel, &scoreOffsetControl, &offsetLabel, &offsetControl,
@@ -246,7 +252,11 @@ SessionScreen::SessionScreen (AudioEngine& e, SessionStore& s, ThemeManager& t, 
     sourceInfoLabel.setWantsKeyboardFocus (true);
 
     // チューナーの後ろを暗くする幕 (チューナーを開いたときだけ表示)。クリックするとチューナーを閉じる
-    dimOverlay.onClick = [this] { if (tunerPanel != nullptr) perform (Command::toggleTuner); };
+    dimOverlay.onClick = [this]
+    {
+        if (tunerPanel != nullptr) perform (Command::toggleTuner);
+        if (tonePanel != nullptr)  toggleTonePanel();
+    };
     addChildComponent (dimOverlay);
 
     applyAppSettings();
@@ -293,7 +303,9 @@ SessionScreen::~SessionScreen()
 //==============================================================================
 void SessionScreen::applySessionToEngine()
 {
-    selectTone (findTonePresetIndex (session.tonePresetId));
+    selectTone (session.tonePresetId == namTonePresetId ? namToneIndex : findTonePresetIndex (session.tonePresetId), false);
+    engine.setInputGainDb ((float) session.inputGainDb);
+    loadNamTone();
     applySourceGain();
     engine.setGuitarGain ((float) session.mixGuitar);
     engine.setMetronomeGain ((float) session.mixMetronome);
@@ -1088,16 +1100,14 @@ void SessionScreen::toggleTuner()
     if (tunerPanel != nullptr)
     {
         tunerPanel = nullptr;
-        dimOverlay.setVisible (false);
+        showOverlay (nullptr);
         tunerButton.setToggleState (false, juce::dontSendNotification);
         resized();   // 隠していた動画とタブ譜を戻す
         return;
     }
 
-    // 後ろの画面を少し暗くして、目がチューナーに行くようにする
-    dimOverlay.setBounds (getLocalBounds());
-    dimOverlay.setVisible (true);
-    dimOverlay.toFront (false);
+    if (tonePanel != nullptr)
+        toggleTonePanel();   // 重ねるパネルは1つだけ
 
     tunerPanel = std::make_unique<TunerPanel> (engine);
     tunerPanel->onClose = [this]
@@ -1109,18 +1119,128 @@ void SessionScreen::toggleTuner()
                 safe->toggleTuner();
         });
     };
-    addAndMakeVisible (*tunerPanel);
+    showOverlay (tunerPanel.get());
     tunerButton.setToggleState (true, juce::dontSendNotification);
     resized();
 }
 
-void SessionScreen::selectTone (int index)
+// 後ろの画面を少し暗くして、目が重ねたパネルに行くようにする。panel が nullptr なら幕を外す
+void SessionScreen::showOverlay (juce::Component* panel)
 {
+    dimOverlay.setBounds (getLocalBounds());
+    dimOverlay.setVisible (panel != nullptr);
+
+    if (panel != nullptr)
+    {
+        dimOverlay.toFront (false);
+        addAndMakeVisible (*panel);
+        panel->toFront (false);
+    }
+}
+
+//==============================================================================
+// 音色
+void SessionScreen::selectTone (int index, bool fromUser)
+{
+    index = juce::jlimit (0, namToneIndex, index);
     toneButtons[(size_t) index].setToggleState (true, juce::dontSendNotification);
 
-    const auto& preset = getTonePresets()[(size_t) index];
-    session.tonePresetId = preset.id;
-    engine.setTone (preset.type);
+    if (index == namToneIndex)
+    {
+        session.tonePresetId = namTonePresetId;
+        engine.setTone (ToneType::nam);
+
+        // まだモデルを選んでいなければ、音色の設定を開いて選んでもらう
+        if (fromUser && session.namModelPath.isEmpty() && session.irPath.isEmpty() && tonePanel == nullptr)
+            toggleTonePanel();
+    }
+    else
+    {
+        const auto& preset = getTonePresets()[(size_t) index];
+        session.tonePresetId = preset.id;
+        engine.setTone (preset.type);
+    }
+
+    updateToneSummary();
+}
+
+void SessionScreen::loadNamTone()
+{
+    const auto toFile = [] (const juce::String& path) { return path.isEmpty() ? juce::File() : juce::File (path); };
+    const auto amp = toFile (session.namModelPath);
+    const auto cabinet = toFile (session.irPath);
+
+    for (const auto& file : { amp, cabinet })
+        if (file != juce::File() && ! file.existsAsFile())
+            setStatus ("音色のファイルが見つかりません: "_jp + file.getFullPathName());
+
+    engine.loadNamToneAsync (amp.existsAsFile() ? amp : juce::File(),
+                             cabinet.existsAsFile() ? cabinet : juce::File(),
+                             [safe = juce::Component::SafePointer (this)] (bool succeeded, const juce::String& error)
+    {
+        if (safe == nullptr)
+            return;
+
+        if (! succeeded)
+            safe->setStatus (error);
+
+        safe->updateToneSummary();
+    });
+
+    updateToneSummary();
+}
+
+void SessionScreen::updateToneSummary()
+{
+    const auto name = [] (const juce::String& path)
+    {
+        return path.isEmpty() ? "なし"_jp : juce::File (path).getFileNameWithoutExtension();
+    };
+
+    const auto text = "NAM: "_jp + name (session.namModelPath) + "  /  IR: " + name (session.irPath);
+    toneSummaryLabel.setText (text, juce::dontSendNotification);
+    toneSummaryLabel.setTooltip (text);
+
+    // NAM を選んでいるときだけ、はっきり表示する
+    toneSummaryLabel.setAlpha (session.tonePresetId == namTonePresetId ? 1.0f : 0.5f);
+}
+
+void SessionScreen::toggleTonePanel()
+{
+    if (tonePanel != nullptr)
+    {
+        tonePanel = nullptr;
+        showOverlay (nullptr);
+        toneDetailButton.setToggleState (false, juce::dontSendNotification);
+        resized();
+        grabKeyboardFocus();
+        return;
+    }
+
+    if (tunerPanel != nullptr)
+        toggleTuner();   // 重ねるパネルは1つだけ
+
+    tonePanel = std::make_unique<ToneDetailPanel> (engine, session);
+    tonePanel->onToneFilesChanged = [this]
+    {
+        // モデルや IR を選んだら、NAM の音色に切り替えて読み込む
+        selectTone (namToneIndex, false);
+        loadNamTone();
+    };
+    tonePanel->onOpenAudioSettings = [this] { if (onOpenSettings != nullptr) onOpenSettings(); };
+    tonePanel->onClose = [this]
+    {
+        // 自分のボタンの onClick の中で破棄しないよう、後で閉じる
+        juce::MessageManager::callAsync ([safe = juce::Component::SafePointer (this)]
+        {
+            if (safe != nullptr && safe->tonePanel != nullptr)
+                safe->toggleTonePanel();
+        });
+    };
+
+    showOverlay (tonePanel.get());
+    toneDetailButton.setToggleState (true, juce::dontSendNotification);
+    resized();
 }
 
 //==============================================================================
@@ -1231,7 +1351,8 @@ void SessionScreen::placeWebViews()
     // WebView (動画・タブ譜) は、ほかの部品より手前に描かれる。
     // チューナーを開いている間と、右のパネルを隠しているとき (動画) は隠す
     // 入れ替え中は、動画を左の大きな枠に、タブ譜を右のパネルの枠に重ねる
-    const bool canShow = tunerPanel == nullptr && getParentComponent() != nullptr && ! getBounds().isEmpty();
+    const bool canShow = tunerPanel == nullptr && tonePanel == nullptr
+                      && getParentComponent() != nullptr && ! getBounds().isEmpty();
     const bool swapped = isSwapped();
     auto& videoTarget = swapped ? static_cast<juce::Component&> (scoreView) : static_cast<juce::Component&> (videoView);
     auto& scoreTarget = swapped ? static_cast<juce::Component&> (videoView) : static_cast<juce::Component&> (scoreView);
@@ -1325,7 +1446,7 @@ void SessionScreen::resized()
     for (auto* c : std::initializer_list<juce::Component*> {
              &sourceHeading, &toneHeading, &mixerHeading, &offsetHeading, &splitter,
              &videoView, &sourceInfoLabel, &sourceRemoveButton, &chooseFileButton, &pasteUrlButton,
-             &toneButtons[0], &toneButtons[1], &toneButtons[2],
+             &toneButtons[0], &toneButtons[1], &toneButtons[2], &toneButtons[3], &toneSummaryLabel, &toneDetailButton,
              &sourceGainLabel, &guitarGainLabel, &metronomeGainLabel,
              &sourceGainSlider, &guitarGainSlider, &metronomeGainSlider, &sourceMuteButton,
              &bpmLabel, &bpmSlider, &tapButton, &scoreOffsetLabel, &scoreOffsetControl, &offsetLabel, &offsetControl })
@@ -1349,7 +1470,7 @@ void SessionScreen::resized()
 
         // 中身の高さ (動画以外)
         constexpr int headingHeight = 24, rowHeight = 32;
-        constexpr int toneHeight = headingHeight + 36;
+        constexpr int toneHeight = headingHeight + 36 + 4 + 28;   // 音色のボタンと、NAM のモデル名・設定ボタン
         constexpr int mixerHeight = headingHeight + 3 * rowHeight;
         constexpr int tempoHeight = headingHeight + 3 * rowHeight + 2 * 4;
         const int sourceExtra = headingHeight + 30 + (hasSource() ? 0 : 40);
@@ -1391,12 +1512,20 @@ void SessionScreen::resized()
         auto tone = card (toneHeight);
         toneHeading.setBounds (tone.removeFromTop (20));
         tone.removeFromTop (4);
-        const auto toneWidth = (tone.getWidth() - 12) / 3;
+        auto toneRow = tone.removeFromTop (36);
+        const auto toneWidth = (toneRow.getWidth() - 6 * (int) (toneButtons.size() - 1)) / (int) toneButtons.size();
         for (auto& button : toneButtons)
         {
-            button.setBounds (tone.removeFromLeft (toneWidth));
-            tone.removeFromLeft (6);
+            button.setBounds (toneRow.removeFromLeft (toneWidth));
+            toneRow.removeFromLeft (6);
         }
+
+        // NAM のモデル名と、音色の設定を開くボタン
+        tone.removeFromTop (4);
+        auto summaryRow = tone.removeFromTop (28);
+        toneDetailButton.setBounds (summaryRow.removeFromRight (110).reduced (0, 1));
+        summaryRow.removeFromRight (6);
+        toneSummaryLabel.setBounds (summaryRow);
 
         // ミキサー。「音源」の行の右端にミュート (ほかの行も同じ幅を空けて、スライダーの長さを揃える)
         auto mixer = card (mixerHeight);
@@ -1460,6 +1589,8 @@ void SessionScreen::resized()
     dimOverlay.setBounds (getLocalBounds());
     if (tunerPanel != nullptr)
         tunerPanel->setBounds (getLocalBounds().withSizeKeepingCentre (TunerPanel::preferredWidth, TunerPanel::preferredHeight));
+    if (tonePanel != nullptr)
+        tonePanel->setBounds (getLocalBounds().withSizeKeepingCentre (ToneDetailPanel::preferredWidth, ToneDetailPanel::preferredHeight));
 
     placeWebViews();
     repaint();

@@ -9,16 +9,23 @@ struct AudioEngine::LoadedAudio
 
 namespace
 {
-    // 仮の音色。NAM を組み込んだら置き換える
-    float applyTone (float sample, int toneType) noexcept
+    // 簡易な音色 (ファイルなしで使える)。tanh で大きい値をなめらかに押さえ込み、アンプの歪みに似せる
+    float applySimpleTone (float sample, int toneType) noexcept
     {
         switch ((ToneType) toneType)
         {
             case ToneType::crunch: return std::tanh (sample * 4.0f) * 0.6f;
             case ToneType::drive:  return std::tanh (sample * 20.0f) * 0.4f;
-            case ToneType::clean:  break;
+            case ToneType::clean:
+            case ToneType::nam:    break;
         }
         return sample;
+    }
+
+    // NAM のモデルに渡す最大のブロックの大きさ。デバイスのバッファより大きければ、分けずに1回で処理できる
+    int namBlockSizeFor (int deviceBufferSize)
+    {
+        return juce::jmax (2048, deviceBufferSize);
     }
 }
 
@@ -39,11 +46,111 @@ AudioEngine::~AudioEngine()
 //==============================================================================
 void AudioEngine::initialise (const juce::XmlElement* savedDeviceState)
 {
+    // 入力 1 チャンネル (ギター)、出力 2 チャンネル。ASIO も選べる (JUCE_ASIO=1、設計書 #13)
     const auto error = deviceManager.initialise (1, 2, savedDeviceState, true);
-    if (error.isNotEmpty())
-        DBG ("Audio device error: " << error);
+    juce::ignoreUnused (error);   // 開けなくても起動は続ける (設定画面で選び直せる)
+    DBG ("Audio device: " << (error.isEmpty() ? juce::String ("ok") : error));
 
     deviceManager.addAudioCallback (this);
+}
+
+AudioEngine::DeviceInfo AudioEngine::getDeviceInfo() const
+{
+    DeviceInfo info;
+    auto* device = deviceManager.getCurrentAudioDevice();
+    if (device == nullptr)
+        return info;
+
+    info.typeName = device->getTypeName();
+    info.deviceName = device->getName();
+    info.sampleRate = device->getCurrentSampleRate();
+    info.bufferSize = device->getCurrentBufferSizeSamples();
+    info.hasInput = device->getActiveInputChannels().countNumberOfSetBits() > 0;
+    info.cpuUsage = deviceManager.getCpuUsage();
+
+    if (info.sampleRate > 0.0)
+        info.reportedLatencyMs = (device->getInputLatencyInSamples() + device->getOutputLatencyInSamples())
+                                 * 1000.0 / info.sampleRate;
+    return info;
+}
+
+//==============================================================================
+// NAM の音色
+void AudioEngine::loadNamToneAsync (const juce::File& ampModel, const juce::File& cabinetIr, LoadCallback onDone)
+{
+    namAmpFile = ampModel;
+    namCabinetFile = cabinetIr;
+    namToneError = {};
+
+    const auto generation = ++namToneGeneration;
+
+    if (ampModel == juce::File() && cabinetIr == juce::File())
+    {
+        namToneLoading = false;
+        installNamTone (nullptr);
+        if (onDone != nullptr)
+            onDone (true, {});
+        return;
+    }
+
+    namToneLoading = true;
+
+    // 今のデバイスの設定で準備する (違うサンプルレートで準備したモデルは、オーディオスレッドで使わない)
+    const auto sampleRate = deviceSampleRate.load();
+    const auto blockSize = namBlockSizeFor (deviceBufferSize.load());
+    juce::WeakReference<AudioEngine> weakThis (this);
+
+    loaderPool.addJob ([weakThis, ampModel, cabinetIr, sampleRate, blockSize, generation, onDone]
+    {
+        auto result = NamTone::load (ampModel, cabinetIr, sampleRate, blockSize);
+
+        juce::MessageManager::callAsync ([weakThis, result, generation, onDone]
+        {
+            auto* self = weakThis.get();
+            if (self == nullptr || generation != self->namToneGeneration)
+                return;   // 破棄済み、または後から別のファイルが選ばれた
+
+            self->namToneLoading = false;
+            self->namToneError = result.error;
+
+            if (result.tone != nullptr)
+                self->installNamTone (result.tone);
+
+            if (onDone != nullptr)
+                onDone (result.tone != nullptr, result.error);
+        });
+    });
+}
+
+void AudioEngine::clearNamTone()
+{
+    loadNamToneAsync ({}, {}, nullptr);
+}
+
+void AudioEngine::installNamTone (std::shared_ptr<NamTone> newTone)
+{
+    // 音源と同じく、古いものはオーディオスレッドが使い終わってから解放する
+    if (ownedNamTone != nullptr)
+        retired.push_back ({ ownedNamTone, callbackCount.load() });
+
+    ownedNamTone = std::move (newTone);
+    currentNamTone.store (ownedNamTone.get());
+}
+
+AudioEngine::NamToneInfo AudioEngine::getNamToneInfo() const
+{
+    NamToneInfo info;
+    info.loading = namToneLoading;
+    info.error = namToneError;
+    info.ampFile = namAmpFile;
+    info.cabinetFile = namCabinetFile;
+
+    if (ownedNamTone != nullptr)
+    {
+        info.modelSampleRate = ownedNamTone->getModelSampleRate();
+        info.active = juce::approximatelyEqual (ownedNamTone->getSampleRate(), deviceSampleRate.load());
+    }
+    return info;
 }
 
 std::unique_ptr<juce::XmlElement> AudioEngine::createDeviceState() const
@@ -143,6 +250,17 @@ void AudioEngine::timerCallback()
                                    [&] (const RetiredSource& r)
                                    { return ! deviceRunning || now > r.callbackCountAtRetire + 1; }),
                    retired.end());
+
+    // デバイスのサンプルレートやバッファの大きさが変わったら (設定画面で ASIO に切り替えたときなど)、
+    // NAM の音色を今の設定で読み込み直す。それまでは、ギターの音をそのまま (音色なしで) 出す
+    if (ownedNamTone != nullptr && ! namToneLoading && deviceRunning)
+    {
+        const bool rateChanged = ! juce::approximatelyEqual (ownedNamTone->getSampleRate(), deviceSampleRate.load());
+        const bool blockTooSmall = ownedNamTone->getMaxBlockSize() < deviceBufferSize.load();
+
+        if (rateChanged || blockTooSmall)
+            loadNamToneAsync (namAmpFile, namCabinetFile, nullptr);
+    }
 }
 
 //==============================================================================
@@ -193,6 +311,38 @@ int AudioEngine::readTunerInput (float* destination, int maxSamples) noexcept
 void AudioEngine::audioDeviceAboutToStart (juce::AudioIODevice* device)
 {
     deviceSampleRate.store (device->getCurrentSampleRate());
+    deviceBufferSize.store (device->getCurrentBufferSizeSamples());
+}
+
+// ギター: 入力の大きさ → 音色 (NAM か、簡易な音色)。結果は guitarBuffer に入る
+void AudioEngine::processGuitar (const float* input, int numSamples, int toneType) noexcept
+{
+    auto* buffer = guitarBuffer.data();
+    juce::FloatVectorOperations::copyWithMultiply (buffer, input, inputGain.load(), numSamples);
+
+    // メーター用 (入力の大きさを合わせるときに見る)
+    const auto inRange = juce::FloatVectorOperations::findMinAndMax (buffer, numSamples);
+    const auto inPeak = juce::jmax (std::abs (inRange.getStart()), std::abs (inRange.getEnd()));
+    if (inPeak > inputPeak.load())
+        inputPeak.store (inPeak);
+
+    if ((ToneType) toneType == ToneType::nam)
+    {
+        // 今のデバイスと同じサンプルレートで準備したモデルだけを使う。
+        // 違うとき (読み込み直している最中) は、音色なしでそのまま出す
+        auto* namTone = currentNamTone.load();
+        if (namTone != nullptr && juce::approximatelyEqual (namTone->getSampleRate(), deviceSampleRate.load()))
+        {
+            const auto block = namTone->getMaxBlockSize();
+            for (int start = 0; start < numSamples; start += block)
+                namTone->process (buffer + start, juce::jmin (block, numSamples - start));
+        }
+    }
+    else
+    {
+        for (int i = 0; i < numSamples; ++i)
+            buffer[i] = applySimpleTone (buffer[i], toneType);
+    }
 }
 
 void AudioEngine::setExternalClock (double position, double rate, bool isPlaying) noexcept
@@ -222,14 +372,20 @@ void AudioEngine::audioDeviceIOCallbackWithContext (const float* const* inputs, 
     if (numOutputs == 0 || outputs[0] == nullptr)
         return;
 
+    // ギターは先にブロックごと処理しておく (NAM はブロック単位で計算するため)。
+    // バッファより大きなブロックは来ない想定だが、来たらはみ出した分は鳴らさない
+    const int guitarSamples = guitarIn != nullptr ? juce::jmin (numSamples, maxGuitarBlock) : 0;
+    if (guitarSamples > 0)
+        processGuitar (guitarIn, guitarSamples, tone.load());
+
     float* outLeft = outputs[0];
     float* outRight = numOutputs > 1 ? outputs[1] : nullptr;
 
     // このブロックで使う値を読み出しておく
     const double sampleRate = deviceSampleRate.load();
     auto* source = currentSource.load();
-    const auto toneType = tone.load();
     const auto gainGuitar = guitarGain.load();
+    float guitarBlockPeak = 0.0f;
     const auto gainSource = sourceGain.load();
     const auto gainMetronome = metronomeGain.load();
     const bool metronomeOn = metronomeEnabled.load();
@@ -287,10 +443,11 @@ void AudioEngine::audioDeviceIOCallbackWithContext (const float* const* inputs, 
     {
         float left = 0.0f, right = 0.0f;
 
-        // ギター → 音色スロット
-        if (guitarIn != nullptr)
+        // ギター (音色をかけたもの)
+        if (i < guitarSamples)
         {
-            const auto guitar = applyTone (guitarIn[i], toneType) * gainGuitar;
+            const auto guitar = guitarBuffer[(size_t) i] * gainGuitar;
+            guitarBlockPeak = juce::jmax (guitarBlockPeak, std::abs (guitar));
             left += guitar;
             right += guitar;
         }
@@ -356,10 +513,14 @@ void AudioEngine::audioDeviceIOCallbackWithContext (const float* const* inputs, 
         left += click;
         right += click;
 
-        outLeft[i] = left;
+        // 耳とスピーカーを守るため、出力は ±1 を超えないようにする (NAM のモデルによっては大きな音が出る)
+        outLeft[i] = juce::jlimit (-1.0f, 1.0f, left);
         if (outRight != nullptr)
-            outRight[i] = right;
+            outRight[i] = juce::jlimit (-1.0f, 1.0f, right);
     }
+
+    if (guitarBlockPeak > guitarPeak.load())
+        guitarPeak.store (guitarBlockPeak);
 
     if (source != nullptr)
         positionSeconds.store (readPosition / source->sampleRate);

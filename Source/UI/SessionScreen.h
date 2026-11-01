@@ -11,6 +11,7 @@
 #include "Commands.h"
 #include "PracticeViews.h"
 #include "TunerPanel.h"
+#include "ToneDetailPanel.h"
 
 // 練習画面 (設計書 4.2)
 //   左: タブ譜 (alphaTab) と再生位置バー     右: 音源 (動画)・音色・ミキサー・ずらし (隠せる・幅を変えられる)
@@ -89,7 +90,11 @@ private:
     void toggleMetronome();
     void toggleMetronomeSolo();
     void toggleTuner();
-    void selectTone (int index);
+    void selectTone (int index, bool fromUser);   // index: 0〜2 が簡易な音色、3 が NAM
+    void loadNamTone();                           // セッションの NAM のファイルを、エンジンに読み込ませる
+    void updateToneSummary();
+    void toggleTonePanel();
+    void showOverlay (juce::Component* panel);    // チューナー・音色の設定を開いたとき (後ろを暗くする)
     void updateLoop();
 
     // 小節の頭 (ループの A・B を合わせる先)。タブ譜があればその拍子で、なければ 4/4 とみなす
@@ -155,7 +160,10 @@ private:
     juce::Label sourceInfoLabel;        // 動画の真下: YouTube の URL (ダブルクリックで変更) か、音源のファイル名
     TrashButton sourceRemoveButton;     // 音源を外す
     juce::TextButton chooseFileButton, pasteUrlButton;   // 音源がないとき
-    std::array<juce::TextButton, 3> toneButtons;
+    std::array<juce::TextButton, 4> toneButtons;   // クリーン・クランチ・歪み・NAM
+    juce::Label toneSummaryLabel;                  // NAM のモデルと IR の名前
+    juce::TextButton toneDetailButton;             // 音色の設定 (NAM) を開く
+    static constexpr int namToneIndex = 3;
     juce::Label sourceGainLabel, guitarGainLabel, metronomeGainLabel;
     WheelSlider sourceGainSlider, guitarGainSlider, metronomeGainSlider;
     juce::TextButton sourceMuteButton;   // 音源だけのミュート
@@ -182,5 +190,6 @@ private:
     FixedTextButton loopButton;
 
     std::unique_ptr<TunerPanel> tunerPanel;
-    DimOverlay dimOverlay;   // チューナーの後ろを暗くする
+    std::unique_ptr<ToneDetailPanel> tonePanel;
+    DimOverlay dimOverlay;   // チューナー・音色の設定の後ろを暗くする
 };

@@ -5,6 +5,7 @@
 #include <vector>
 #include <juce_audio_utils/juce_audio_utils.h>
 #include "../Model/TonePresets.h"
+#include "NamTone.h"
 
 // 音声処理の中心 (設計書 5.1)
 //
@@ -66,6 +67,41 @@ public:
     void setMetronomeGain (float gain) noexcept { metronomeGain.store (gain); }
     void setTone (ToneType type) noexcept       { tone.store ((int) type); }
 
+    //==== NAM の音色 (メッセージスレッドから呼ぶ) ====
+    // アンプのモデル (.nam) とキャビネットの IR (.wav) を、ワーカースレッドで読み込んでから差し替える。
+    // どちらかが空でもよい。両方空なら、NAM の音色を外す
+    void loadNamToneAsync (const juce::File& ampModel, const juce::File& cabinetIr, LoadCallback onDone);
+    void clearNamTone();
+
+    struct NamToneInfo
+    {
+        bool loading = false;
+        bool active = false;              // 読み込めていて、今のデバイスのサンプルレートで動いている
+        juce::String error;
+        juce::File ampFile, cabinetFile;
+        double modelSampleRate = 0.0;     // モデルを作ったときのサンプルレート (分からなければ 0)
+    };
+    NamToneInfo getNamToneInfo() const;
+
+    // ギターの入力の大きさ (dB)。NAM のモデルは、入る音の大きさで歪み方が変わる
+    void setInputGainDb (float db) noexcept { inputGain.store (juce::Decibels::decibelsToGain (db)); }
+
+    // メーター用: 前回読んでから今までの、ギターの入力と出力の最大値 (0〜1)。読むと 0 に戻る
+    float takeInputPeak() noexcept  { return inputPeak.exchange (0.0f); }
+    float takeOutputPeak() noexcept { return guitarPeak.exchange (0.0f); }
+
+    //==== デバイスの情報 (表示用) ====
+    struct DeviceInfo
+    {
+        juce::String typeName, deviceName;
+        double sampleRate = 0.0;
+        int bufferSize = 0;
+        double reportedLatencyMs = 0.0;   // 入力 + 出力の遅延 (ドライバが報告する値。設計書 1.4)
+        double cpuUsage = 0.0;            // 0〜1
+        bool hasInput = false;
+    };
+    DeviceInfo getDeviceInfo() const;
+
     //==== チューナー ====
     void setTunerActive (bool active) noexcept { tunerActive.store (active); }
     int readTunerInput (float* destination, int maxSamples) noexcept;  // UI スレッドから呼ぶ
@@ -73,9 +109,10 @@ public:
 private:
     struct LoadedAudio;
 
+    // 差し替えて使わなくなったもの (音源・音色)。オーディオスレッドが使い終わってから解放する
     struct RetiredSource
     {
-        std::shared_ptr<LoadedAudio> audio;
+        std::shared_ptr<void> object;
         juce::uint64 callbackCountAtRetire;
     };
 
@@ -91,6 +128,8 @@ private:
 
     std::shared_ptr<LoadedAudio> readAudioFile (const juce::File& file, juce::String& error);
     void installSource (std::shared_ptr<LoadedAudio> newSource);
+    void installNamTone (std::shared_ptr<NamTone> newTone);
+    void processGuitar (const float* input, int numSamples, int toneType) noexcept;
     void pushTunerInput (const float* data, int numSamples) noexcept;
     void triggerClick (bool accent, double sampleRate) noexcept;
     float renderClick() noexcept;
@@ -103,8 +142,18 @@ private:
     std::vector<RetiredSource> retired;
     int loadGeneration = 0;
 
+    std::shared_ptr<NamTone> ownedNamTone;
+    juce::File namAmpFile, namCabinetFile;   // 選ばれているファイル (デバイスの設定が変わったら、読み込み直す)
+    int namToneGeneration = 0;
+    bool namToneLoading = false;
+    juce::String namToneError;
+
     // スレッド間で共有する値
     std::atomic<LoadedAudio*> currentSource { nullptr };
+    std::atomic<NamTone*> currentNamTone { nullptr };
+    std::atomic<int> deviceBufferSize { 512 };
+    std::atomic<float> inputGain { 1.0f };
+    std::atomic<float> inputPeak { 0.0f }, guitarPeak { 0.0f };
     std::atomic<juce::uint64> callbackCount { 0 };
     std::atomic<double> deviceSampleRate { 48000.0 };
     std::atomic<bool> playing { false };
@@ -127,6 +176,10 @@ private:
     static constexpr int tunerFifoSize = 16384;
     juce::AbstractFifo tunerFifo { tunerFifoSize };
     std::vector<float> tunerBuffer = std::vector<float> ((size_t) tunerFifoSize);
+
+    // ギターの音を、まとめて (ブロックごとに) 処理するための場所。NAM はブロック単位で処理するため
+    static constexpr int maxGuitarBlock = 16384;
+    std::vector<float> guitarBuffer = std::vector<float> ((size_t) maxGuitarBlock, 0.0f);
 
     // オーディオスレッドだけが触る
     double readPosition = 0.0;  // 音源のサンプル位置

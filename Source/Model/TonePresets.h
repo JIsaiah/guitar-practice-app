@@ -3,12 +3,15 @@
 #include <array>
 #include "../Text.h"
 
-// 音色スロットの種類。NAM を組み込むまでの仮実装 (AudioEngine で簡易な歪みをかける)
+// 音色の種類
+//   clean / crunch / drive: 簡易な音色 (AudioEngine で tanh による歪みをかける。ファイルなしで、すぐ音が出る)
+//   nam: NAM のアンプのモデル (.nam) とキャビネットの IR (.wav)。ファイルを選んで使う (設計書 #6)
 enum class ToneType
 {
     clean = 0,
     crunch,
-    drive
+    drive,
+    nam
 };
 
 struct TonePreset
@@ -18,6 +21,7 @@ struct TonePreset
     ToneType type;
 };
 
+// 簡易な音色 (ファイルなしで使える3つ)
 inline const std::array<TonePreset, 3>& getTonePresets()
 {
     static const std::array<TonePreset, 3> presets {{
@@ -27,6 +31,9 @@ inline const std::array<TonePreset, 3>& getTonePresets()
     }};
     return presets;
 }
+
+// NAM の音色 (セッションの tone.preset_id に入る値)
+inline constexpr const char* namTonePresetId = "nam";
 
 inline int findTonePresetIndex (const juce::String& id)
 {

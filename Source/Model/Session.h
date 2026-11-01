@@ -50,7 +50,10 @@ struct Session
     double mixGuitar = 1.0;
     double mixMetronome = 0.8;
 
-    juce::String tonePresetId = "clean-01";
+    juce::String tonePresetId = "clean-01";   // 簡易な音色の ID か、"nam"
+    juce::String namModelPath;                 // NAM のアンプのモデル (.nam)
+    juce::String irPath;                       // キャビネットの IR (.wav)
+    double inputGainDb = 0.0;                  // ギターの入力の大きさ (dB)
 
     juce::var toVar() const;
     static Session fromVar (const juce::var& value);

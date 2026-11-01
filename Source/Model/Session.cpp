@@ -85,7 +85,12 @@ juce::var Session::toVar() const
         { "layout",   makeObject ({ { "video_in_main_area", videoInMainArea } }) },
         { "loop",     makeObject ({ { "a_ms", loopStartMs }, { "b_ms", loopEndMs }, { "enabled", loopEnabled } }) },
         { "mixer",    makeObject ({ { "source", mixSource }, { "guitar", mixGuitar }, { "metronome", mixMetronome } }) },
-        { "tone",     makeObject ({ { "type", "builtin" }, { "preset_id", tonePresetId }, { "vst3", emptyArray() } }) },
+        { "tone",     makeObject ({ { "type", tonePresetId == "nam" ? "nam" : "builtin" },
+                                    { "preset_id", tonePresetId },
+                                    { "nam_model", namModelPath },
+                                    { "ir", irPath },
+                                    { "input_gain_db", inputGainDb },
+                                    { "vst3", emptyArray() } }) },
     });
 }
 
@@ -123,7 +128,11 @@ Session Session::fromVar (const juce::var& value)
     s.mixGuitar = getOr<double> (mixer["guitar"], 1.0);
     s.mixMetronome = getOr<double> (mixer["metronome"], 0.8);
 
-    s.tonePresetId = getOr<juce::String> (value["tone"]["preset_id"], "clean-01");
+    const auto& tone = value["tone"];
+    s.tonePresetId = getOr<juce::String> (tone["preset_id"], "clean-01");
+    s.namModelPath = getOr<juce::String> (tone["nam_model"], {});
+    s.irPath = getOr<juce::String> (tone["ir"], {});
+    s.inputGainDb = getOr<double> (tone["input_gain_db"], 0.0);
 
     return s;
 }

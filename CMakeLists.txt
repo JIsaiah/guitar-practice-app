@@ -28,6 +28,52 @@ if(NOT EXISTS ${WEBVIEW2_DIR}/build/native/include/WebView2.h)
 endif()
 set(JUCE_WEBVIEW2_PACKAGE_LOCATION ${WEBVIEW2_PACKAGES})
 
+# ASIO SDK (Steinberg)。ASIO ドライバーで、低い遅延でギターの音を出すのに使う (設計書 #13、PoC-1)
+# ライセンスは Steinberg の独自ライセンスと GPL v3 の二重ライセンス。このアプリ (AGPL v3) では GPL v3 を選ぶ
+# 公式サイトの ZIP を、初回の構成時にだけ取得する (ハッシュで確認)。使うのはヘッダー (common/) だけ
+set(ASIOSDK_DIR ${CMAKE_BINARY_DIR}/asiosdk/ASIOSDK)
+if(NOT EXISTS ${ASIOSDK_DIR}/common/iasiodrv.h)
+    file(DOWNLOAD https://download.steinberg.net/sdk_downloads/ASIO-SDK_2.3.4_2025-10-15.zip
+         ${CMAKE_BINARY_DIR}/asiosdk/asiosdk.zip
+         EXPECTED_HASH SHA256=D5EBF0C20DD2C5F43771FD0C1418F4B361BF52434EE670097CFA6B3A335E2ECA)
+    file(ARCHIVE_EXTRACT INPUT ${CMAKE_BINARY_DIR}/asiosdk/asiosdk.zip DESTINATION ${CMAKE_BINARY_DIR}/asiosdk)
+endif()
+
+# NeuralAmpModelerCore (MIT)。NAM のアンプのモデル (.nam) と、キャビネットの IR (.wav) を動かす
+# 依存: Eigen (MPL-2.0。サブモジュールとして取得) と nlohmann/json (MIT。リポジトリに同梱)
+# SOURCE_SUBDIR に存在しないフォルダを指定して、取得だけ行う (付属のツールやテストはビルドしない)
+FetchContent_Declare(NeuralAmpModelerCore
+    GIT_REPOSITORY https://github.com/sdatkinson/NeuralAmpModelerCore.git
+    GIT_TAG        v0.6.0
+    GIT_SHALLOW    TRUE
+    GIT_SUBMODULES "Dependencies/eigen"
+    SOURCE_SUBDIR  do-not-build)
+FetchContent_MakeAvailable(NeuralAmpModelerCore)
+
+set(NAM_DIR ${neuralampmodelercore_SOURCE_DIR})
+file(GLOB NAM_SOURCES ${NAM_DIR}/NAM/*.cpp ${NAM_DIR}/NAM/wavenet/*.cpp)
+# OBJECT ライブラリにする (STATIC だと動かない): NAM はモデルの種類 (WaveNet など) を、起動時に自分で一覧へ登録する。
+# 静的ライブラリにすると、どこからも直接呼ばれない登録のコードをリンカーが捨て、「WaveNet を読めない」エラーになる
+add_library(nam OBJECT ${NAM_SOURCES})
+target_include_directories(nam SYSTEM PUBLIC
+    ${NAM_DIR}
+    ${NAM_DIR}/NAM
+    ${NAM_DIR}/Dependencies/eigen
+    ${NAM_DIR}/Dependencies/nlohmann)
+target_compile_definitions(nam PUBLIC
+    NAM_SAMPLE_FLOAT     # 音のデータを float で受け渡す (JUCE と同じ)
+    EIGEN_NO_DEBUG       # Eigen の確認処理を外す (オーディオスレッドで重くならないように)
+    NOMINMAX)
+target_compile_features(nam PUBLIC cxx_std_20)
+if(MSVC)
+    # Eigen は最適化しないと極端に遅く、リアルタイムに間に合わないため、Debug ビルドでも最適化する
+    # (/O2 が Debug の /Od を上書きする。コマンドラインの警告 D9025 が出るが問題ない)
+    target_compile_options(nam PRIVATE /utf-8 /bigobj $<$<CONFIG:Debug>:/O2 /Ob2>)
+    # /O2 と、Debug の実行時チェック (/RTC1) は同時に使えない。プロジェクト全体の Debug から /RTC1 を外す
+    string(REPLACE "/RTC1" "" CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG}")
+    string(REPLACE "/RTC1" "" CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG}")
+endif()
+
 juce_add_gui_app(GuitarPractice
     PRODUCT_NAME "Guitar Practice"
     COMPANY_NAME "GuitarPractice"
@@ -43,6 +89,9 @@ target_sources(GuitarPractice PRIVATE
     Source/Web/ScoreViewer.cpp
     Source/Web/WebResources.cpp
     Source/Audio/AudioEngine.cpp
+    Source/Audio/NamTone.cpp
+    Source/DevAudioCheck.cpp
+    Source/UI/ToneDetailPanel.cpp
     Source/Model/Session.cpp
     Source/Model/SessionStore.cpp
     Source/UI/MainComponent.cpp
@@ -78,6 +127,7 @@ target_compile_definitions(GuitarPractice PRIVATE
     JUCE_USE_WIN_WEBVIEW2_WITH_STATIC_LINKING=1
     JUCE_USE_CURL=0
     JUCE_USE_MP3AUDIOFORMAT=1
+    JUCE_ASIO=1
     JUCE_APPLICATION_NAME_STRING="$<TARGET_PROPERTY:GuitarPractice,JUCE_PRODUCT_NAME>"
     JUCE_APPLICATION_VERSION_STRING="$<TARGET_PROPERTY:GuitarPractice,JUCE_VERSION>")
 
@@ -86,8 +136,12 @@ if(MSVC)
     target_compile_options(GuitarPractice PRIVATE /utf-8)
 endif()
 
+# ASIO SDK のヘッダー (JUCE が iasiodrv.h を読む)
+target_include_directories(GuitarPractice PRIVATE ${ASIOSDK_DIR}/common)
+
 target_link_libraries(GuitarPractice
     PRIVATE
+        nam
         GuitarPracticeData
         juce::juce_audio_utils
         juce::juce_gui_extra

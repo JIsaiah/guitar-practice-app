@@ -1,6 +1,7 @@
 #include <juce_gui_extra/juce_gui_extra.h>
 #include "Audio/AudioEngine.h"
 #include "AppSettings.h"
+#include "DevAudioCheck.h"
 #include "DevSnapshots.h"
 #include "Model/SessionStore.h"
 #include "Theme/ThemeManager.h"
@@ -21,6 +22,14 @@ public:
         {
             DevSnapshots::renderAll (juce::File (commandLine.fromFirstOccurrenceOf (DevSnapshots::commandLineFlag, false, false)
                                                             .trim().unquoted()));
+            quit();
+            return;
+        }
+
+        // 開発用: オーディオデバイスの一覧と、NAM の処理時間を確かめて終わる (DevAudioCheck.h)
+        if (commandLine.contains (DevAudioCheck::commandLineFlag))
+        {
+            DevAudioCheck::run (commandLine);
             quit();
             return;
         }

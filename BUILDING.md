@@ -6,6 +6,12 @@
 
 WebView2 SDK (YouTube の埋め込みに使う) も、初回の構成時に `build\webview2\` へ自動で取得されます (NuGet から。ハッシュで確認)。実行には WebView2 ランタイムが必要です (Windows 11 には標準で入っています)。
 
+ASIO SDK (Steinberg。GPL v3 との二重ライセンス) も、初回の構成時に公式サイトから `build\asiosdk\` へ自動で取得されます (ハッシュで確認)。使うのはヘッダーだけです。
+
+NeuralAmpModelerCore v0.6.0 (MIT。NAM の音色) と、その依存の Eigen (MPL-2.0)・nlohmann/json (MIT) も、初回の構成時に自動で取得されます。NAM の部分は Debug ビルドでも最適化してコンパイルします (Eigen は最適化しないとリアルタイムに間に合わないため)。
+
+開発用の確認 (Debug のみ): `"Guitar Practice.exe" --audio-check <出力フォルダ> --nam <モデル.nam> [--ir <IR.wav>]` で、使えるオーディオデバイスの一覧と、NAM の処理時間を `audio-check.txt` に書き出します (音は出しません)。
+
 デザイントークン (`design/tokens.json`) を変えたときは、ビルドの前に `python design/generate_tokens.py` を実行します (`design/README.md`)。
 
 ```powershell
@@ -26,6 +32,9 @@ cmake --build build --config Debug
 | --- | --- |
 | `Source/Main.cpp` | アプリの起動・終了、ウィンドウ |
 | `Source/Audio/AudioEngine` | 音声処理 (ギター入力→音色、ローカル音源、メトロノーム、3系統ミキサー、チューナー入力) |
+| `Source/Audio/NamTone` | NAM の音色 (アンプのモデル .nam + キャビネットの IR .wav) |
+| `Source/UI/ToneDetailPanel` | 音色の設定 (NAM のファイル、入力の大きさ、メーター、デバイスの情報) |
+| `Source/DevAudioCheck` | 開発用 (Debug のみ): `--audio-check` でデバイスの一覧と NAM の処理時間を確かめる |
 | `Source/Audio/TapTempo.h`, `PitchDetector.h` | タップテンポ、音程検出 |
 | `Source/Model/Session`, `SessionStore` | セッションのデータと `.gppractice` の読み書き |
 | `Source/UI/MainComponent` | 画面遷移 (一覧 → 作成 → セッション → 一覧) |
