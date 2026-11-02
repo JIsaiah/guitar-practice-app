@@ -1,6 +1,7 @@
 #pragma once
 
 #include <set>
+#include "../AppSettings.h"
 #include "SetlistCard.h"
 
 // 一覧画面の「セットリスト」タブの中身 (setlist-mode.md 4.2、4.5)
@@ -8,7 +9,7 @@
 class SetlistPanel final : public juce::Component
 {
 public:
-    SetlistPanel (SessionLibrary& library, SetlistStore& store, ThemeManager& theme);
+    SetlistPanel (SessionLibrary& library, SetlistStore& store, ThemeManager& theme, AppSettings& settings);
 
     void refresh();   // ファイルから読み直す
 
@@ -30,10 +31,11 @@ private:
     SessionLibrary& library;
     SetlistStore& store;
     ThemeManager& theme;
+    AppSettings& settings;
 
     juce::Viewport viewport;
     juce::Component content;
     juce::TextButton newButton;
     std::vector<std::unique_ptr<SetlistCard>> cards;
-    std::set<juce::String> expandedIds;   // 読み直しても、開いていたカードは開いたままにする
+    std::set<juce::String> expandedIds;   // 開いていたカード。設定に保存し、練習画面から戻ったときや次の起動でも開いたままにする
 };

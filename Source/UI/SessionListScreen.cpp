@@ -13,7 +13,7 @@ SessionListScreen::SessionListScreen (SessionLibrary& l, SetlistStore& sl, Theme
       sessionsTab (t), setlistsTab (t),
       newButton (t), openButton (t), deleteButton (t), settingsButton (t),
       deathMetalToggle (t, FixedTextId::DeathMetalMode),
-      setlistPanel (l, sl, t)
+      setlistPanel (l, sl, t, a)
 {
     appTitle.setFont (juce::FontOptions (24.0f, juce::Font::bold));
     addAndMakeVisible (appTitle);

@@ -16,6 +16,7 @@ public:
 
         testOverridesAreIndependent();
         testSharedSettings();
+        testLoopSuspendedInSetlistPlay();
 
         folder.deleteRecursively();
     }
@@ -151,6 +152,61 @@ private:
         expectEquals (session.namModelPath, juce::String ("C:/Models/amp.nam"));
         expectEquals (session.mixGuitar, 0.5);
         expectEquals (session.syncOffsetMs, 40);
+    }
+
+    // 通し再生ではループを外して開く。触らなければ、エントリの「有効」は元のまま (作者の指示)
+    void testLoopSuspendedInSetlistPlay()
+    {
+        beginTest ("Loop is turned off in setlist play, and kept unless toggled");
+
+        SetlistEntry::Overrides overrides;
+        overrides.loopEnabled = true;
+        overrides.loopStartSec = 10.0;
+        overrides.loopEndSec = 20.0;
+
+        Session stored;
+        stored.speedPercent = 100;
+
+        // 開くと外れている。範囲は残る
+        {
+            PlaybackSettingsResolver resolver (overrides);
+            const auto working = resolver.makeWorkingCopy (stored, true);
+            expect (! working.loopEnabled);
+            expectEquals (working.loopStartMs, 10000);
+            expectEquals (working.loopEndMs, 20000);
+
+            // 速度だけ変えて保存しても、ループの「有効」は消えない
+            auto changed = working;
+            changed.speedPercent = 80;
+            const auto split = resolver.split (changed);
+            expect (split.overrides->loopEnabled);
+            expectEquals (split.overrides->speed, 0.8);
+        }
+
+        // 開いている間に自分でループを入れたら、それを保存する
+        {
+            PlaybackSettingsResolver resolver (overrides);
+            auto working = resolver.makeWorkingCopy (stored, true);
+            working.loopEnabled = true;
+            working.loopStartMs = 12000;
+            const auto split = resolver.split (working);
+            expect (split.overrides->loopEnabled);
+            expectEquals (split.overrides->loopStartSec, 12.0);
+        }
+
+        // 外さずに開くとき (suspendLoop = false) は、今までどおり
+        {
+            PlaybackSettingsResolver resolver (overrides);
+            expect (resolver.makeWorkingCopy (stored).loopEnabled);
+        }
+
+        // 単体 (Standalone) では外さない
+        {
+            Session looped;
+            looped.loopEnabled = true;
+            PlaybackSettingsResolver standalone;
+            expect (standalone.makeWorkingCopy (looped, true).loopEnabled);
+        }
     }
 
     juce::File folder;

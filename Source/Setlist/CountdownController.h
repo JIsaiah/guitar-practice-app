@@ -32,3 +32,21 @@ private:
     State state = State::stopped;
     double endMs = 0.0;
 };
+
+// 再生ボタン (と Space キー) の押し方 (作者の指示)。「すぐに始める」は数字のクリックではなく、ボタンの2回押しにまとめた
+//   止まっている     → 1回: カウントダウン。続けてもう1回: すぐに始める
+//   カウントダウン中 → 間をあけて1回: 中止。続けてもう1回: すぐに始める (セットリストの自動のカウントダウンも同じ)
+//   再生中           → 1回: 止める (ただし、待ち時間 0 秒で始めた直後の2回目は無視する)
+class PlayButtonPresses
+{
+public:
+    enum class Action { none, startCountdown, startNow, cancel, pause };
+
+    Action press (double nowMs, bool countingDown, bool playing);
+
+    static constexpr double quickPressMs = 500.0;   // 【仮決め】「続けて」とみなす間隔 (Windows のダブルクリックの既定に近い値)
+
+private:
+    double lastPressMs = -1.0e9;
+    Action lastAction = Action::none;
+};

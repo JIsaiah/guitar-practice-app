@@ -63,6 +63,44 @@ public:
             expectEquals (finished, 1);
         }
 
+        beginTest ("Play button: press twice to start now, a late second press cancels");
+        {
+            using A = PlayButtonPresses::Action;
+
+            // 止まっている → 1回目でカウントダウン、続けて2回目ですぐに始める
+            {
+                PlayButtonPresses p;
+                expect (p.press (1000.0, false, false) == A::startCountdown);
+                expect (p.press (1300.0, true, false) == A::startNow);
+            }
+
+            // カウントダウン中に間をあけて押すと中止
+            {
+                PlayButtonPresses p;
+                expect (p.press (1000.0, false, false) == A::startCountdown);
+                expect (p.press (2500.0, true, false) == A::cancel);
+                expect (p.press (5000.0, false, false) == A::startCountdown);   // 間をあければ、またカウントダウン
+            }
+
+            // 自動のカウントダウン中に2回押す → 中止のあと、すぐに始める
+            {
+                PlayButtonPresses p;
+                expect (p.press (10000.0, true, false) == A::cancel);
+                expect (p.press (10300.0, false, false) == A::startNow);
+            }
+
+            // 再生中は止める。待ち時間 0 秒で始めた直後の2回目は無視する
+            {
+                PlayButtonPresses p;
+                expect (p.press (1000.0, false, true) == A::pause);
+
+                PlayButtonPresses zero;
+                expect (zero.press (1000.0, false, false) == A::startCountdown);
+                expect (zero.press (1200.0, false, true) == A::none);
+                expect (zero.press (3000.0, false, true) == A::pause);
+            }
+        }
+
         beginTest ("8. Can restart from onFinished (next song)");
         {
             CountdownController c;

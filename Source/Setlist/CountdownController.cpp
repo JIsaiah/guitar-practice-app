@@ -37,6 +37,23 @@ int CountdownController::getDisplayNumber (double nowMs) const
     return juce::jmax (1, (int) std::ceil ((endMs - nowMs) / 1000.0));
 }
 
+PlayButtonPresses::Action PlayButtonPresses::press (double nowMs, bool countingDown, bool playing)
+{
+    const auto quick = nowMs - lastPressMs <= quickPressMs;
+
+    auto action = Action::startCountdown;
+    if (countingDown)
+        action = quick ? Action::startNow : Action::cancel;
+    else if (playing)
+        action = quick && lastAction == Action::startCountdown ? Action::none : Action::pause;
+    else if (quick && lastAction == Action::cancel)
+        action = Action::startNow;
+
+    lastPressMs = nowMs;
+    lastAction = action;
+    return action;
+}
+
 void CountdownController::finish()
 {
     // onFinished の中で、もう一度 start() してもよいように、先に状態を戻す

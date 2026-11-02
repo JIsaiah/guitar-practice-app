@@ -11,6 +11,9 @@
 // 練習画面は、これまでどおり Session の値 (speedPercent、loop…) を読み書きする。
 // - 開くとき: makeWorkingCopy() で、速度・ループをエントリの専用設定に置き換えた「画面で使う値」を作る
 // - 保存するとき: split() で、セッションに保存する分 (速度・ループは単体の値に戻す) と、エントリに保存する分に分ける
+//
+// 通し再生では、ループ (くり返し) を外して開く (作者の指示: 最初から最後まで通すため)。
+// 範囲は残す。開いている間にループを自分で入・切しなければ、保存してもエントリの「有効」は元のまま
 class PlaybackSettingsResolver
 {
 public:
@@ -19,7 +22,8 @@ public:
 
     bool usesOverrides() const noexcept { return overrides.has_value(); }
 
-    Session makeWorkingCopy (const Session& stored);
+    // suspendLoop: ループを外して開く (Setlist のときだけ効く)
+    Session makeWorkingCopy (const Session& stored, bool suspendLoop = false);
 
     struct Split
     {
@@ -38,4 +42,8 @@ private:
     int storedSpeedPercent = 100;
     int storedLoopStartMs = 0, storedLoopEndMs = 0;
     bool storedLoopEnabled = false;
+
+    // ループを外して開いたとき: 開いたときの「有効」(false) と、エントリに保存されていた「有効」
+    bool loopSuspended = false;
+    bool overrideLoopEnabled = false;
 };

@@ -6,6 +6,9 @@
 #include "../Library/SetlistStore.h"
 #include "../Session/PlaybackSettingsResolver.h"
 #include "../Session/SessionOpenContext.h"
+#include "../Setlist/SetlistPlayer.h"
+
+class SessionScreen;
 #include "../Theme/ThemeManager.h"
 #include "../AppSettings.h"
 #include "../Web/YouTubePlayer.h"
@@ -28,7 +31,10 @@ private:
     void showList();
     void showSetup();
     void showSession (Session session, SessionOpenContext context = {}, PlaybackSettingsResolver resolver = {});
-    void openSetlistEntryLater (const juce::String& setlistId, int entryIndex);
+    // セットリストの曲を開き、startDelaySeconds 待ってから自動で再生を始める (setlist-mode.md 5、7)。負なら開くだけ
+    void openSetlistEntryLater (const juce::String& setlistId, int entryIndex, double startDelaySeconds);
+    void connectSetlist (SessionScreen& screen, const juce::String& setlistId, const juce::String& entryId);
+    std::optional<SetlistPlayer> makeSetlistPlayer (const juce::String& setlistId, const juce::String& entryId);
     void openSessionLater (std::function<std::optional<Session> (MainComponent&)> load);
     void openSettings();
     void openLogoTuner();
@@ -44,6 +50,9 @@ private:
     ThemeManager& theme;
     AppSettings& settings;
     std::unique_ptr<juce::Component> currentScreen;
+
+    // 通し再生: 曲が終わったら次の曲へ進むか (「通し再生を止める」で false。次・前・再開で true に戻る)
+    bool setlistAutoAdvance = true;
 
     // YouTube のプレイヤー (WebView)。アプリの起動中に1つだけ作り、練習画面に貸す (実装指示 T5)
     YouTubePlayer youtubePlayer;

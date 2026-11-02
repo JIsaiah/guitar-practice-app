@@ -123,6 +123,16 @@ void YouTubePlayer::setLoop (double startSeconds, double endSeconds, bool enable
     send (makeCommand ("loop", { { "a", startSeconds }, { "b", endSeconds }, { "on", enabled } }));
 }
 
+void YouTubePlayer::warmUp()
+{
+    send (makeCommand ("warmUp"));
+}
+
+void YouTubePlayer::showCountdown (int number, const juce::String& caption)
+{
+    send (makeCommand ("countdown", { { "number", number }, { "caption", caption } }));
+}
+
 double YouTubePlayer::getEstimatedTime() const
 {
     if (! isPlaying())

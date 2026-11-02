@@ -73,7 +73,10 @@ void MainComponent::showList()
     };
     screen->onPlaySetlist = [this] (const juce::String& setlistId, int entryIndex)
     {
-        openSetlistEntryLater (setlistId, entryIndex);
+        // 「通しで再生」「この曲から通しで再生」: 1曲目は開くだけで、再生は自分で始める (作者の指示)。
+        // 2曲目からは自動で送る
+        setlistAutoAdvance = true;
+        openSetlistEntryLater (setlistId, entryIndex, -1.0);
     };
 
     setScreen (std::move (screen));
@@ -103,11 +106,11 @@ void MainComponent::openSessionLater (std::function<std::optional<Session> (Main
     });
 }
 
-void MainComponent::openSetlistEntryLater (const juce::String& setlistId, int entryIndex)
+void MainComponent::openSetlistEntryLater (const juce::String& setlistId, int entryIndex, double startDelaySeconds)
 {
     // セットリストから開く: 速度・ループはエントリの専用設定、それ以外はセッションの設定 (setlist-mode.md 3.5、3.6)
     const auto clickedAt = TimingLog::now();
-    navigate ([setlistId, entryIndex, clickedAt] (MainComponent& m)
+    navigate ([setlistId, entryIndex, startDelaySeconds, clickedAt] (MainComponent& m)
     {
         const auto setlist = m.setlistStore.load (setlistId);
         if (setlist.has_value() && juce::isPositiveAndBelow (entryIndex, (int) setlist->entries.size()))
@@ -115,9 +118,19 @@ void MainComponent::openSetlistEntryLater (const juce::String& setlistId, int en
             const auto& entry = setlist->entries[(size_t) entryIndex];
             if (auto session = m.library.load (entry.sessionId))
             {
+                // 通し再生なので、ループ (くり返し) は外して開く (作者の指示)
                 PlaybackSettingsResolver resolver (entry.overrides);
-                auto working = resolver.makeWorkingCopy (*session);
+                auto working = resolver.makeWorkingCopy (*session, true);
                 m.showSession (std::move (working), SessionOpenContext::forSetlist (setlistId, entry.entryId), std::move (resolver));
+
+                // 次の曲は、待っている間に読み込む (読み込みが間に合わなければ「読み込み中…」のあとに始まる)
+                if (auto* screen = dynamic_cast<SessionScreen*> (m.currentScreen.get()))
+                {
+                    m.connectSetlist (*screen, setlistId, entry.entryId);
+                    if (startDelaySeconds >= 0.0)
+                        screen->startAutomatically (startDelaySeconds);
+                }
+
                 m.pendingPaintMark = PendingMark { "3. 開く → 練習画面の表示"_jp, clickedAt, false };
                 m.sessionOpenedAtMs = clickedAt;
                 return;
@@ -128,6 +141,100 @@ void MainComponent::openSetlistEntryLater (const juce::String& setlistId, int en
                                                 "開けませんでした"_jp,
                                                 "セットリストか、その曲のセッションが見つかりません。"_jp);
     });
+}
+
+std::optional<SetlistPlayer> MainComponent::makeSetlistPlayer (const juce::String& setlistId, const juce::String& entryId)
+{
+    // 練習中にセットリストが変わっていてもよいように、毎回ファイルから作る
+    auto setlist = setlistStore.load (setlistId);
+    if (! setlist.has_value())
+        return std::nullopt;
+
+    return SetlistPlayer (std::move (*setlist), [this] (const juce::String& id) { return library.contains (id); }, entryId);
+}
+
+void MainComponent::connectSetlist (SessionScreen& screen, const juce::String& setlistId, const juce::String& entryId)
+{
+    const auto safe = juce::Component::SafePointer<SessionScreen> (&screen);
+
+    const auto refreshInfo = [this, safe, setlistId, entryId]
+    {
+        auto player = makeSetlistPlayer (setlistId, entryId);
+        if (safe == nullptr || ! player.has_value())
+            return;
+
+        SetlistBar::Info info;
+        info.setlistName = player->getSetlist().name;
+        info.position = player->getCurrentIndex() + 1;
+        info.count = player->getNumEntries();
+        if (const auto* next = player->getNext())
+        {
+            const auto title = library.getTitle (next->sessionId);
+            info.nextTitle = title.isNotEmpty() ? title : "(無題)"_jp;
+        }
+        info.hasPrevious = player->hasPrevious();
+        info.hasNext = player->hasNext();
+        info.autoAdvance = setlistAutoAdvance;
+        safe->setSetlistInfo (info);
+    };
+    refreshInfo();
+
+    // 次・前の曲へ。今の曲の変更は保存してから移る
+    const auto moveTo = [this, safe, setlistId] (int index, double delaySeconds)
+    {
+        if (safe != nullptr)
+        {
+            safe->stopForSetlist();
+            safe->saveChangesQuietly();
+        }
+        openSetlistEntryLater (setlistId, index, delaySeconds);
+    };
+
+    // 曲が終わった: 曲間の待ち時間のあとに次の曲。最後の曲なら終わり (setlist-mode.md 7.1、7.4)
+    screen.onSongFinished = [this, safe, setlistId, entryId, moveTo]
+    {
+        auto player = makeSetlistPlayer (setlistId, entryId);
+        if (safe == nullptr || ! player.has_value() || ! setlistAutoAdvance)
+            return;
+
+        const auto next = player->findNext();
+        if (next < 0)
+            safe->showSetlistEnd();
+        else
+            moveTo (next, settings.getSongGapSeconds());
+    };
+
+    // 手で次・前へ移ったときも、自動送りと同じ待ち時間 (作者の指示でひとつにした)
+    screen.onSetlistNext = [this, setlistId, entryId, moveTo]
+    {
+        if (auto player = makeSetlistPlayer (setlistId, entryId); player.has_value() && player->hasNext())
+        {
+            setlistAutoAdvance = true;
+            moveTo (player->findNext(), settings.getSongGapSeconds());
+        }
+    };
+    screen.onSetlistPrevious = [this, setlistId, entryId, moveTo]
+    {
+        if (auto player = makeSetlistPlayer (setlistId, entryId); player.has_value() && player->hasPrevious())
+        {
+            setlistAutoAdvance = true;
+            moveTo (player->findPrevious(), settings.getSongGapSeconds());
+        }
+    };
+
+    // 「通し再生を止める」: 今の曲を止め、曲が終わっても次へ進まない。「再開」で今の曲から始め直す
+    screen.onSetlistAutoAdvanceToggled = [this, safe, refreshInfo] (bool resume)
+    {
+        setlistAutoAdvance = resume;
+        if (safe != nullptr)
+        {
+            if (resume)
+                safe->startAutomatically (settings.getSongGapSeconds());
+            else
+                safe->stopForSetlist();
+        }
+        refreshInfo();
+    };
 }
 
 void MainComponent::showSetup()
@@ -153,6 +260,10 @@ void MainComponent::showSetup()
 
 void MainComponent::showSession (Session session, SessionOpenContext context, PlaybackSettingsResolver resolver)
 {
+    // 前の画面を先に消す。練習画面から練習画面へ移るとき (セットリストの次の曲)、
+    // 前の画面の後片付け (音源を外す、YouTube の動画を外す) が、新しい画面の読み込みを消してしまうため
+    currentScreen.reset();
+
     auto screen = std::make_unique<SessionScreen> (engine, store, theme, settings, youtubePlayer, scoreViewer, std::move (session),
                                                    context, std::move (resolver));
 

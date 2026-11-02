@@ -4,6 +4,8 @@ namespace
 {
     constexpr const char* skipKey = "skipSeconds";
     constexpr const char* preStartDelayKey = "preStartDelaySeconds";
+    constexpr const char* songGapKey = "setlistCountdownSeconds";   // 前の "songGapSeconds" (既定 5) は引き継がない
+    constexpr const char* expandedSetlistsKey = "expandedSetlists";
     constexpr const char* wheelSpeedKey = "wheelStepSpeed";
     constexpr const char* wheelBpmKey = "wheelStepBpm";
     constexpr const char* wheelVolumeKey = "wheelStepVolume";
@@ -18,6 +20,7 @@ AppSettings::AppSettings (juce::PropertiesFile& f)
 {
     skipSeconds = juce::jlimit (minSkipSeconds, maxSkipSeconds, file.getIntValue (skipKey, 5));
     preStartDelaySeconds = juce::jlimit (0, maxPreStartDelaySeconds, file.getIntValue (preStartDelayKey, defaultPreStartDelaySeconds));
+    songGapSeconds = juce::jlimit (0, maxSongGapSeconds, file.getIntValue (songGapKey, defaultSongGapSeconds));
     wheel.speedPercent = juce::jlimit (1, 50, file.getIntValue (wheelSpeedKey, 5));
     wheel.bpm = juce::jlimit (1, 20, file.getIntValue (wheelBpmKey, 1));
     wheel.volumePercent = juce::jlimit (1, 50, file.getIntValue (wheelVolumeKey, 5));
@@ -61,6 +64,27 @@ void AppSettings::setPreStartDelaySeconds (int seconds)
     }
 }
 
+void AppSettings::setSongGapSeconds (int seconds)
+{
+    seconds = juce::jlimit (0, maxSongGapSeconds, seconds);
+    if (seconds != songGapSeconds)
+    {
+        songGapSeconds = seconds;
+        save();
+    }
+}
+
+juce::StringArray AppSettings::getExpandedSetlists() const
+{
+    return juce::StringArray::fromTokens (file.getValue (expandedSetlistsKey), ",", {});
+}
+
+void AppSettings::setExpandedSetlists (const juce::StringArray& setlistIds)
+{
+    // カードを開閉したときだけ変わるので、知らせは出さずに保存する
+    file.setValue (expandedSetlistsKey, setlistIds.joinIntoString (","));
+}
+
 void AppSettings::setWheelSteps (const WheelSteps& steps)
 {
     wheel = steps;
@@ -78,6 +102,7 @@ void AppSettings::save()
 {
     file.setValue (skipKey, skipSeconds);
     file.setValue (preStartDelayKey, preStartDelaySeconds);
+    file.setValue (songGapKey, songGapSeconds);
     file.setValue (wheelSpeedKey, wheel.speedPercent);
     file.setValue (wheelBpmKey, wheel.bpm);
     file.setValue (wheelVolumeKey, wheel.volumePercent);

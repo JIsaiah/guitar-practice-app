@@ -12,6 +12,8 @@
 #include "../Web/ScoreViewer.h"
 #include "../Web/YouTubePlayer.h"
 #include "Commands.h"
+#include "CountdownOverlay.h"
+#include "SetlistBar.h"
 #include "PracticeViews.h"
 #include "TunerPanel.h"
 #include "ToneDetailPanel.h"
@@ -38,6 +40,19 @@ public:
     std::function<bool (const SetlistEntry::Overrides&)> onSaveOverrides;
 
     void perform (Command command);
+
+    //==== セットリスト (Setlist で開いたとき。setlist-mode.md 5、7) ====
+    void setSetlistInfo (const SetlistBar::Info& info);   // 下のメニューに出す内容
+    // 待ち時間のあとに自動で再生を始める (曲間・「通しで再生」)。音源の準備がまだなら、できしだい始める
+    void startAutomatically (double delaySeconds);
+    void stopForSetlist();         // 「通し再生を止める」: 今の曲とカウントダウンを止める
+    void showSetlistEnd();         // 最後の曲が終わった
+    void saveChangesQuietly();     // 次の曲へ移る前に、未保存の変更を保存する
+
+    std::function<void()> onSongFinished;                  // 曲が最後まで再生された (ループ中は来ない)
+    std::function<void()> onSetlistPrevious, onSetlistNext;
+    std::function<void (bool resume)> onSetlistAutoAdvanceToggled;
+    void startCountdownForSnapshot();   // 開発用 (DevSnapshots): 音源なしでカウントダウンの表示を出す
 
     void paint (juce::Graphics& g) override;
     void resized() override;
@@ -92,6 +107,10 @@ private:
     void togglePlay();
     void startPlayback();      // カウントダウンが終わったら呼ぶ
     void updatePlayButton();
+    void updateCountdownDisplay();   // 画面中央の大きな数字 (タブ譜・動画のページの中か、CountdownOverlay)
+    void handleSourceReady();        // 音源の準備ができた (自動で始める待ちがあれば始める)
+    void handleSourceFailed (const juce::String& message);
+    void checkSongEnd (bool playing, double position, double length);
     void skip (double seconds);
     void skipBars (int direction);   // -1: 前の小節の頭、+1: 次の小節の頭
     bool isBarMode() const;          // タブ譜モード (タブ譜を大きく表示している) なら、戻る・進むは小節単位
@@ -137,6 +156,18 @@ private:
     SessionOpenContext openContext;
     PlaybackSettingsResolver settingsResolver;
     CountdownController countdown;   // 再生開始前の待ち時間
+    PlayButtonPresses playPresses;   // 再生ボタンの2回押しで「すぐに始める」
+    bool videoWarmedUp = false;      // YouTube: カウントダウン中に一度だけ再生して、読み込みを済ませた
+    CountdownOverlay countdownOverlay;
+    enum class CountdownTarget { none, score, video, native };
+    CountdownTarget shownCountdownTarget = CountdownTarget::none;
+    int shownCountdownNumber = 0;
+    juce::String shownCountdownCaption;
+    bool waitingForSource = false;   // カウントダウンは終わったが、音源の準備がまだ (「読み込み中…」)
+    bool sourceFailed = false;
+    bool songEndNotified = false;
+    SetlistBar setlistBar;
+    juce::Rectangle<int> bottomBarArea;
     juce::String savedSnapshot;
 
     TapTempo tapTempo;

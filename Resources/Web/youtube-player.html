@@ -10,18 +10,43 @@
   html, body { margin: 0; height: 100%; overflow: hidden; background: var(--color-surface); color: var(--color-text-muted);
                font-family: var(--font-ui); font-size: var(--font-size-body); }
   #player, #message { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+  /* 動画の上に透明な板を置き、マウスが YouTube に届かないようにする。
+     YouTube はマウスが乗ると題名や操作の帯 (オーバーレイ) を出すため。再生の操作はアプリから行う */
+  #shield { position: absolute; inset: 0; z-index: 10; }
   #message { display: flex; align-items: center; justify-content: center; text-align: center; padding: var(--space-lg); box-sizing: border-box; }
+  /* 再生前のカウントダウン (setlist-mode.md 7.2)。離れた位置からでも読める大きさ。
+     すぐに始めるのはアプリの再生ボタンの2回押し。クリックは受けない (下のタブ譜をそのまま触れる) */
+  #countdown { position: absolute; inset: 0; z-index: 100; display: none; flex-direction: column;
+               align-items: center; justify-content: center; background: rgba(0, 0, 0, 0.45);
+               pointer-events: none; user-select: none; }
+  #countdown .number { font-size: min(55vh, 280px); font-weight: 700; line-height: 1; color: #fff;
+                       font-family: var(--font-numeric), var(--font-ui); text-shadow: 0 4px 24px rgba(0, 0, 0, 0.6); }
+  #countdown .caption { margin-top: 16px; font-size: 26px; font-weight: 700; color: #fff; text-align: center;
+                        text-shadow: 0 2px 12px rgba(0, 0, 0, 0.6); }
+  #countdown .hint { margin-top: 8px; font-size: 15px; color: rgba(255, 255, 255, 0.85); }
 </style>
 </head>
 <body>
 <div id="message">YouTube を準備しています…</div>
 <div id="player"></div>
+<div id="shield"></div>
 
+<div id="countdown"><div class="number"></div><div class="caption"></div><div class="hint">▶ をもう一度押すと、すぐに始めます</div></div>
 <script>
   // アプリ (C++) へ知らせる。JUCE が window.__JUCE__ を用意している
   function send(type, data) {
     if (window.__JUCE__ && window.__JUCE__.backend)
       window.__JUCE__.backend.emitEvent("player", Object.assign({ type: type }, data || {}));
+  }
+
+  // 再生前のカウントダウン。number が 0 で caption だけなら「読み込み中…」などの文字だけ、両方なければ消す
+  function showCountdown(number, caption) {
+    const c = document.getElementById("countdown");
+    c.querySelector(".number").textContent = number > 0 ? number : "";
+    c.querySelector(".number").style.display = number > 0 ? "" : "none";
+    c.querySelector(".hint").style.display = number > 0 ? "" : "none";
+    c.querySelector(".caption").textContent = caption || "";
+    c.style.display = number > 0 || caption ? "flex" : "none";
   }
 
   function showMessage(text) {
@@ -31,6 +56,7 @@
   }
 
   let player = null, apiReady = false, playerReady = false, pending = null;
+  let warming = false, warmStart = 0;   // 先読み: 音を消して一瞬だけ再生している
   let loop = { a: 0, b: 0, on: false };
   let volume = 100;
 
@@ -38,15 +64,36 @@
   window.playerCommand = function (cmd) {
     switch (cmd.type) {
       case "load":   load(cmd.videoId, cmd.start || 0); break;
-      case "unload": pending = null; if (playerReady) player.stopVideo(); showMessage(""); break;
-      case "play":   if (playerReady) player.playVideo(); break;
+      case "unload": pending = null; warming = false; if (playerReady) player.stopVideo(); showMessage(""); break;
+      case "play":   if (playerReady) { endWarmUp(true); player.playVideo(); } break;
+      case "warmUp": warmUp(); break;
       case "pause":  if (playerReady) player.pauseVideo(); break;
+      case "countdown": showCountdown(cmd.number, cmd.caption); break;
       case "seek":   if (playerReady) player.seekTo(Math.max(0, cmd.seconds), true); break;
       case "rate":   if (playerReady) player.setPlaybackRate(cmd.rate); break;
-      case "volume": volume = cmd.volume; if (playerReady) { player.unMute(); player.setVolume(volume); } break;
+      case "volume": volume = cmd.volume; if (playerReady && !warming) { player.unMute(); player.setVolume(volume); } break;
       case "loop":   loop = { a: cmd.a, b: cmd.b, on: cmd.on }; break;
     }
   };
+
+  // 先読み: 動画は再生を始めるまで読み込まれないので、カウントダウン中に音を消して一瞬だけ再生し、すぐに止めて頭に戻す
+  function warmUp() {
+    if (!playerReady || warming || player.getPlayerState() === 1) return;
+    warming = true;
+    warmStart = player.getCurrentTime();
+    player.mute();
+    player.playVideo();
+  }
+
+  // 先読みを終える。startingNow: そのまま本当の再生を始める (位置だけ戻す)
+  function endWarmUp(startingNow) {
+    if (!warming) return;
+    warming = false;
+    if (!startingNow) player.pauseVideo();
+    player.seekTo(warmStart, true);
+    player.unMute();
+    player.setVolume(volume);
+  }
 
   function load(videoId, start) {
     if (!apiReady) { pending = { videoId: videoId, start: start }; return; }
@@ -59,7 +106,9 @@
 
     player = new YT.Player("player", {
       videoId: videoId,
-      playerVars: { playsinline: 1, rel: 0, start: Math.floor(start), origin: location.origin },
+      // controls: 0 … YouTube の操作の帯を出さない (操作はアプリから)。iv_load_policy: 3 … 動画内の注釈を出さない
+      playerVars: { playsinline: 1, rel: 0, controls: 0, disablekb: 1, fs: 0, iv_load_policy: 3,
+                    start: Math.floor(start), origin: location.origin },
       events: {
         onReady: function () {
           playerReady = true;
@@ -67,7 +116,10 @@
           player.setVolume(volume);
           send("ready");
         },
-        onStateChange: function (e) { send("state", status()); },
+        onStateChange: function (e) {
+          if (warming && e.data === 1) endWarmUp(false);   // 再生が始まった = 読み込めた。止めて頭に戻す
+          send("state", status());
+        },
         onPlaybackRateChange: function () { send("state", status()); },
         onError: function (e) { send("error", { code: e.data }); }
       }
@@ -76,7 +128,8 @@
 
   function status() {
     return {
-      state: player.getPlayerState(),        // -1 未開始, 0 終了, 1 再生中, 2 一時停止, 3 読み込み中, 5 頭出し済み
+      // -1 未開始, 0 終了, 1 再生中, 2 一時停止, 3 読み込み中, 5 頭出し済み。先読み中は「頭出し済み」と伝える (アプリが再生中と思わないように)
+      state: warming ? 5 : player.getPlayerState(),
       time: player.getCurrentTime(),
       duration: player.getDuration(),
       rate: player.getPlaybackRate()

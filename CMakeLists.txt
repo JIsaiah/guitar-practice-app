@@ -99,6 +99,7 @@ target_sources(GuitarPractice PRIVATE
     Source/Library/SetlistStore.cpp
     Source/Session/PlaybackSettingsResolver.cpp
     Source/Setlist/CountdownController.cpp
+    Source/Setlist/SetlistPlayer.cpp
     Source/UI/MainComponent.cpp
     Source/UI/SessionListScreen.cpp
     Source/UI/SetlistPanel.cpp
@@ -107,6 +108,8 @@ target_sources(GuitarPractice PRIVATE
     Source/UI/SessionPickerPanel.cpp
     Source/UI/SessionSetupScreen.cpp
     Source/UI/SessionScreen.cpp
+    Source/UI/CountdownOverlay.cpp
+    Source/UI/SetlistBar.cpp
     Source/UI/TunerPanel.cpp
     Source/Theme/ThemeManager.cpp
     Source/Theme/DeathMetalLookAndFeel.cpp
@@ -171,13 +174,15 @@ target_sources(GuitarPracticeTests PRIVATE
     Tests/SetlistTests.cpp
     Tests/PlaybackSettingsResolverTests.cpp
     Tests/CountdownControllerTests.cpp
+    Tests/SetlistPlayerTests.cpp
     Source/Model/Session.cpp
     Source/Model/SessionStore.cpp
     Source/Library/SessionLibrary.cpp
     Source/Library/Setlist.cpp
     Source/Library/SetlistStore.cpp
     Source/Session/PlaybackSettingsResolver.cpp
-    Source/Setlist/CountdownController.cpp)
+    Source/Setlist/CountdownController.cpp
+    Source/Setlist/SetlistPlayer.cpp)
 
 target_compile_definitions(GuitarPracticeTests PRIVATE
     JUCE_USE_CURL=0

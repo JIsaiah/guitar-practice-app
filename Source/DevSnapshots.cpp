@@ -176,7 +176,17 @@ juce::String DevSnapshots::renderAll (const juce::File& folder)
                     auto working = resolver.makeWorkingCopy (session);
                     SessionScreen fromSetlist (engine, store, theme, appSettings, youtube, scoreViewer, working,
                                                SessionOpenContext::forSetlist ("sample", "entry"), resolver);
+                    SetlistBar::Info info;
+                    info.setlistName = "11月ライブ"_jp;
+                    info.position = 3;
+                    info.count = 8;
+                    info.nextTitle = "Crazy Train";
+                    info.hasPrevious = info.hasNext = true;
+                    fromSetlist.setSetlistInfo (info);
                     snap (fromSetlist, 1280, 800, "practice_setlist" + suffix);
+
+                    fromSetlist.startCountdownForSnapshot();   // タブ譜が無いので、画面の部品で数字を出す
+                    snap (fromSetlist, 1280, 800, "practice_countdown" + suffix);
                 }
 
                 SettingsPanel panel (appSettings, theme, engine.getDeviceManager());

@@ -17,8 +17,6 @@ juce::String describeOverrides (const SetlistEntry::Overrides& overrides)
     juce::StringArray marks;
     if (overrides.speed != 1.0)
         marks.add ("速度"_jp + juce::String (juce::roundToInt (overrides.speed * 100.0)) + "%");
-    if (overrides.loopEnabled)
-        marks.add ("ループ"_jp);
 
     return marks.joinIntoString ("・"_jp);
 }
@@ -175,8 +173,9 @@ void SetlistEntryList::mouseUp (const juce::MouseEvent& e)
         return;
     }
 
-    if (rowAt (e.y) == row && ! e.mods.isPopupMenu() && onPlay != nullptr)
-        onPlay (row);
+    if (rowAt (e.y) == row && ! e.mods.isPopupMenu() && onOpenSession != nullptr
+        && library.contains (setlist.entries[(size_t) row].sessionId))
+        onOpenSession (setlist.entries[(size_t) row].sessionId);
 }
 
 void SetlistEntryList::showRowMenu (int row)
@@ -185,11 +184,13 @@ void SetlistEntryList::showRowMenu (int row)
     const auto found = library.contains (entry.sessionId);
 
     juce::PopupMenu menu;
-    menu.addItem (1, "セットリストから外す"_jp);
+    menu.addItem (3, "この曲から通しで再生"_jp, found);
     menu.addItem (2, "元のセッションを単体で開く"_jp, found);
+    menu.addSeparator();
+    menu.addItem (1, "セットリストから外す"_jp);
 
     menu.showMenuAsync (juce::PopupMenu::Options().withMousePosition(),
-                        [safe = juce::Component::SafePointer (this), entryId = entry.entryId, sessionId = entry.sessionId] (int result)
+                        [safe = juce::Component::SafePointer (this), row, entryId = entry.entryId, sessionId = entry.sessionId] (int result)
     {
         if (safe == nullptr)
             return;
@@ -200,5 +201,8 @@ void SetlistEntryList::showRowMenu (int row)
 
         if (result == 2 && safe->onOpenSession != nullptr)
             safe->onOpenSession (sessionId);
+
+        if (result == 3 && safe->onPlay != nullptr && safe->setlist.indexOf (entryId) == row)
+            safe->onPlay (row);
     });
 }

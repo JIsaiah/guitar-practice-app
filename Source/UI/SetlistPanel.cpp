@@ -7,9 +7,12 @@ namespace
     constexpr int newButtonHeight = 56;
 }
 
-SetlistPanel::SetlistPanel (SessionLibrary& l, SetlistStore& s, ThemeManager& t)
-    : library (l), store (s), theme (t)
+SetlistPanel::SetlistPanel (SessionLibrary& l, SetlistStore& s, ThemeManager& t, AppSettings& a)
+    : library (l), store (s), theme (t), settings (a)
 {
+    for (const auto& id : settings.getExpandedSetlists())
+        expandedIds.insert (id);
+
     newButton.setButtonText ("＋ 新しいセットリスト"_jp);
     newButton.onClick = [this] { createSetlist(); };
     content.addAndMakeVisible (newButton);
@@ -23,10 +26,6 @@ SetlistPanel::SetlistPanel (SessionLibrary& l, SetlistStore& s, ThemeManager& t)
 
 void SetlistPanel::refresh()
 {
-    for (const auto& card : cards)
-        if (card->isExpanded())
-            expandedIds.insert (card->getSetlist().setlistId);
-
     cards.clear();
 
     for (auto& setlist : store.list())
@@ -95,6 +94,22 @@ void SetlistPanel::removeCardLater (const juce::String& setlistId)
 
 void SetlistPanel::layoutCards()
 {
+    // 開閉はここを通るので、開いているカードを覚えておく (消したセットリストは自然に外れる)
+    juce::StringArray ids;
+    expandedIds.clear();
+    for (const auto& card : cards)
+        if (card->isExpanded())
+        {
+            ids.add (card->getSetlist().setlistId);
+            expandedIds.insert (card->getSetlist().setlistId);
+        }
+
+    ids.sort (false);
+    auto saved = settings.getExpandedSetlists();
+    saved.sort (false);
+    if (ids != saved)
+        settings.setExpandedSetlists (ids);
+
     const auto width = viewport.getMaximumVisibleWidth();
     int y = 0;
 

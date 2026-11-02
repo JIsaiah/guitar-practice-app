@@ -23,9 +23,13 @@ public:
 
     // タブ譜のファイルを読み込む。空の File なら消す
     void load (const juce::File& file, int trackIndex);
-    void setPosition (double seconds, double bpm, double offsetSeconds);
+    // 再生位置。rate と playing も送り、ページの中で次の報告までの間を補って、針をなめらかに動かす
+    void setPosition (double seconds, double bpm, double offsetSeconds, double rate, bool playing);
     void setColours (const Palette& palette);
     void setEqualBarWidths (bool equal);   // 小節を同じ幅で並べる
+
+    // 再生前のカウントダウンを、タブ譜の上に大きく出す。number が 0 なら消す (setlist-mode.md 7.2)
+    void showCountdown (int number, const juce::String& caption = {});
 
     bool hasScore() const noexcept { return scoreFile.existsAsFile(); }
     double getScoreTempo() const noexcept { return scoreTempo; }
@@ -54,7 +58,8 @@ private:
     int loadCount = 0;
     double scoreTempo = 0.0;
     std::vector<double> barStartBeats;
-    double lastSentSeconds = -1.0, lastSentBpm = 0.0, lastSentOffset = 0.0;
+    double lastSentSeconds = -1.0, lastSentBpm = 0.0, lastSentOffset = 0.0, lastSentRate = 1.0, lastSentAtMs = 0.0;
+    bool lastSentPlaying = false;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ScoreViewer)
 };

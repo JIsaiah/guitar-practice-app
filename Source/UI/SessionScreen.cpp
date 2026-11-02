@@ -201,6 +201,10 @@ SessionScreen::SessionScreen (AudioEngine& e, SessionStore& s, ThemeManager& t, 
     speedSlider.setTextBoxStyle (juce::Slider::TextBoxRight, false, 44, 24);
     bpmSlider.setTextBoxStyle (juce::Slider::TextBoxRight, false, 44, 24);
 
+    // 速度をダブルクリックすると、原速 (100%) に戻す
+    speedSlider.setDoubleClickReturnValue (true, 100.0);
+    speedSlider.setTooltip ("ダブルクリックで 100% に戻す"_jp);
+
     // BPM をダブルクリックすると、この曲に保存されている値に戻す
     bpmSlider.setDoubleClickReturnValue (true, savedBpm);
     bpmSlider.setTooltip ("ダブルクリックで、保存されている BPM に戻す"_jp);
@@ -265,10 +269,17 @@ SessionScreen::SessionScreen (AudioEngine& e, SessionStore& s, ThemeManager& t, 
     {
         speedHeading.setText ("速度 (%)・セトリ専用"_jp, juce::dontSendNotification);
         loopHeading.setText ("ループ・セトリ専用 (単体のセッションとは別)"_jp, juce::dontSendNotification);
-        speedSlider.setTooltip ("この速度は、このセットリストの中だけで使います"_jp);
+        speedSlider.setTooltip ("この速度は、このセットリストの中だけで使います。ダブルクリックで 100% に戻す"_jp);
     }
 
     countdown.onFinished = [this] { startPlayback(); };
+    addChildComponent (countdownOverlay);
+
+    setlistBar.onPrevious = [this] { if (onSetlistPrevious != nullptr) onSetlistPrevious(); };
+    setlistBar.onNext = [this] { if (onSetlistNext != nullptr) onSetlistNext(); };
+    setlistBar.onAutoAdvanceToggled = [this] (bool resume) { if (onSetlistAutoAdvanceToggled != nullptr) onSetlistAutoAdvanceToggled (resume); };
+    addChildComponent (setlistBar);
+    setlistBar.setVisible (openContext.isSetlist());
 
     applyAppSettings();
     settings.addChangeListener (this);
@@ -297,6 +308,10 @@ SessionScreen::~SessionScreen()
         engine.clearExternalClock();
     }
     youtube.hide();
+
+    // カウントダウンの表示は WebView のページの中にあるので、次の画面のために消しておく
+    youtube.showCountdown (0);
+    scoreViewer.showCountdown (0);
 
     youtube.onKey = nullptr;
     scoreViewer.onLoaded = nullptr;
@@ -346,7 +361,7 @@ void SessionScreen::loadSource()
     const juce::File file (session.sourcePath);
     if (! file.existsAsFile())
     {
-        setStatus ("音源ファイルが見つかりません: "_jp + session.sourcePath);
+        handleSourceFailed ("音源ファイルが見つかりません: "_jp + session.sourcePath);
         return;
     }
 
@@ -359,7 +374,7 @@ void SessionScreen::loadSource()
 
         if (! succeeded)
         {
-            safe->setStatus (error);
+            safe->handleSourceFailed (error);
             return;
         }
 
@@ -367,6 +382,7 @@ void SessionScreen::loadSource()
         safe->setStatus ({});
         safe->setTransportEnabled (true);
         safe->recordLength (safe->engine.getSourceLengthSeconds());
+        safe->handleSourceReady();
     });
 }
 
@@ -386,7 +402,13 @@ void SessionScreen::setUpYouTube()
     }
 
     youtube.onStateChanged = [this] { handleYouTubeState(); };
-    youtube.onError = [this] (const juce::String& message) { setStatus (message); };
+    youtube.onError = [this] (const juce::String& message)
+    {
+        if (sourceReady)
+            setStatus (message);
+        else
+            handleSourceFailed (message);
+    };
 
     setStatus ("YouTube を読み込み中…"_jp);
     requestedRate = session.speedPercent / 100.0;
@@ -414,6 +436,7 @@ void SessionScreen::handleYouTubeState()
         applySourceGain();
         updateLoop();
         recordLength (state.duration);
+        handleSourceReady();
 
         if (onVideoReady != nullptr)
             onVideoReady();
@@ -798,36 +821,104 @@ bool SessionScreen::keyPressed (const juce::KeyPress& key)
 
 void SessionScreen::togglePlay()
 {
-    if (! sourceReady)
-        return;
+    // 1回押すとカウントダウン、続けてもう1回押すとすぐに始める。カウントダウン中に間をあけて押すと中止 (PlayButtonPresses)
+    const auto now = juce::Time::getMillisecondCounterHiRes();
+    const auto counting = countdown.isCountingDown() || waitingForSource;
 
-    // カウントダウン中に押したら、始めずに止める
-    if (countdown.isCountingDown())
+    switch (playPresses.press (now, counting, isTransportPlaying()))
     {
-        countdown.cancel();
-        updatePlayButton();
-        return;
+        case PlayButtonPresses::Action::cancel:
+            countdown.cancel();
+            waitingForSource = false;
+            break;
+
+        case PlayButtonPresses::Action::startNow:
+            if (countdown.isCountingDown())
+                countdown.skip();
+            else if (! waitingForSource && sourceReady)
+                startPlayback();
+            break;
+
+        case PlayButtonPresses::Action::pause:
+            if (isYouTube())
+                youtube.pause();
+            else
+                engine.setPlaying (false);
+            break;
+
+        case PlayButtonPresses::Action::startCountdown:
+            // 再生開始前の待ち時間 (ギターに手を戻す時間)。0 秒ならすぐに startPlayback() が呼ばれる。
+            // 音源とタブ譜は、待ち時間のあとに同じ時計で同時に始まる (ずらしの計算には入れない)
+            if (sourceReady)
+                countdown.start (settings.getPreStartDelaySeconds(), now);
+            break;
+
+        case PlayButtonPresses::Action::none:
+            break;
     }
 
-    if (isTransportPlaying())
-    {
-        if (isYouTube())
-            youtube.pause();
-        else
-            engine.setPlaying (false);
-        return;
-    }
-
-    // 再生開始前の待ち時間 (ギターに手を戻す時間)。0 秒ならすぐに startPlayback() が呼ばれる。
-    // 音源とタブ譜は、待ち時間のあとに同じ時計で同時に始まる (ずらしの計算には入れない)
-    countdown.start (settings.getPreStartDelaySeconds(), juce::Time::getMillisecondCounterHiRes());
     updatePlayButton();
+    updateCountdownDisplay();
+}
+
+void SessionScreen::startCountdownForSnapshot()
+{
+    countdown.start (3.0, juce::Time::getMillisecondCounterHiRes());
+    updatePlayButton();
+    updateCountdownDisplay();
+}
+
+void SessionScreen::updateCountdownDisplay()
+{
+    const auto number = countdown.isCountingDown() ? countdown.getDisplayNumber (juce::Time::getMillisecondCounterHiRes()) : 0;
+    countdownOverlay.setBounds (scoreView.getBounds());   // ウィンドウの大きさが変わっても合わせる
+
+    // 数字の下は曲名。カウントダウンが終わっても音源の準備がまだなら、数字なしで「読み込み中…」(setlist-mode.md 6.5)
+    const auto caption = waitingForSource ? "読み込み中…"_jp : number > 0 ? session.title : juce::String();
+
+    // メインの枠 (左の大きな枠) に今あるものの上に出す
+    const bool scoreShown = session.scorePath.isNotEmpty() && juce::File (session.scorePath).existsAsFile();
+    const auto target = number == 0 && caption.isEmpty() ? CountdownTarget::none
+                      : isSwapped()  ? CountdownTarget::video
+                      : scoreShown   ? CountdownTarget::score
+                                     : CountdownTarget::native;
+
+    // WebView への命令は、表示が変わったときだけ送る
+    if (number == shownCountdownNumber && target == shownCountdownTarget && caption == shownCountdownCaption)
+        return;
+
+    if (target == CountdownTarget::score || shownCountdownTarget == CountdownTarget::score)
+        scoreViewer.showCountdown (target == CountdownTarget::score ? number : 0, caption);
+    if (target == CountdownTarget::video || shownCountdownTarget == CountdownTarget::video)
+        youtube.showCountdown (target == CountdownTarget::video ? number : 0, caption);
+
+    countdownOverlay.setCountdown (number, caption);
+    countdownOverlay.setVisible (target == CountdownTarget::native);
+    if (target == CountdownTarget::native)
+        countdownOverlay.toFront (false);
+
+    shownCountdownNumber = number;
+    shownCountdownTarget = target;
+    shownCountdownCaption = caption;
 }
 
 void SessionScreen::startPlayback()
 {
     if (! sourceReady)
+    {
+        // セットリストで自動で始めるとき: 準備ができしだい始める
+        if (! sourceFailed && hasSource())
+            waitingForSource = true;
+        else
+            handleSourceFailed ("この曲には再生できる音源がありません"_jp);
+
+        updateCountdownDisplay();
         return;
+    }
+
+    waitingForSource = false;
+    songEndNotified = false;
+    updateCountdownDisplay();
 
     if (isYouTube())
     {
@@ -840,6 +931,85 @@ void SessionScreen::startPlayback()
         engine.seekSeconds (0.0);
 
     engine.setPlaying (true);
+}
+
+void SessionScreen::handleSourceReady()
+{
+    if (waitingForSource)
+        startPlayback();
+}
+
+void SessionScreen::handleSourceFailed (const juce::String& message)
+{
+    sourceFailed = true;
+    setStatus (message);
+
+    // セットリストの自動送りは止める (通常どおりエラーを出し、次の曲へは進まない。setlist-mode.md 6.5)
+    const auto wasWaiting = waitingForSource || countdown.isCountingDown();
+    waitingForSource = false;
+    countdown.cancel();
+    updateCountdownDisplay();
+
+    if (wasWaiting && openContext.isSetlist() && onSetlistAutoAdvanceToggled != nullptr)
+        onSetlistAutoAdvanceToggled (false);
+}
+
+//==============================================================================
+// セットリスト
+void SessionScreen::setSetlistInfo (const SetlistBar::Info& info)
+{
+    setlistBar.setInfo (info);
+}
+
+void SessionScreen::startAutomatically (double delaySeconds)
+{
+    countdown.start (delaySeconds, juce::Time::getMillisecondCounterHiRes());
+    updatePlayButton();
+    updateCountdownDisplay();
+}
+
+void SessionScreen::stopForSetlist()
+{
+    countdown.cancel();
+    waitingForSource = false;
+
+    if (isTransportPlaying())
+    {
+        if (isYouTube())
+            youtube.pause();
+        else
+            engine.setPlaying (false);
+    }
+
+    updatePlayButton();
+    updateCountdownDisplay();
+}
+
+void SessionScreen::showSetlistEnd()
+{
+    // 【フェーズ6で「セットリスト終了」の画面に置き換える】
+    setStatus ("セットリストの最後の曲が終わりました"_jp);
+}
+
+void SessionScreen::saveChangesQuietly()
+{
+    if (isDirty())
+        save();
+}
+
+// 曲の終わり (setlist-mode.md 7.3): 再生していたものが、音源の終わりで止まった。
+// タブ譜と長さが違っても、音源の終わりで決める。ループ中は終わらない
+void SessionScreen::checkSongEnd (bool playing, double position, double length)
+{
+    if (! openContext.isSetlist() || songEndNotified || playing || ! wasPlaying)
+        return;
+
+    if (session.loopEnabled || length <= 0.0 || position < length - 0.25)
+        return;   // 途中で止めた
+
+    songEndNotified = true;
+    if (onSongFinished != nullptr)
+        onSongFinished();
 }
 
 void SessionScreen::updatePlayButton()
@@ -924,6 +1094,24 @@ void SessionScreen::setLoopPoint (bool isStart)
     //   A: 押した位置にいちばん近い小節の頭 (少し早めに押しても、次の小節の頭になる)
     //   B: 押した位置を含む小節の「終わり」(= 次の小節の頭)。4小節目の途中で押すと、4小節目の最後まで弾いてから A に戻る
     const auto position = getPosition();
+
+    // 動画をメインに表示しているときは、小節に合わせず押した位置にする (作者の指示)。
+    // 動画を見ながら弾いているときは小節が見えず、戻る・進むも秒単位のため
+    if (isSwapped())
+    {
+        const auto ms = juce::roundToInt (position * 1000.0);
+        if (isStart)
+            session.loopStartMs = ms;
+        else
+            session.loopEndMs = ms;
+
+        if (session.loopEndMs <= session.loopStartMs)
+            session.loopEnabled = false;
+
+        updateLoop();
+        return;
+    }
+
     auto index = isStart ? barIndexNear (position) : barIndexAt (position) + 1;
 
     // B が A と同じか前になったら、A の小節の終わりにする (最低1小節はくり返す)
@@ -1023,6 +1211,18 @@ void SessionScreen::updateLoop()
     //   A: 始まりの小節 (A の位置から始まる小節)
     //   B: 最後まで弾く小節 (保存している B の位置は、その小節の終わり = 次の小節の頭なので、1つ前の小節)
     const bool unset = session.loopStartMs == 0 && session.loopEndMs == 0;
+
+    // 動画をメインに表示しているときは、時刻で表示する (A・B を押した位置で決めるため)
+    if (isSwapped())
+    {
+        const auto a = formatTime (session.loopStartMs / 1000.0), b = formatTime (session.loopEndMs / 1000.0);
+        loopStartButton.setButtonText (unset ? juce::String ("A") : "A " + a);
+        loopEndButton.setButtonText (unset ? juce::String ("B") : "B " + b);
+        if (! unset && session.loopEndMs > session.loopStartMs)
+            loopButton.setTooltip (a + "〜"_jp + b + " をくり返します"_jp);
+        return;
+    }
+
     const auto firstBar = barIndexNear (session.loopStartMs / 1000.0) + 1;
     const auto lastBar = juce::jmax (1, barIndexNear (session.loopEndMs / 1000.0));
 
@@ -1094,6 +1294,7 @@ void SessionScreen::updateSwapUi()
                                        : "YouTube の音源のときに使えます"_jp);
     sourceHeading.setText (isSwapped() ? "タブ譜 (動画と入れ替え中)"_jp : "音源"_jp, juce::dontSendNotification);
     updateSkipButtons();
+    updateLoop();   // ループの A・B の表示 (小節 ⇔ 時刻) を合わせる
 
     if (isSwapped())
         videoView.setText (session.scorePath.isEmpty() ? "タブ譜がありません"_jp : juce::String());
@@ -1325,11 +1526,23 @@ void SessionScreen::timerCallback()
 
     countdown.update (juce::Time::getMillisecondCounterHiRes());
     updatePlayButton();
+    updateCountdownDisplay();
 
     // 再生を始めたら、メトロノームは「単体」から曲に合わせる方へ切り替える (基本は音源に同期)
     if (playing && ! wasPlaying && engine.isMetronomeSolo())
         toggleMetronomeSolo();
+
+    checkSongEnd (playing, position, length);
     wasPlaying = playing;
+
+    if (openContext.isSetlist())
+    {
+        const auto& info = setlistBar.getInfo();
+        const auto fraction = length > 0.0 ? position / length : 0.0;
+        if (info.count > 0)
+            setlistBar.setProgress ((info.position - 1 + juce::jlimit (0.0, 1.0, fraction)) / info.count);
+        setlistBar.setNotice (session.loopEnabled ? "ループ中のため自動で次に進みません"_jp : juce::String());
+    }
 
     // 小節・拍 (一定テンポ + ずらし。設計書 3.1)
     const auto beats = (position - session.syncOffsetMs / 1000.0) * session.bpm / 60.0;
@@ -1337,7 +1550,17 @@ void SessionScreen::timerCallback()
     const auto beat = beats >= 0.0 ? (int) std::floor (beats) % 4 + 1 : 0;
     positionLabel.setText ("小節 "_jp + juce::String (bar) + "   拍 "_jp + juce::String (beat), juce::dontSendNotification);
     scoreView.setBarAndBeat (bar, beat);
-    scoreViewer.setPosition (position, session.bpm, getScoreOffsetSeconds());   // タブ譜は「拍の位置」+「タブ譜だけ」
+    // タブ譜は「拍の位置」+「タブ譜だけ」。針はページの中で、速度と経過時間からなめらかに進める
+    const auto rate = isYouTube() ? youtube.getState().rate : session.speedPercent / 100.0;
+    scoreViewer.setPosition (position, session.bpm, getScoreOffsetSeconds(), rate, playing);
+
+    // YouTube: カウントダウン中に、音を消して一瞬だけ再生し、読み込みを済ませておく (作者の指示)。
+    // 動画は再生を始めるまで読み込まれないので、カウントダウンのあとに読み込みの待ちが出るのを防ぐ
+    if (isYouTube() && sourceReady && countdown.isCountingDown() && ! videoWarmedUp)
+    {
+        videoWarmedUp = true;
+        youtube.warmUp();
+    }
 
     timeline.setState (position, length, session.loopStartMs / 1000.0, session.loopEndMs / 1000.0, session.loopEnabled);
 
@@ -1407,7 +1630,7 @@ void SessionScreen::paint (juce::Graphics& g)
     }
 
     // 下の再生操作の帯と、グループの区切り線
-    auto bottom = getLocalBounds().reduced (12).removeFromBottom (bottomBarHeight).toFloat();
+    const auto bottom = bottomBarArea.toFloat();
     g.setColour (findColour (ThemeColourIds::panel));
     g.fillRoundedRectangle (bottom, 10.0f);
     g.setColour (findColour (ThemeColourIds::border));
@@ -1461,7 +1684,8 @@ void SessionScreen::resized()
     area.removeFromTop (12);
 
     //==== 下部: 「再生／速度／メトロノーム／ループ」のグループ。それぞれ上に見出し、間に区切り線 ====
-    auto bottom = area.removeFromBottom (bottomBarHeight).reduced (14, 8);
+    bottomBarArea = area.removeFromBottom (bottomBarHeight);
+    auto bottom = bottomBarArea.reduced (14, 8);
     area.removeFromBottom (12);
     bottomDividers.clear();
 
@@ -1652,6 +1876,13 @@ void SessionScreen::resized()
     positionLabel.setBounds (scoreHeader.removeFromRight (160));
     scoreNameLabel.setBounds (scoreHeader);
     area.removeFromTop (6);
+
+    // セットリスト用メニュー (Setlist で開いたときだけ)。右のパネルの高さを減らさないよう、左の列の下に置く
+    if (openContext.isSetlist())
+    {
+        setlistBar.setBounds (area.removeFromBottom (SetlistBar::preferredHeight));
+        area.removeFromBottom (8);
+    }
 
     timeline.setBounds (area.removeFromBottom (44));
     area.removeFromBottom (8);

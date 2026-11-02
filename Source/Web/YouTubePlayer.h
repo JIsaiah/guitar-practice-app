@@ -44,6 +44,8 @@ public:
     void setRate (double rate);
     void setVolume (double gain);   // ミキサーの値 (0〜1.5)。YouTube の音量は 0〜100 なので、1.0 以上は 100
     void setLoop (double startSeconds, double endSeconds, bool enabled);
+    void showCountdown (int number, const juce::String& caption = {});   // 動画の上に大きく出す。0 なら消す
+    void warmUp();   // 音を消して一瞬だけ再生して止め、動画の読み込みを済ませる (再生を始めたときの待ちを無くす)
 
     //==== 状態 ====
     const State& getState() const noexcept { return state; }

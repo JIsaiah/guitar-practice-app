@@ -14,12 +14,22 @@ public:
     int getSkipSeconds() const noexcept { return skipSeconds; }
     void setSkipSeconds (int seconds);
 
-    // 再生開始前の待ち時間 (秒)。「▶ 再生」を押してから、ギターに手を戻すまでの時間。
-    // セットリストの曲と曲の間にも使う (setlist-mode.md 7.1)。0 ならすぐに始める
+    // 再生ボタンの待ち時間 (秒)。「▶ 再生」を押してから、ギターに手を戻すまでの時間。0 ならすぐに始める
     int getPreStartDelaySeconds() const noexcept { return preStartDelaySeconds; }
     void setPreStartDelaySeconds (int seconds);
     static constexpr int maxPreStartDelaySeconds = 10;
     static constexpr int defaultPreStartDelaySeconds = 3;   // 【仮決め】
+
+    // セットリストのカウントダウン (秒)。曲が終わって次の曲を始めるときと、「次の曲」「前の曲」「通し再生を再開」のとき
+    // (setlist-mode.md 7.1)。作者の指示で、再生ボタンの待ち時間とは別にし、セットリストの中ではひとつにした
+    int getSongGapSeconds() const noexcept { return songGapSeconds; }
+    void setSongGapSeconds (int seconds);
+    static constexpr int maxSongGapSeconds = 30;
+    static constexpr int defaultSongGapSeconds = 3;
+
+    // 一覧で開いていたセットリスト (練習画面から戻ったときと、次の起動のときに開いたままにする)
+    juce::StringArray getExpandedSetlists() const;
+    void setExpandedSetlists (const juce::StringArray& setlistIds);
 
     // ホイール1目盛りで変わる量 (設計書 4.3)
     struct WheelSteps
@@ -54,6 +64,7 @@ private:
     juce::PropertiesFile& file;
     int skipSeconds = 5;
     int preStartDelaySeconds = defaultPreStartDelaySeconds;
+    int songGapSeconds = defaultSongGapSeconds;
     WheelSteps wheel;
     int sidePanelWidth = 400;
     bool scoreEqualBars = false;

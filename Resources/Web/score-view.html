@@ -14,17 +14,38 @@
   #barHighlight { position: absolute; background: var(--color-accent); opacity: 0; pointer-events: none; z-index: 4; }
   #message { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
              color: var(--color-text-muted); text-align: center; padding: 24px; box-sizing: border-box; }
+  /* 再生前のカウントダウン (setlist-mode.md 7.2)。離れた位置からでも読める大きさ。
+     すぐに始めるのはアプリの再生ボタンの2回押し。クリックは受けない (下のタブ譜をそのまま触れる) */
+  #countdown { position: absolute; inset: 0; z-index: 100; display: none; flex-direction: column;
+               align-items: center; justify-content: center; background: rgba(0, 0, 0, 0.45);
+               pointer-events: none; user-select: none; }
+  #countdown .number { font-size: min(55vh, 280px); font-weight: 700; line-height: 1; color: #fff;
+                       font-family: var(--font-numeric), var(--font-ui); text-shadow: 0 4px 24px rgba(0, 0, 0, 0.6); }
+  #countdown .caption { margin-top: 16px; font-size: 26px; font-weight: 700; color: #fff; text-align: center;
+                        text-shadow: 0 2px 12px rgba(0, 0, 0, 0.6); }
+  #countdown .hint { margin-top: 8px; font-size: 15px; color: rgba(255, 255, 255, 0.85); }
 </style>
 </head>
 <body>
 <div id="message">タブ譜を準備しています…</div>
 <div id="scroller"><div id="score"></div></div>
+<div id="countdown"><div class="number"></div><div class="caption"></div><div class="hint">▶ をもう一度押すと、すぐに始めます</div></div>
 <script src="alphatab/alphaTab.min.js"></script>
 <script>
   function send(type, data) {
     if (window.__JUCE__ && window.__JUCE__.backend)
       window.__JUCE__.backend.emitEvent("score", Object.assign({ type: type }, data || {}));
   }
+  // 再生前のカウントダウン。number が 0 で caption だけなら「読み込み中…」などの文字だけ、両方なければ消す
+  function showCountdown(number, caption) {
+    const c = document.getElementById("countdown");
+    c.querySelector(".number").textContent = number > 0 ? number : "";
+    c.querySelector(".number").style.display = number > 0 ? "" : "none";
+    c.querySelector(".hint").style.display = number > 0 ? "" : "none";
+    c.querySelector(".caption").textContent = caption || "";
+    c.style.display = number > 0 || caption ? "flex" : "none";
+  }
+
   function showMessage(text) {
     const m = document.getElementById("message");
     m.textContent = text;
@@ -121,7 +142,8 @@
     switch (cmd.type) {
       case "load": load(cmd.url, cmd.track || 0); break;
       case "clear": clearScore(); break;
-      case "position": setPosition(cmd.seconds, cmd.bpm, cmd.offset); break;
+      case "countdown": showCountdown(cmd.number, cmd.caption); break;
+      case "position": receivePosition(cmd); break;
       case "layout":
         equalBars = !!cmd.equalBars;
         applyLayout();
@@ -163,6 +185,45 @@
   }
 
   // 再生位置 (秒) から、今の小節と小節の中の位置を求めて、カーソルを動かす
+  // ---- 再生位置 ----
+  // アプリからの位置の報告は、届く間隔がばらつく (1秒に約10回)。届いたときに針を置くだけだと、ガタガタ進む。
+  // そこで、報告の間はこのページで「最後の位置 + 経過時間 × 速度」で針を進め、画面の更新 (requestAnimationFrame) ごとに描く。
+  // 報告とのずれが小さいときは少しずつ寄せ、大きいとき (移動したとき) はすぐに合わせる
+  let clock = { seconds: 0, at: 0, rate: 1, playing: false };
+  let timing = { bpm: 120, offset: 0 };
+  let animating = false;
+
+  function currentSeconds(now) {
+    return clock.playing ? clock.seconds + (now - clock.at) / 1000 * clock.rate : clock.seconds;
+  }
+
+  function receivePosition(cmd) {
+    const now = performance.now();
+    const predicted = currentSeconds(now);
+    const playing = !!cmd.playing, rate = cmd.rate > 0 ? cmd.rate : 1;
+
+    if (playing && clock.playing && Math.abs(cmd.seconds - predicted) < 0.25)
+      clock = { seconds: predicted + (cmd.seconds - predicted) * 0.15, at: now, rate: rate, playing: true };
+    else
+      clock = { seconds: cmd.seconds, at: now, rate: rate, playing: playing };
+
+    timing = { bpm: cmd.bpm, offset: cmd.offset };
+    setPosition(clock.seconds, timing.bpm, timing.offset);
+
+    if (playing && !animating) {
+      animating = true;
+      requestAnimationFrame(animate);
+    }
+  }
+
+  function animate() {
+    if (!clock.playing) { animating = false; return; }
+    setPosition(currentSeconds(performance.now()), timing.bpm, timing.offset);
+    requestAnimationFrame(animate);
+  }
+
+  let scrolledToLine = -1;
+
   function setPosition(seconds, bpm, offset) {
     if (!api || !score || !api.renderer || !api.renderer.boundsLookup || barStartBeats.length === 0) return;
 
@@ -186,10 +247,12 @@
     barHighlight.style.width = v.w + "px"; barHighlight.style.height = line.h + "px";
     barHighlight.style.opacity = 0.08;
 
-    // カーソルの行が見えなくなりそうなら、自動でスクロールする
+    // カーソルの行が見えなくなりそうなら、自動でスクロールする (同じ行では1回だけ。毎フレーム頼むと動きが止まるため)
     const top = line.y, bottom = line.y + line.h;
-    if (top < scroller.scrollTop + 20 || bottom > scroller.scrollTop + scroller.clientHeight - 20)
+    if (top !== scrolledToLine && (top < scroller.scrollTop + 20 || bottom > scroller.scrollTop + scroller.clientHeight - 20)) {
+      scrolledToLine = top;
       scroller.scrollTo({ top: Math.max(0, top - 40), behavior: "smooth" });
+    }
   }
 
   // 小節をクリックしたら、その小節の頭から再生できるように、アプリに知らせる

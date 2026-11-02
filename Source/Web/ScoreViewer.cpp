@@ -116,20 +116,31 @@ void ScoreViewer::load (const juce::File& file, int trackIndex)
         send (makeCommand ("clear"));
 }
 
-void ScoreViewer::setPosition (double seconds, double bpm, double offsetSeconds)
+void ScoreViewer::setPosition (double seconds, double bpm, double offsetSeconds, double rate, bool playing)
 {
-    // 画面の更新 (1秒に30回) のたびに送ると多いので、変わったときだけ送る。
-    // 止まっているときに BPM やずらしを変えても、カーソルが動くように、それらの変化も見る
-    const bool changed = std::abs (seconds - lastSentSeconds) >= 0.01
-                      || ! juce::approximatelyEqual (bpm, lastSentBpm)
-                      || ! juce::approximatelyEqual (offsetSeconds, lastSentOffset);
-    if (! rendered || ! changed)
+    if (! rendered)
+        return;
+
+    // 再生中は、針をページの中で動かす (requestAnimationFrame)。こちらからは位置の補正を 0.1 秒ごとに送るだけでよい。
+    // 止まっているときは、位置が変わったときに送る。再生・停止、BPM、ずらし、速度が変わったらすぐに送る
+    const auto now = juce::Time::getMillisecondCounterHiRes();
+    const bool settingsChanged = playing != lastSentPlaying
+                              || ! juce::approximatelyEqual (bpm, lastSentBpm)
+                              || ! juce::approximatelyEqual (offsetSeconds, lastSentOffset)
+                              || ! juce::approximatelyEqual (rate, lastSentRate);
+    const bool positionChanged = playing ? now - lastSentAtMs >= 100.0
+                                         : std::abs (seconds - lastSentSeconds) >= 0.01;
+    if (! settingsChanged && ! positionChanged)
         return;
 
     lastSentSeconds = seconds;
     lastSentBpm = bpm;
     lastSentOffset = offsetSeconds;
-    send (makeCommand ("position", { { "seconds", seconds }, { "bpm", bpm }, { "offset", offsetSeconds } }));
+    lastSentRate = rate;
+    lastSentPlaying = playing;
+    lastSentAtMs = now;
+    send (makeCommand ("position", { { "seconds", seconds }, { "bpm", bpm }, { "offset", offsetSeconds },
+                                     { "rate", rate }, { "playing", playing } }));
 }
 
 void ScoreViewer::setColours (const Palette& p)
@@ -158,6 +169,11 @@ void ScoreViewer::setEqualBarWidths (bool equal)
                    pending.end());
 
     send (makeCommand ("layout", { { "equalBars", equal } }));
+}
+
+void ScoreViewer::showCountdown (int number, const juce::String& caption)
+{
+    send (makeCommand ("countdown", { { "number", number }, { "caption", caption } }));
 }
 
 void ScoreViewer::handleEvent (const juce::var& event)

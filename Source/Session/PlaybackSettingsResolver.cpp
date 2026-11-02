@@ -5,7 +5,7 @@ PlaybackSettingsResolver::PlaybackSettingsResolver (const SetlistEntry::Override
 {
 }
 
-Session PlaybackSettingsResolver::makeWorkingCopy (const Session& stored)
+Session PlaybackSettingsResolver::makeWorkingCopy (const Session& stored, bool suspendLoop)
 {
     auto working = stored;
     if (! overrides.has_value())
@@ -20,6 +20,12 @@ Session PlaybackSettingsResolver::makeWorkingCopy (const Session& stored)
     working.loopStartMs = juce::roundToInt (overrides->loopStartSec * 1000.0);
     working.loopEndMs = juce::roundToInt (overrides->loopEndSec * 1000.0);
     working.loopEnabled = overrides->loopEnabled;
+
+    loopSuspended = suspendLoop && overrides->loopEnabled;
+    overrideLoopEnabled = overrides->loopEnabled;
+    if (loopSuspended)
+        working.loopEnabled = false;
+
     return working;
 }
 
@@ -34,6 +40,11 @@ PlaybackSettingsResolver::Split PlaybackSettingsResolver::split (const Session& 
     o.loopStartSec = working.loopStartMs / 1000.0;
     o.loopEndSec = working.loopEndMs / 1000.0;
     o.loopEnabled = working.loopEnabled;
+
+    // ループを外して開き、そのまま触っていなければ、エントリの「有効」は元のまま
+    if (loopSuspended && ! working.loopEnabled)
+        o.loopEnabled = overrideLoopEnabled;
+
     result.overrides = o;
 
     result.session.speedPercent = storedSpeedPercent;
