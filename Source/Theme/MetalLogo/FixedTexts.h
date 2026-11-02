@@ -8,7 +8,7 @@
 enum class FixedTextId
 {
     // 一覧画面
-    AppTitle, Sessions, NewSession, Open, Delete, Settings, DeathMetalMode,
+    AppTitle, Sessions, Setlists, NewSession, Open, Delete, Settings, DeathMetalMode,
 
     // セッション画面
     BackToList, Save, Details, Play, Stop, Tap, Metronome, Loop, Tuner
@@ -20,6 +20,7 @@ inline juce::String getFixedText (FixedTextId id)
     {
         case FixedTextId::AppTitle:       return "Guitar Practice";
         case FixedTextId::Sessions:       return "セッション一覧"_jp;
+        case FixedTextId::Setlists:       return "セットリスト"_jp;
         case FixedTextId::NewSession:     return "新しいセッション"_jp;
         case FixedTextId::Open:           return "開く"_jp;
         case FixedTextId::Delete:         return "削除"_jp;
@@ -40,7 +41,7 @@ inline juce::String getFixedText (FixedTextId id)
 
 // FixedTextId の全部 (調整ツールでまとめて試すときに使う)
 inline constexpr FixedTextId allFixedTextIds[] {
-    FixedTextId::AppTitle, FixedTextId::Sessions, FixedTextId::NewSession, FixedTextId::Open,
+    FixedTextId::AppTitle, FixedTextId::Sessions, FixedTextId::Setlists, FixedTextId::NewSession, FixedTextId::Open,
     FixedTextId::Delete, FixedTextId::Settings, FixedTextId::DeathMetalMode,
     FixedTextId::BackToList, FixedTextId::Save, FixedTextId::Details, FixedTextId::Play,
     FixedTextId::Stop, FixedTextId::Tap, FixedTextId::Metronome, FixedTextId::Loop, FixedTextId::Tuner

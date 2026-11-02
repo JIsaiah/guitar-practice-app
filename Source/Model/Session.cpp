@@ -71,12 +71,13 @@ namespace
 juce::var Session::toVar() const
 {
     auto source = sourceType == SourceType::youtube
-                    ? makeObject ({ { "type", toString (sourceType) }, { "url", youtubeUrl } })
-                    : makeObject ({ { "type", toString (sourceType) }, { "path", sourcePath } });
+                    ? makeObject ({ { "type", toString (sourceType) }, { "url", youtubeUrl }, { "length_sec", lengthSeconds } })
+                    : makeObject ({ { "type", toString (sourceType) }, { "path", sourcePath }, { "length_sec", lengthSeconds } });
 
     return makeObject ({
-        { "version",  currentVersion },
-        { "title",    title },
+        { "version",    currentVersion },
+        { "session_id", sessionId },
+        { "title",      title },
         { "source",   source },
         { "score",    makeObject ({ { "path", scorePath }, { "track_index", scoreTrackIndex } }) },
         { "tempo",    makeObject ({ { "bpm", bpm }, { "origin", toString (tempoOrigin) } }) },
@@ -98,12 +99,14 @@ Session Session::fromVar (const juce::var& value)
 {
     Session s;
 
+    s.sessionId = getOr<juce::String> (value["session_id"], {});
     s.title = getOr<juce::String> (value["title"], {});
 
     const auto& source = value["source"];
     s.sourceType = sourceTypeFromString (getOr<juce::String> (source["type"], "none"));
     s.sourcePath = getOr<juce::String> (source["path"], {});
     s.youtubeUrl = getOr<juce::String> (source["url"], {});
+    s.lengthSeconds = getOr<double> (source["length_sec"], 0.0);
 
     const auto& score = value["score"];
     s.scorePath = getOr<juce::String> (score["path"], {});

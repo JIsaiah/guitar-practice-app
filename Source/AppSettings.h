@@ -14,6 +14,13 @@ public:
     int getSkipSeconds() const noexcept { return skipSeconds; }
     void setSkipSeconds (int seconds);
 
+    // 再生開始前の待ち時間 (秒)。「▶ 再生」を押してから、ギターに手を戻すまでの時間。
+    // セットリストの曲と曲の間にも使う (setlist-mode.md 7.1)。0 ならすぐに始める
+    int getPreStartDelaySeconds() const noexcept { return preStartDelaySeconds; }
+    void setPreStartDelaySeconds (int seconds);
+    static constexpr int maxPreStartDelaySeconds = 10;
+    static constexpr int defaultPreStartDelaySeconds = 3;   // 【仮決め】
+
     // ホイール1目盛りで変わる量 (設計書 4.3)
     struct WheelSteps
     {
@@ -34,6 +41,10 @@ public:
     bool getScoreEqualBars() const noexcept { return scoreEqualBars; }
     void setScoreEqualBars (bool equal);
 
+    // 一覧画面で最後に開いていたタブ (0: セッション、1: セットリスト。setlist-mode.md 4.1)
+    int getLibraryTab() const noexcept { return libraryTab; }
+    void setLibraryTab (int tab);
+
     // 選べる範囲
     static constexpr int minSkipSeconds = 1, maxSkipSeconds = 30;
 
@@ -42,7 +53,9 @@ private:
 
     juce::PropertiesFile& file;
     int skipSeconds = 5;
+    int preStartDelaySeconds = defaultPreStartDelaySeconds;
     WheelSteps wheel;
     int sidePanelWidth = 400;
     bool scoreEqualBars = false;
+    int libraryTab = 0;
 };

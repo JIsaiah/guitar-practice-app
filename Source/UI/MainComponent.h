@@ -2,7 +2,10 @@
 
 #include <juce_gui_basics/juce_gui_basics.h>
 #include "../Audio/AudioEngine.h"
-#include "../Model/SessionStore.h"
+#include "../Library/SessionLibrary.h"
+#include "../Library/SetlistStore.h"
+#include "../Session/PlaybackSettingsResolver.h"
+#include "../Session/SessionOpenContext.h"
 #include "../Theme/ThemeManager.h"
 #include "../AppSettings.h"
 #include "../Web/YouTubePlayer.h"
@@ -15,7 +18,7 @@
 class MainComponent final : public juce::Component
 {
 public:
-    MainComponent (AudioEngine& engine, SessionStore& store, ThemeManager& theme, AppSettings& settings);
+    MainComponent (AudioEngine& engine, SessionLibrary& library, SetlistStore& setlists, ThemeManager& theme, AppSettings& settings);
     ~MainComponent() override;
 
     void resized() override;
@@ -24,7 +27,9 @@ public:
 private:
     void showList();
     void showSetup();
-    void showSession (Session session);
+    void showSession (Session session, SessionOpenContext context = {}, PlaybackSettingsResolver resolver = {});
+    void openSetlistEntryLater (const juce::String& setlistId, int entryIndex);
+    void openSessionLater (std::function<std::optional<Session> (MainComponent&)> load);
     void openSettings();
     void openLogoTuner();
 
@@ -33,7 +38,9 @@ private:
     void setScreen (std::unique_ptr<juce::Component> screen);
 
     AudioEngine& engine;
+    SessionLibrary& library;
     SessionStore& store;
+    SetlistStore& setlistStore;
     ThemeManager& theme;
     AppSettings& settings;
     std::unique_ptr<juce::Component> currentScreen;

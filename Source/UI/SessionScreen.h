@@ -5,6 +5,9 @@
 #include "../Audio/TapTempo.h"
 #include "../AppSettings.h"
 #include "../Model/SessionStore.h"
+#include "../Session/PlaybackSettingsResolver.h"
+#include "../Session/SessionOpenContext.h"
+#include "../Setlist/CountdownController.h"
 #include "../Theme/MetalLogo/FixedTextButton.h"
 #include "../Web/ScoreViewer.h"
 #include "../Web/YouTubePlayer.h"
@@ -21,13 +24,18 @@ class SessionScreen final : public juce::Component,
                             private juce::ChangeListener
 {
 public:
+    // session: 画面で使う値 (Setlist で開くときは、resolver.makeWorkingCopy() で速度・ループを専用設定にしたもの)
     SessionScreen (AudioEngine& engine, SessionStore& store, ThemeManager& theme, AppSettings& settings,
-                   YouTubePlayer& youtube, ScoreViewer& scoreViewer, Session session);
+                   YouTubePlayer& youtube, ScoreViewer& scoreViewer, Session session,
+                   SessionOpenContext context = {}, PlaybackSettingsResolver resolver = {});
     ~SessionScreen() override;
 
     std::function<void()> onBackToList;
     std::function<void()> onOpenSettings;
     std::function<void()> onVideoReady;   // YouTube の動画を再生できるようになったとき (時間の計測用)
+
+    // Setlist で開いたとき: エントリの専用設定 (速度・ループ) を保存する。失敗したら false
+    std::function<bool (const SetlistEntry::Overrides&)> onSaveOverrides;
 
     void perform (Command command);
 
@@ -72,6 +80,8 @@ private:
     //==== 保存・画面 ====
     bool isDirty() const;
     bool save();
+    bool writeToDisk();   // セッションと、Setlist ならエントリの専用設定に分けて保存する
+    void recordLength (double seconds);   // 音源の長さが分かったときに記録する (セットリストの合計時間用)
     void requestBackToList();
     void setStatus (const juce::String& text);
     void applyAppSettings();
@@ -80,6 +90,8 @@ private:
 
     //==== 操作 ====
     void togglePlay();
+    void startPlayback();      // カウントダウンが終わったら呼ぶ
+    void updatePlayButton();
     void skip (double seconds);
     void skipBars (int direction);   // -1: 前の小節の頭、+1: 次の小節の頭
     bool isBarMode() const;          // タブ譜モード (タブ譜を大きく表示している) なら、戻る・進むは小節単位
@@ -122,6 +134,9 @@ private:
     ScoreViewer& scoreViewer;
     AppSettings& settings;
     Session session;
+    SessionOpenContext openContext;
+    PlaybackSettingsResolver settingsResolver;
+    CountdownController countdown;   // 再生開始前の待ち時間
     juce::String savedSnapshot;
 
     TapTempo tapTempo;

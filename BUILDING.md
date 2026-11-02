@@ -22,6 +22,8 @@ cmake --build build --config Debug
 実行ファイル: `build\GuitarPractice_artefacts\Debug\Guitar Practice.exe`
 
 - セッションの保存先: `ドキュメント\GuitarPractice\Sessions\*.gppractice`
+- セットリストの保存先: `ドキュメント\GuitarPractice\Setlists\*.gpsetlist`
+- 自動テスト: `cmake --build build --config Debug --target GuitarPracticeTests` のあと `ctest --test-dir build -C Debug --output-on-failure`
 - アプリの設定の保存先: `%APPDATA%\GuitarPractice\GuitarPractice.settings` (オーディオ設定、デスメタルモード)
 - 時間の計測の記録: `%APPDATA%\GuitarPractice\timing.log`。WebView のデータ: `%APPDATA%\GuitarPractice\WebView2\`
 - VC++ ランタイムは静的リンクしているため、配布先に追加のインストールは不要です
@@ -38,7 +40,10 @@ cmake --build build --config Debug
 | `Source/Audio/TapTempo.h`, `PitchDetector.h` | タップテンポ、音程検出 |
 | `Source/Model/Session`, `SessionStore` | セッションのデータと `.gppractice` の読み書き |
 | `Source/UI/MainComponent` | 画面遷移 (一覧 → 作成 → セッション → 一覧) |
-| `Source/UI/SessionListScreen` | セッション一覧 |
+| `Source/UI/SessionListScreen` | 一覧 (タブ: セッション／セットリスト) |
+| `Source/Library/` | セッション ID → ファイルの対応表 (`SessionLibrary`)、セットリストのデータと `.gpsetlist` の読み書き (`Setlist`, `SetlistStore`) |
+| `Source/UI/SetlistPanel`, `SetlistCard`, `SetlistEntryList`, `SessionPickerPanel` | セットリストのタブ (カード、曲順の編集、曲の追加パネル)。`Claudeこれ見て/setlist-mode.md` |
+| `Tests/` | 自動テスト (JUCE UnitTest)。音や画面に関係しない部分 |
 | `Source/UI/SessionSetupScreen` | 新しいセッションの作成 |
 | `Source/UI/SessionScreen` | 練習画面。操作はすべて `Commands.h` のコマンド経由 |
 | `Source/UI/TunerPanel` | チューナー (セッション画面の上に重ねる) |

@@ -8,8 +8,8 @@
 #include "../Theme/Dev/MetalLogoTuner.h"
 #include "../TimingLog.h"
 
-MainComponent::MainComponent (AudioEngine& e, SessionStore& s, ThemeManager& t, AppSettings& a)
-    : engine (e), store (s), theme (t), settings (a)
+MainComponent::MainComponent (AudioEngine& e, SessionLibrary& l, SetlistStore& sl, ThemeManager& t, AppSettings& a)
+    : engine (e), library (l), store (l.getStore()), setlistStore (sl), theme (t), settings (a)
 {
     addChildComponent (youtubePlayer);
     addChildComponent (scoreViewer);
@@ -59,26 +59,21 @@ void MainComponent::resized()
 //==============================================================================
 void MainComponent::showList()
 {
-    auto screen = std::make_unique<SessionListScreen> (store, theme);
+    auto screen = std::make_unique<SessionListScreen> (library, setlistStore, theme, settings);
 
     screen->onNewSession = [this] { navigate ([] (MainComponent& m) { m.showSetup(); }); };
     screen->onOpenSettings = [this] { openSettings(); };
     screen->onOpenSession = [this] (const juce::String& id)
     {
-        const auto clickedAt = TimingLog::now();
-        navigate ([id, clickedAt] (MainComponent& m)
-        {
-            if (auto session = m.store.load (id))
-            {
-                m.showSession (std::move (*session));
-                m.pendingPaintMark = PendingMark { "3. 開く → 練習画面の表示"_jp, clickedAt, false };
-                m.sessionOpenedAtMs = clickedAt;
-            }
-            else
-                juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon,
-                                                        "開けませんでした"_jp,
-                                                        "セッションファイルが壊れているか、見つかりません。"_jp);
-        });
+        openSessionLater ([id] (MainComponent& m) { return m.store.load (id); });
+    };
+    screen->onOpenSessionById = [this] (const juce::String& sessionId)
+    {
+        openSessionLater ([sessionId] (MainComponent& m) { return m.library.load (sessionId); });
+    };
+    screen->onPlaySetlist = [this] (const juce::String& setlistId, int entryIndex)
+    {
+        openSetlistEntryLater (setlistId, entryIndex);
     };
 
     setScreen (std::move (screen));
@@ -88,6 +83,51 @@ void MainComponent::showList()
         firstListShown = true;
         pendingPaintMark = PendingMark { "1. 起動 → 一覧の表示"_jp, TimingLog::processStart(), true };
     }
+}
+
+void MainComponent::openSessionLater (std::function<std::optional<Session> (MainComponent&)> load)
+{
+    const auto clickedAt = TimingLog::now();
+    navigate ([load = std::move (load), clickedAt] (MainComponent& m)
+    {
+        if (auto session = load (m))
+        {
+            m.showSession (std::move (*session));
+            m.pendingPaintMark = PendingMark { "3. 開く → 練習画面の表示"_jp, clickedAt, false };
+            m.sessionOpenedAtMs = clickedAt;
+        }
+        else
+            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon,
+                                                    "開けませんでした"_jp,
+                                                    "セッションファイルが壊れているか、見つかりません。"_jp);
+    });
+}
+
+void MainComponent::openSetlistEntryLater (const juce::String& setlistId, int entryIndex)
+{
+    // セットリストから開く: 速度・ループはエントリの専用設定、それ以外はセッションの設定 (setlist-mode.md 3.5、3.6)
+    const auto clickedAt = TimingLog::now();
+    navigate ([setlistId, entryIndex, clickedAt] (MainComponent& m)
+    {
+        const auto setlist = m.setlistStore.load (setlistId);
+        if (setlist.has_value() && juce::isPositiveAndBelow (entryIndex, (int) setlist->entries.size()))
+        {
+            const auto& entry = setlist->entries[(size_t) entryIndex];
+            if (auto session = m.library.load (entry.sessionId))
+            {
+                PlaybackSettingsResolver resolver (entry.overrides);
+                auto working = resolver.makeWorkingCopy (*session);
+                m.showSession (std::move (working), SessionOpenContext::forSetlist (setlistId, entry.entryId), std::move (resolver));
+                m.pendingPaintMark = PendingMark { "3. 開く → 練習画面の表示"_jp, clickedAt, false };
+                m.sessionOpenedAtMs = clickedAt;
+                return;
+            }
+        }
+
+        juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon,
+                                                "開けませんでした"_jp,
+                                                "セットリストか、その曲のセッションが見つかりません。"_jp);
+    });
 }
 
 void MainComponent::showSetup()
@@ -111,9 +151,29 @@ void MainComponent::showSetup()
     setScreen (std::move (screen));
 }
 
-void MainComponent::showSession (Session session)
+void MainComponent::showSession (Session session, SessionOpenContext context, PlaybackSettingsResolver resolver)
 {
-    auto screen = std::make_unique<SessionScreen> (engine, store, theme, settings, youtubePlayer, scoreViewer, std::move (session));
+    auto screen = std::make_unique<SessionScreen> (engine, store, theme, settings, youtubePlayer, scoreViewer, std::move (session),
+                                                   context, std::move (resolver));
+
+    if (context.isSetlist())
+    {
+        // エントリの専用設定 (速度・ループ) をセットリストのファイルに書く。
+        // 練習中にセットリストが変わっていてもよいように、毎回読み直してから書く
+        screen->onSaveOverrides = [this, context] (const SetlistEntry::Overrides& overrides)
+        {
+            auto setlist = setlistStore.load (context.setlistId);
+            if (! setlist.has_value())
+                return false;
+
+            auto* entry = setlist->findEntry (context.entryId);
+            if (entry == nullptr)
+                return false;
+
+            entry->overrides = overrides;
+            return setlistStore.save (*setlist);
+        };
+    }
 
     screen->onBackToList = [this] { navigate ([] (MainComponent& m) { m.showList(); }); };
     screen->onOpenSettings = [this] { openSettings(); };

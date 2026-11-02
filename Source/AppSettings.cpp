@@ -3,24 +3,35 @@
 namespace
 {
     constexpr const char* skipKey = "skipSeconds";
+    constexpr const char* preStartDelayKey = "preStartDelaySeconds";
     constexpr const char* wheelSpeedKey = "wheelStepSpeed";
     constexpr const char* wheelBpmKey = "wheelStepBpm";
     constexpr const char* wheelVolumeKey = "wheelStepVolume";
     constexpr const char* wheelOffsetKey = "wheelStepOffset";
     constexpr const char* sidePanelWidthKey = "sidePanelWidth";
     constexpr const char* scoreEqualBarsKey = "scoreEqualBars";
+    constexpr const char* libraryTabKey = "libraryTab";
 }
 
 AppSettings::AppSettings (juce::PropertiesFile& f)
     : file (f)
 {
     skipSeconds = juce::jlimit (minSkipSeconds, maxSkipSeconds, file.getIntValue (skipKey, 5));
+    preStartDelaySeconds = juce::jlimit (0, maxPreStartDelaySeconds, file.getIntValue (preStartDelayKey, defaultPreStartDelaySeconds));
     wheel.speedPercent = juce::jlimit (1, 50, file.getIntValue (wheelSpeedKey, 5));
     wheel.bpm = juce::jlimit (1, 20, file.getIntValue (wheelBpmKey, 1));
     wheel.volumePercent = juce::jlimit (1, 50, file.getIntValue (wheelVolumeKey, 5));
     wheel.offsetMs = juce::jlimit (1, 500, file.getIntValue (wheelOffsetKey, 10));
     sidePanelWidth = juce::jlimit (minSidePanelWidth, maxSidePanelWidth, file.getIntValue (sidePanelWidthKey, 400));
     scoreEqualBars = file.getBoolValue (scoreEqualBarsKey, false);
+    libraryTab = juce::jlimit (0, 1, file.getIntValue (libraryTabKey, 0));
+}
+
+void AppSettings::setLibraryTab (int tab)
+{
+    // 一覧のタブを押したときだけ変わるので、知らせは出さずに保存する
+    libraryTab = juce::jlimit (0, 1, tab);
+    file.setValue (libraryTabKey, libraryTab);
 }
 
 void AppSettings::setScoreEqualBars (bool equal)
@@ -36,6 +47,16 @@ void AppSettings::setSkipSeconds (int seconds)
     if (seconds != skipSeconds)
     {
         skipSeconds = seconds;
+        save();
+    }
+}
+
+void AppSettings::setPreStartDelaySeconds (int seconds)
+{
+    seconds = juce::jlimit (0, maxPreStartDelaySeconds, seconds);
+    if (seconds != preStartDelaySeconds)
+    {
+        preStartDelaySeconds = seconds;
         save();
     }
 }
@@ -56,6 +77,7 @@ void AppSettings::setSidePanelWidth (int width)
 void AppSettings::save()
 {
     file.setValue (skipKey, skipSeconds);
+    file.setValue (preStartDelayKey, preStartDelaySeconds);
     file.setValue (wheelSpeedKey, wheel.speedPercent);
     file.setValue (wheelBpmKey, wheel.bpm);
     file.setValue (wheelVolumeKey, wheel.volumePercent);

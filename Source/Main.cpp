@@ -3,7 +3,8 @@
 #include "AppSettings.h"
 #include "DevAudioCheck.h"
 #include "DevSnapshots.h"
-#include "Model/SessionStore.h"
+#include "Library/SessionLibrary.h"
+#include "Library/SetlistStore.h"
 #include "Theme/ThemeManager.h"
 #include "UI/MainComponent.h"
 
@@ -52,7 +53,10 @@ public:
         audioEngine->initialise (properties.getUserSettings()->getXmlValue (audioDeviceKey).get());
 
         sessionStore = std::make_unique<SessionStore>();
-        mainWindow = std::make_unique<MainWindow> (getApplicationName(), *audioEngine, *sessionStore, *themeManager, *appSettings);
+        sessionLibrary = std::make_unique<SessionLibrary> (*sessionStore);   // 走査は一覧画面を出すときに行う
+        setlistStore = std::make_unique<SetlistStore>();
+        mainWindow = std::make_unique<MainWindow> (getApplicationName(), *audioEngine, *sessionLibrary, *setlistStore,
+                                                   *themeManager, *appSettings);
     }
 
     void shutdown() override
@@ -67,6 +71,8 @@ public:
 
         properties.saveIfNeeded();
         audioEngine = nullptr;
+        setlistStore = nullptr;
+        sessionLibrary = nullptr;
         sessionStore = nullptr;
         appSettings = nullptr;
         themeManager = nullptr;   // 画面がすべて消えてから、LookAndFeel を消す
@@ -79,14 +85,15 @@ private:
     class MainWindow final : public juce::DocumentWindow
     {
     public:
-        MainWindow (const juce::String& name, AudioEngine& engine, SessionStore& store, ThemeManager& theme, AppSettings& settings)
+        MainWindow (const juce::String& name, AudioEngine& engine, SessionLibrary& library, SetlistStore& setlists,
+                    ThemeManager& theme, AppSettings& settings)
             : DocumentWindow (name,
                               juce::Desktop::getInstance().getDefaultLookAndFeel()
                                   .findColour (juce::ResizableWindow::backgroundColourId),
                               DocumentWindow::allButtons)
         {
             setUsingNativeTitleBar (true);
-            setContentOwned (new MainComponent (engine, store, theme, settings), true);
+            setContentOwned (new MainComponent (engine, library, setlists, theme, settings), true);
             setResizable (true, true);
             setResizeLimits (1200, 700, 10000, 10000);
             centreWithSize (getWidth(), getHeight());
@@ -107,6 +114,8 @@ private:
     juce::ApplicationProperties properties;
     std::unique_ptr<AudioEngine> audioEngine;
     std::unique_ptr<SessionStore> sessionStore;
+    std::unique_ptr<SessionLibrary> sessionLibrary;
+    std::unique_ptr<SetlistStore> setlistStore;
     std::unique_ptr<ThemeManager> themeManager;
     std::unique_ptr<AppSettings> appSettings;
     std::unique_ptr<MainWindow> mainWindow;

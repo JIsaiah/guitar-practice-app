@@ -63,7 +63,7 @@ private:
     juce::Label generalHeading, deathMetalHeading, advancedHeading, wheelHeading, colourHeading, colourNote, colourError, audioHeading;
     juce::Label themeLabel, textScaleLabel;
     juce::ComboBox themeBox, textScaleBox;
-    Row skipRow, speedRow, bpmRow, volumeRow, offsetRow;
+    Row skipRow, preStartDelayRow, speedRow, bpmRow, volumeRow, offsetRow;
 
     juce::ToggleButton deathMetalToggle;
     juce::TextButton logoTunerButton;

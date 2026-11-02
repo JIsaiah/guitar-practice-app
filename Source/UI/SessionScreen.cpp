@@ -19,9 +19,10 @@ namespace
 }
 
 SessionScreen::SessionScreen (AudioEngine& e, SessionStore& s, ThemeManager& t, AppSettings& appSettings,
-                              YouTubePlayer& yt, ScoreViewer& sv, Session sessionToOpen)
+                              YouTubePlayer& yt, ScoreViewer& sv, Session sessionToOpen,
+                              SessionOpenContext context, PlaybackSettingsResolver resolver)
     : engine (e), store (s), theme (t), youtube (yt), scoreViewer (sv), settings (appSettings),
-      session (std::move (sessionToOpen)),
+      session (std::move (sessionToOpen)), openContext (std::move (context)), settingsResolver (std::move (resolver)),
       backButton (t), saveButton (t), settingsButton (t),
       tapButton (t), tunerButton (t), playButton (t), metronomeButton (t), loopButton (t)
 {
@@ -259,6 +260,16 @@ SessionScreen::SessionScreen (AudioEngine& e, SessionStore& s, ThemeManager& t, 
     };
     addChildComponent (dimOverlay);
 
+    // セットリストから開いたときは、速度とループはこの曲順の中だけの設定 (setlist-mode.md 3.6)
+    if (settingsResolver.usesOverrides())
+    {
+        speedHeading.setText ("速度 (%)・セトリ専用"_jp, juce::dontSendNotification);
+        loopHeading.setText ("ループ・セトリ専用 (単体のセッションとは別)"_jp, juce::dontSendNotification);
+        speedSlider.setTooltip ("この速度は、このセットリストの中だけで使います"_jp);
+    }
+
+    countdown.onFinished = [this] { startPlayback(); };
+
     applyAppSettings();
     settings.addChangeListener (this);
     lookAndFeelChanged();
@@ -355,6 +366,7 @@ void SessionScreen::loadSource()
         safe->sourceReady = true;
         safe->setStatus ({});
         safe->setTransportEnabled (true);
+        safe->recordLength (safe->engine.getSourceLengthSeconds());
     });
 }
 
@@ -401,6 +413,7 @@ void SessionScreen::handleYouTubeState()
         youtube.setRate (requestedRate);
         applySourceGain();
         updateLoop();
+        recordLength (state.duration);
 
         if (onVideoReady != nullptr)
             onVideoReady();
@@ -668,9 +681,24 @@ bool SessionScreen::isDirty() const
     return juce::JSON::toString (session.toVar()) != savedSnapshot;
 }
 
+bool SessionScreen::writeToDisk()
+{
+    auto split = settingsResolver.split (session);
+    if (! store.save (split.session))
+        return false;
+
+    session.id = split.session.id;   // 初めて保存したときに採番される
+    session.sessionId = split.session.sessionId;
+
+    if (split.overrides.has_value() && onSaveOverrides != nullptr)
+        return onSaveOverrides (*split.overrides);
+
+    return true;
+}
+
 bool SessionScreen::save()
 {
-    if (! store.save (session))
+    if (! writeToDisk())
     {
         setStatus ("保存できませんでした"_jp);
         return false;
@@ -683,6 +711,20 @@ bool SessionScreen::save()
     updateMixerDefaults();
     setStatus ("保存しました"_jp);
     return true;
+}
+
+void SessionScreen::recordLength (double seconds)
+{
+    if (seconds <= 0.0 || std::abs (seconds - session.lengthSeconds) < 0.5)
+        return;
+
+    // 長さだけが変わったときは、そのまま保存する (「未保存」にして、戻るときの確認を出さないため)。
+    // ほかに未保存の変更があれば、次の保存で一緒に保存される
+    const auto wasDirty = isDirty();
+    session.lengthSeconds = seconds;
+
+    if (! wasDirty && session.id.isNotEmpty() && writeToDisk())
+        savedSnapshot = juce::JSON::toString (session.toVar());
 }
 
 void SessionScreen::requestBackToList()
@@ -759,18 +801,37 @@ void SessionScreen::togglePlay()
     if (! sourceReady)
         return;
 
-    if (isYouTube())
+    // カウントダウン中に押したら、始めずに止める
+    if (countdown.isCountingDown())
     {
-        if (youtube.isPlaying())
-            youtube.pause();
-        else
-            youtube.play();   // 最後まで再生していたら、YouTube が頭から再生する
+        countdown.cancel();
+        updatePlayButton();
         return;
     }
 
-    if (engine.isPlaying())
+    if (isTransportPlaying())
     {
-        engine.setPlaying (false);
+        if (isYouTube())
+            youtube.pause();
+        else
+            engine.setPlaying (false);
+        return;
+    }
+
+    // 再生開始前の待ち時間 (ギターに手を戻す時間)。0 秒ならすぐに startPlayback() が呼ばれる。
+    // 音源とタブ譜は、待ち時間のあとに同じ時計で同時に始まる (ずらしの計算には入れない)
+    countdown.start (settings.getPreStartDelaySeconds(), juce::Time::getMillisecondCounterHiRes());
+    updatePlayButton();
+}
+
+void SessionScreen::startPlayback()
+{
+    if (! sourceReady)
+        return;
+
+    if (isYouTube())
+    {
+        youtube.play();   // 最後まで再生していたら、YouTube が頭から再生する
         return;
     }
 
@@ -779,6 +840,18 @@ void SessionScreen::togglePlay()
         engine.seekSeconds (0.0);
 
     engine.setPlaying (true);
+}
+
+void SessionScreen::updatePlayButton()
+{
+    // カウントダウン中は残りの秒数を出す (押すと中止)
+    if (countdown.isCountingDown())
+        playButton.setFixedText (FixedTextId::Stop,
+                                 "■ "_jp + juce::String (countdown.getDisplayNumber (juce::Time::getMillisecondCounterHiRes())) + "…"_jp);
+    else if (isTransportPlaying())
+        playButton.setFixedText (FixedTextId::Stop, "■ 停止"_jp);
+    else
+        playButton.setFixedText (FixedTextId::Play, "▶ 再生"_jp);
 }
 
 void SessionScreen::skip (double seconds)
@@ -1250,10 +1323,8 @@ void SessionScreen::timerCallback()
     const auto length = getLength();
     const auto playing = isTransportPlaying();
 
-    if (playing)
-        playButton.setFixedText (FixedTextId::Stop, "■ 停止"_jp);
-    else
-        playButton.setFixedText (FixedTextId::Play, "▶ 再生"_jp);
+    countdown.update (juce::Time::getMillisecondCounterHiRes());
+    updatePlayButton();
 
     // 再生を始めたら、メトロノームは「単体」から曲に合わせる方へ切り替える (基本は音源に同期)
     if (playing && ! wasPlaying && engine.isMetronomeSolo())

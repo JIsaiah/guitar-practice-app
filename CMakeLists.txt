@@ -94,8 +94,17 @@ target_sources(GuitarPractice PRIVATE
     Source/UI/ToneDetailPanel.cpp
     Source/Model/Session.cpp
     Source/Model/SessionStore.cpp
+    Source/Library/SessionLibrary.cpp
+    Source/Library/Setlist.cpp
+    Source/Library/SetlistStore.cpp
+    Source/Session/PlaybackSettingsResolver.cpp
+    Source/Setlist/CountdownController.cpp
     Source/UI/MainComponent.cpp
     Source/UI/SessionListScreen.cpp
+    Source/UI/SetlistPanel.cpp
+    Source/UI/SetlistCard.cpp
+    Source/UI/SetlistEntryList.cpp
+    Source/UI/SessionPickerPanel.cpp
     Source/UI/SessionSetupScreen.cpp
     Source/UI/SessionScreen.cpp
     Source/UI/TunerPanel.cpp
@@ -149,3 +158,43 @@ target_link_libraries(GuitarPractice
         juce::juce_recommended_config_flags
         juce::juce_recommended_lto_flags
         juce::juce_recommended_warning_flags)
+
+# 自動テスト (JUCE UnitTest。setlist-mode.md 10章)。音や画面に関係しない部分だけを、コンソールのアプリでテストする
+#   cmake --build build --config Debug --target GuitarPracticeTests
+#   ctest --test-dir build -C Debug --output-on-failure
+enable_testing()
+juce_add_console_app(GuitarPracticeTests
+    PRODUCT_NAME "Guitar Practice Tests")
+
+target_sources(GuitarPracticeTests PRIVATE
+    Tests/TestMain.cpp
+    Tests/SetlistTests.cpp
+    Tests/PlaybackSettingsResolverTests.cpp
+    Tests/CountdownControllerTests.cpp
+    Source/Model/Session.cpp
+    Source/Model/SessionStore.cpp
+    Source/Library/SessionLibrary.cpp
+    Source/Library/Setlist.cpp
+    Source/Library/SetlistStore.cpp
+    Source/Session/PlaybackSettingsResolver.cpp
+    Source/Setlist/CountdownController.cpp)
+
+target_compile_definitions(GuitarPracticeTests PRIVATE
+    JUCE_USE_CURL=0
+    JUCE_WEB_BROWSER=0
+    JUCE_UNIT_TESTS=0)   # JUCE 自身のテストは入れない (このアプリのテストだけを実行する)
+
+if(MSVC)
+    target_compile_options(GuitarPracticeTests PRIVATE /utf-8)
+endif()
+
+target_link_libraries(GuitarPracticeTests
+    PRIVATE
+        juce::juce_core
+        juce::juce_events
+        juce::juce_data_structures
+    PUBLIC
+        juce::juce_recommended_config_flags
+        juce::juce_recommended_warning_flags)
+
+add_test(NAME GuitarPracticeTests COMMAND GuitarPracticeTests)

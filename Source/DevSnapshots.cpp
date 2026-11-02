@@ -2,7 +2,8 @@
 
 #if JUCE_DEBUG
 
-#include "Model/SessionStore.h"
+#include "Library/SessionLibrary.h"
+#include "Library/SetlistStore.h"
 #include "Theme/ThemeManager.h"
 #include "Theme/MetalLogo/FixedTexts.h"
 #include "Theme/MetalLogo/MetalLogoGenerator.h"
@@ -75,13 +76,48 @@ juce::String DevSnapshots::renderAll (const juce::File& folder)
     juce::PropertiesFile settings (tempSettings.getFile(), options);
     {
         ThemeManager theme (settings);
-        SessionStore store;   // 一覧を読むだけ
+        AppSettings listSettings (settings);
+
+        // 作者のセッションには触らない。一時フォルダに見本のセッションとセットリストを作る
+        const auto sampleFolder = juce::File::createTempFile ("snapshot-samples");
+        struct RemoveWhenDone { juce::File folder; ~RemoveWhenDone() { folder.deleteRecursively(); } } removeSamples { sampleFolder };
+        SessionStore store (sampleFolder.getChildFile ("Sessions"));
+        SessionLibrary library (store);
+        SetlistStore setlistStore (sampleFolder.getChildFile ("Setlists"));
+        {
+            const std::pair<const char*, double> songs[] { { "Hotel California (ソロ)", 391.0 }, { "Crazy Train", 296.0 },
+                                                           { "Master of Puppets", 0.0 }, { "Sweet Child O' Mine", 356.0 } };
+            std::vector<Session> saved;
+            for (const auto& [title, length] : songs)
+            {
+                Session s;
+                s.title = juce::String::fromUTF8 (title);
+                s.sourceType = SourceType::local;
+                s.lengthSeconds = length;
+                store.save (s);
+                saved.push_back (s);
+            }
+
+            auto empty = setlistStore.createNew();   // 空のセットリスト (先に保存し、見本のほうを一覧の先頭にする)
+            setlistStore.save (empty);
+            juce::Thread::sleep (20);
+
+            auto setlist = setlistStore.createNew();
+            setlist.name = "11月ライブ"_jp;
+            setlist.addEntry (saved[1].sessionId).overrides.speed = 0.8;
+            setlist.addEntry (saved[0].sessionId);
+            setlist.addEntry ("missing-session");   // リンク切れ
+            setlist.addEntry (saved[2].sessionId).overrides.loopEnabled = true;
+            setlist.addEntry (saved[1].sessionId);   // 同じ曲をもう一度
+            setlistStore.save (setlist);
+        }
 
         for (auto mode : { ThemeMode::Normal, ThemeMode::DeathMetal })
         {
             theme.setMode (mode);
 
-            SessionListScreen screen (store, theme);
+            SessionListScreen screen (library, setlistStore, theme, listSettings);
+            screen.showTab (SessionListScreen::Tab::sessions);
             screen.setSize (1280, 800);
             screen.setVisible (true);
 
@@ -119,11 +155,29 @@ juce::String DevSnapshots::renderAll (const juce::File& folder)
                 theme.setColourTheme (colour);
                 const juce::String suffix = colour == ColourTheme::Light ? "_light.png" : "_dark.png";
 
-                SessionListScreen list (store, theme);
+                SessionListScreen list (library, setlistStore, theme, listSettings);
+                list.showTab (SessionListScreen::Tab::sessions);
                 snap (list, 1280, 800, "list" + suffix);
+
+                // セットリストのタブ: 1つ目を開き、曲の追加パネルを出した状態
+                list.showTab (SessionListScreen::Tab::setlists);
+                snap (list, 1280, 800, "setlists" + suffix);
+                list.openFirstSetlistForSnapshot();
+                snap (list, 1280, 800, "setlists_open" + suffix);
 
                 SessionScreen practice (engine, store, theme, appSettings, youtube, scoreViewer, session);
                 snap (practice, 1280, 800, "practice" + suffix);
+
+                // セットリストから開いたとき (速度・ループに「セトリ専用」)
+                {
+                    SetlistEntry::Overrides overrides;
+                    overrides.speed = 0.9;
+                    PlaybackSettingsResolver resolver (overrides);
+                    auto working = resolver.makeWorkingCopy (session);
+                    SessionScreen fromSetlist (engine, store, theme, appSettings, youtube, scoreViewer, working,
+                                               SessionOpenContext::forSetlist ("sample", "entry"), resolver);
+                    snap (fromSetlist, 1280, 800, "practice_setlist" + suffix);
+                }
 
                 SettingsPanel panel (appSettings, theme, engine.getDeviceManager());
                 snap (panel, panel.getWidth(), panel.getHeight(), "settings" + suffix);

@@ -1,16 +1,34 @@
 #include "SessionListScreen.h"
 #include "../Text.h"
 
-SessionListScreen::SessionListScreen (SessionStore& s, ThemeManager& t)
-    : store (s), theme (t),
-      appTitle (t, FixedTextId::AppTitle), heading (t, FixedTextId::Sessions),
+namespace
+{
+    constexpr int tabRadioGroup = 0x5e7;
+    constexpr int pickerWidth = 380;
+}
+
+SessionListScreen::SessionListScreen (SessionLibrary& l, SetlistStore& sl, ThemeManager& t, AppSettings& a)
+    : library (l), store (l.getStore()), setlistStore (sl), theme (t), settings (a),
+      appTitle (t, FixedTextId::AppTitle),
+      sessionsTab (t), setlistsTab (t),
       newButton (t), openButton (t), deleteButton (t), settingsButton (t),
-      deathMetalToggle (t, FixedTextId::DeathMetalMode)
+      deathMetalToggle (t, FixedTextId::DeathMetalMode),
+      setlistPanel (l, sl, t)
 {
     appTitle.setFont (juce::FontOptions (24.0f, juce::Font::bold));
-    heading.setFont (juce::FontOptions (24.0f, juce::Font::bold));
     addAndMakeVisible (appTitle);
-    addAndMakeVisible (heading);
+
+    // タブ (setlist-mode.md 4.1)。最後に開いていたタブを覚えておく
+    sessionsTab.setFixedText (FixedTextId::Sessions, "セッション"_jp);
+    setlistsTab.setFixedText (FixedTextId::Setlists, "セットリスト"_jp);
+    for (auto* tab : { &sessionsTab, &setlistsTab })
+    {
+        tab->setClickingTogglesState (true);
+        tab->setRadioGroupId (tabRadioGroup);
+        addAndMakeVisible (tab);
+    }
+    sessionsTab.onClick = [this] { if (sessionsTab.getToggleState()) showTab (Tab::sessions); };
+    setlistsTab.onClick = [this] { if (setlistsTab.getToggleState()) showTab (Tab::setlists); };
 
     listBox.setRowHeight (48);
     addAndMakeVisible (listBox);
@@ -45,7 +63,30 @@ SessionListScreen::SessionListScreen (SessionStore& s, ThemeManager& t)
     addAndMakeVisible (themeBox);
     theme.addChangeListener (this);
 
+    // セットリストのタブ
+    setlistPanel.onPlay = [this] (const juce::String& setlistId, int index)
+    {
+        if (onPlaySetlist != nullptr)
+            onPlaySetlist (setlistId, index);
+    };
+    setlistPanel.onOpenSession = [this] (const juce::String& sessionId)
+    {
+        if (onOpenSessionById != nullptr)
+            onOpenSessionById (sessionId);
+    };
+    setlistPanel.onRequestAdd = [this] (SetlistCard* card) { showPicker (card); };
+    addChildComponent (setlistPanel);
+
+    picker.onAdd = [this] (const juce::String& sessionId)
+    {
+        if (auto* card = setlistPanel.findCard (pickerTargetId))
+            card->addSession (sessionId);
+    };
+    picker.onClose = [this] { showPicker (nullptr); };
+    addChildComponent (picker);
+
     refresh();
+    showTab (settings.getLibraryTab() == (int) Tab::setlists ? Tab::setlists : Tab::sessions);
 }
 
 SessionListScreen::~SessionListScreen()
@@ -61,16 +102,70 @@ void SessionListScreen::changeListenerCallback (juce::ChangeBroadcaster*)
     themeBox.setEnabled (! theme.isDeathMetal());   // デスメタルモード中は、配色はデスメタルのまま
 }
 
+void SessionListScreen::showTab (Tab tab)
+{
+    currentTab = tab;
+    settings.setLibraryTab ((int) tab);
+
+    const auto sessions = tab == Tab::sessions;
+    sessionsTab.setToggleState (sessions, juce::dontSendNotification);
+    setlistsTab.setToggleState (! sessions, juce::dontSendNotification);
+
+    for (auto* c : std::initializer_list<juce::Component*> { &listBox, &newButton, &openButton, &deleteButton })
+        c->setVisible (sessions);
+
+    setlistPanel.setVisible (! sessions);
+    if (sessions)
+        showPicker (nullptr);
+
+    resized();
+    repaint();
+}
+
+void SessionListScreen::openFirstSetlistForSnapshot()
+{
+    if (auto* card = setlistPanel.getFirstCard())
+    {
+        card->setExpanded (true);
+        showPicker (card);
+    }
+}
+
 void SessionListScreen::refresh()
 {
+    // ファイル名の変更・古いファイルへの ID の付与・曲名の変更を、セットリストの表示にも反映する
+    library.rescan();
+
     entries = store.list();
     listBox.updateContent();
     listBox.deselectAllRows();
     if (! entries.empty())
         listBox.selectRow (0);
 
+    picker.setSessions (entries);
     updateButtons();
     repaint();
+}
+
+void SessionListScreen::showPicker (SetlistCard* card)
+{
+    if (auto* previous = setlistPanel.findCard (pickerTargetId))
+        previous->setAdding (false);
+
+    pickerTargetId = card != nullptr ? card->getSetlist().setlistId : juce::String();
+    picker.setVisible (card != nullptr);
+
+    if (card != nullptr)
+    {
+        card->setAdding (true);
+        picker.setTarget (card->getSetlist().name, [this] (const juce::String& sessionId)
+        {
+            const auto* target = setlistPanel.findCard (pickerTargetId);
+            return target != nullptr ? target->getSetlist().countOf (sessionId) : 0;
+        });
+    }
+
+    resized();
 }
 
 void SessionListScreen::updateButtons()
@@ -94,20 +189,31 @@ void SessionListScreen::deleteSelected()
         return;
 
     const auto entry = entries[(size_t) row];
+
+    // セットリストで使われていれば、その数を伝える。消したあとの行はリンク切れとして残す (setlist-mode.md 4.6)
+    auto message = "「"_jp + entry.title + "」を削除しますか？"_jp;
+    const auto usedIn = entry.sessionId.isNotEmpty() ? setlistStore.countSetlistsUsing (entry.sessionId) : 0;
+    if (usedIn > 0)
+        message << "\n"
+                << juce::String (usedIn) << "件のセットリストで使われています。"_jp
+                << "\nセットリストの中では「見つかりません」と表示されます。"_jp;
+
     auto options = juce::MessageBoxOptions()
                        .withIconType (juce::MessageBoxIconType::QuestionIcon)
                        .withTitle ("セッションの削除"_jp)
-                       .withMessage ("「"_jp + entry.title + "」を削除しますか？"_jp)
+                       .withMessage (message)
                        .withButton ("削除"_jp)
                        .withButton ("キャンセル"_jp)
                        .withAssociatedComponent (this);
 
-    juce::AlertWindow::showAsync (options, [safe = juce::Component::SafePointer (this), id = entry.id] (int result)
+    juce::AlertWindow::showAsync (options, [safe = juce::Component::SafePointer (this), entry] (int result)
     {
         if (safe != nullptr && result == 1)
         {
-            safe->store.remove (id);
+            safe->store.remove (entry.id);
+            safe->library.noteRemoved (entry.sessionId);
             safe->refresh();
+            safe->setlistPanel.refresh();   // リンク切れの表示と「通しで再生」を直す
         }
     });
 }
@@ -147,7 +253,7 @@ void SessionListScreen::paint (juce::Graphics& g)
 
 void SessionListScreen::paintOverChildren (juce::Graphics& g)
 {
-    if (! entries.empty())
+    if (currentTab != Tab::sessions || ! entries.empty())
         return;
 
     g.setColour (listBox.findColour (juce::ListBox::textColourId).withAlpha (0.6f));
@@ -168,9 +274,23 @@ void SessionListScreen::resized()
     themeBox.setBounds (top.removeFromRight (230).reduced (0, 7));
     appTitle.setBounds (top.removeFromLeft (220));
     top.removeFromLeft (16);
-    heading.setBounds (top.removeFromLeft (juce::jmin (200, top.getWidth())));   // ロゴは枠の中央に描くので、幅は文字に合わせて決める
+    sessionsTab.setBounds (top.removeFromLeft (150).reduced (0, 2));
+    top.removeFromLeft (8);
+    setlistsTab.setBounds (top.removeFromLeft (150).reduced (0, 2));
 
     area.removeFromTop (12);
+
+    if (currentTab == Tab::setlists)
+    {
+        if (picker.isVisible())
+        {
+            picker.setBounds (area.removeFromRight (pickerWidth));
+            area.removeFromRight (12);
+        }
+        setlistPanel.setBounds (area);
+        return;
+    }
+
     auto buttons = area.removeFromBottom (48);
     newButton.setBounds (buttons.removeFromLeft (220));
     buttons.removeFromLeft (12);

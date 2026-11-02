@@ -72,7 +72,11 @@ SettingsPanel::SettingsPanel (AppSettings& s, ThemeManager& t, juce::AudioDevice
     setUpRow (volumeRow, "音量"_jp, "%", 1, 50);
     setUpRow (offsetRow, "ずらし"_jp, "ms", 1, 500);
 
+    setUpRow (preStartDelayRow, "再生開始前の待ち時間"_jp, "秒"_jp, 0, AppSettings::maxPreStartDelaySeconds);
+    preStartDelayRow.value.setTooltip ("「▶ 再生」を押してから始まるまでの時間。セットリストの曲の間にも使います"_jp);
+
     skipRow.value.onValueChange = [this] { settings.setSkipSeconds ((int) skipRow.value.getValue()); };
+    preStartDelayRow.value.onValueChange = [this] { settings.setPreStartDelaySeconds ((int) preStartDelayRow.value.getValue()); };
     for (auto* row : { &speedRow, &bpmRow, &volumeRow, &offsetRow })
         row->value.onValueChange = [this] { storeWheelSteps(); };
 
@@ -105,7 +109,7 @@ SettingsPanel::SettingsPanel (AppSettings& s, ThemeManager& t, juce::AudioDevice
     theme.addChangeListener (this);
     settings.addChangeListener (this);
 
-    setSize (600, 1080);
+    setSize (600, 1118);
 }
 
 SettingsPanel::~SettingsPanel()
@@ -196,6 +200,7 @@ void SettingsPanel::updateFromSettings()
     textScaleBox.setSelectedId (nearest + 1, juce::dontSendNotification);
 
     skipRow.value.setValue (settings.getSkipSeconds(), juce::dontSendNotification);
+    preStartDelayRow.value.setValue (settings.getPreStartDelaySeconds(), juce::dontSendNotification);
 
     const auto& steps = settings.getWheelSteps();
     speedRow.value.setValue (steps.speedPercent, juce::dontSendNotification);
@@ -274,6 +279,7 @@ void SettingsPanel::resized()
     row (themeLabel, themeBox, nullptr, 230);
     row (textScaleLabel, textScaleBox, nullptr, 150);
     row (skipRow.label, skipRow.value, &skipRow.unit);
+    row (preStartDelayRow.label, preStartDelayRow.value, &preStartDelayRow.unit);
 
     area.removeFromTop (4);
     wheelHeading.setBounds (area.removeFromTop (24));
