@@ -227,6 +227,14 @@ juce::String DevSnapshots::renderAll (const juce::File& folder)
                         log << "wrote timeline_states.png\n";
                 }
 
+                // TONE3000 を選んだとき (このPCにはまだ入っていないので、ダウンロードの案内が出る)
+                {
+                    Session pluginSession = session;
+                    pluginSession.tonePresetId = pluginTonePresetId;
+                    SessionScreen pluginPractice (engine, store, theme, appSettings, youtube, scoreViewer, pluginSession);
+                    snap (pluginPractice, 1280, 800, "practice_tone3000.png");
+                }
+
                 // チューナーを開いたとき (後ろが暗くなる)
                 practice.perform (Command::toggleTuner);
                 snap (practice, 1280, 800, "practice_tuner.png");

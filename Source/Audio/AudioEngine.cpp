@@ -17,7 +17,8 @@ namespace
             case ToneType::crunch: return std::tanh (sample * 4.0f) * 0.6f;
             case ToneType::drive:  return std::tanh (sample * 20.0f) * 0.4f;
             case ToneType::clean:
-            case ToneType::nam:    break;
+            case ToneType::nam:
+            case ToneType::plugin: break;
         }
         return sample;
     }
@@ -32,6 +33,7 @@ namespace
 AudioEngine::AudioEngine()
 {
     formatManager.registerBasicFormats();
+    juce::addDefaultFormatsToManager (pluginFormats);   // VST3 (JUCE_PLUGINHOST_VST3=1)
     startTimerHz (10);
 }
 
@@ -41,6 +43,11 @@ AudioEngine::~AudioEngine()
     deviceManager.removeAudioCallback (this);
     deviceManager.closeAudioDevice();
     loaderPool.removeAllJobs (true, 5000);
+
+    // オーディオが止まったあとで、プラグインを確実にここ (メッセージスレッド) で消す
+    currentPluginTone.store (nullptr);
+    ownedPluginTone.reset();
+    retired.clear();
 }
 
 //==============================================================================
@@ -125,6 +132,99 @@ void AudioEngine::loadNamToneAsync (const juce::File& ampModel, const juce::File
 void AudioEngine::clearNamTone()
 {
     loadNamToneAsync ({}, {}, nullptr);
+}
+
+//==============================================================================
+// VST3 プラグインの音色
+void AudioEngine::loadPluginToneAsync (const juce::File& vst3File, const juce::MemoryBlock& state, LoadCallback onDone)
+{
+    const auto generation = ++pluginToneGeneration;
+
+    if (vst3File == juce::File())
+    {
+        pluginToneLoading = false;
+        installPluginTone (nullptr);
+        if (onDone != nullptr)
+            onDone (true, {});
+        return;
+    }
+
+    pluginToneLoading = true;
+    juce::WeakReference<AudioEngine> weakThis (this);
+
+    PluginTone::createAsync (pluginFormats, vst3File, state,
+                             deviceSampleRate.load(), deviceBufferSize.load(),
+                             [weakThis, generation, onDone] (std::shared_ptr<PluginTone> tone, const juce::String& error)
+    {
+        auto* self = weakThis.get();
+        if (self == nullptr || generation != self->pluginToneGeneration)
+            return;   // 破棄済み、または後から別のプラグインが選ばれた (できたものはここで消える: メッセージスレッド)
+
+        self->pluginToneLoading = false;
+
+        if (tone != nullptr)
+            self->installPluginTone (tone);
+
+        if (onDone != nullptr)
+            onDone (tone != nullptr, error);
+    });
+}
+
+void AudioEngine::clearPluginTone()
+{
+    loadPluginToneAsync ({}, {}, nullptr);
+}
+
+void AudioEngine::installPluginTone (std::shared_ptr<PluginTone> newTone)
+{
+    // 今のプラグインの編集画面を、画面に消してもらう (プラグインより先に消す必要がある)
+    if (ownedPluginTone != nullptr && onPluginToneAboutToReplace != nullptr)
+        onPluginToneAboutToReplace();
+
+    // 古いものは、オーディオスレッドが使い終わってから解放する (音源・NAM と同じ)
+    if (ownedPluginTone != nullptr)
+        retired.push_back ({ ownedPluginTone, callbackCount.load() });
+
+    ownedPluginTone = std::move (newTone);
+    pluginDetachedAtCallback = -1;
+    currentPluginTone.store (ownedPluginTone.get());
+
+    if (onPluginToneChanged != nullptr)
+        onPluginToneChanged();
+}
+
+void AudioEngine::updatePluginPreparation()
+{
+    if (ownedPluginTone == nullptr)
+        return;
+
+    auto* device = deviceManager.getCurrentAudioDevice();
+    const bool deviceRunning = device != nullptr && device->isPlaying();
+    const auto sampleRate = deviceSampleRate.load();
+    const auto blockSize = deviceBufferSize.load();
+
+    if (pluginDetachedAtCallback < 0)
+    {
+        // デバイスのサンプルレートやバッファが変わったら、準備し直す。
+        // プラグインの準備 (prepareToPlay) は、オーディオスレッドが使っている間にはできないので、まず外す
+        const bool changed = ! juce::approximatelyEqual (ownedPluginTone->getSampleRate(), sampleRate)
+                          || ownedPluginTone->getBlockSize() < blockSize;
+        if (! changed)
+            return;
+
+        currentPluginTone.store (nullptr);
+        pluginDetachedAtCallback = (juce::int64) callbackCount.load();
+        if (deviceRunning)
+            return;   // 次のタイマーで、オーディオスレッドが使い終わったのを確かめてから準備する
+    }
+
+    // 外してからコールバックが2回進めば (またはデバイスが止まっていれば)、もう使われていない
+    if (deviceRunning && (juce::int64) callbackCount.load() <= pluginDetachedAtCallback + 1)
+        return;
+
+    ownedPluginTone->prepare (sampleRate, blockSize);
+    pluginDetachedAtCallback = -1;
+    currentPluginTone.store (ownedPluginTone.get());
 }
 
 void AudioEngine::installNamTone (std::shared_ptr<NamTone> newTone)
@@ -261,6 +361,8 @@ void AudioEngine::timerCallback()
         if (rateChanged || blockTooSmall)
             loadNamToneAsync (namAmpFile, namCabinetFile, nullptr);
     }
+
+    updatePluginPreparation();
 }
 
 //==============================================================================
@@ -326,7 +428,18 @@ void AudioEngine::processGuitar (const float* input, int numSamples, int toneTyp
     if (inPeak > inputPeak.load())
         inputPeak.store (inPeak);
 
-    if ((ToneType) toneType == ToneType::nam)
+    if ((ToneType) toneType == ToneType::plugin)
+    {
+        // VST3 プラグイン。準備し直している最中 (外している間) は、音色なしでそのまま出す
+        auto* pluginTone = currentPluginTone.load();
+        if (pluginTone != nullptr && juce::approximatelyEqual (pluginTone->getSampleRate(), deviceSampleRate.load()))
+        {
+            const auto block = pluginTone->getBlockSize();
+            for (int start = 0; start < numSamples; start += block)
+                pluginTone->process (buffer + start, juce::jmin (block, numSamples - start));
+        }
+    }
+    else if ((ToneType) toneType == ToneType::nam)
     {
         // 今のデバイスと同じサンプルレートで準備したモデルだけを使う。
         // 違うとき (読み込み直している最中) は、音色なしでそのまま出す

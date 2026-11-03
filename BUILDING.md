@@ -10,7 +10,7 @@ ASIO SDK (Steinberg。GPL v3 との二重ライセンス) も、初回の構成�
 
 NeuralAmpModelerCore v0.6.0 (MIT。NAM の音色) と、その依存の Eigen (MPL-2.0)・nlohmann/json (MIT) も、初回の構成時に自動で取得されます。NAM の部分は Debug ビルドでも最適化してコンパイルします (Eigen は最適化しないとリアルタイムに間に合わないため)。
 
-開発用の確認 (Debug のみ): `"Guitar Practice.exe" --audio-check <出力フォルダ> --nam <モデル.nam> [--ir <IR.wav>]` で、使えるオーディオデバイスの一覧と、NAM の処理時間を `audio-check.txt` に書き出します (音は出しません)。
+開発用の確認 (Debug のみ): `"Guitar Practice.exe" --audio-check <出力フォルダ> --nam <モデル.nam> [--ir <IR.wav>] [--plugin <プラグイン.vst3>]` で、使えるオーディオデバイスの一覧、NAM の処理時間、VST3 プラグインの読み込み・処理時間・状態の保存と復元・画面の大きさを `audio-check.txt` に書き出します (音は出さず、画面も開きません)。
 
 デザイントークン (`design/tokens.json`) を変えたときは、ビルドの前に `python design/generate_tokens.py` を実行します (`design/README.md`)。
 
@@ -36,6 +36,8 @@ cmake --build build --config Debug
 | `Source/Audio/AudioEngine` | 音声処理 (ギター入力→音色、ローカル音源、メトロノーム、3系統ミキサー、チューナー入力) |
 | `Source/Audio/NamTone` | NAM の音色 (アンプのモデル .nam + キャビネットの IR .wav) |
 | `Source/UI/ToneDetailPanel` | 音色の設定 (NAM のファイル、入力の大きさ、メーター、デバイスの情報) |
+| `Source/Audio/PluginTone`, `PluginLocator.h` | VST3 プラグインの音色 (TONE3000 など)。標準の置き場所から名前で探す |
+| `Source/UI/PluginToneCard` | TONE3000 のカード (プラグインの画面を練習画面の右パネルに埋め込む) |
 | `Source/DevAudioCheck` | 開発用 (Debug のみ): `--audio-check` でデバイスの一覧と NAM の処理時間を確かめる |
 | `Source/Audio/TapTempo.h`, `PitchDetector.h` | タップテンポ、音程検出 |
 | `Source/Model/Session`, `SessionStore` | セッションのデータと `.gppractice` の読み書き |

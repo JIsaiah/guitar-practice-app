@@ -48,7 +48,8 @@ SessionSetupScreen::SessionSetupScreen()
         button.setButtonText (juce::String::fromUTF8 (presets[i].name));
         button.setClickingTogglesState (true);
         button.setRadioGroupId (1);
-        button.onClick = [this, i] { selectTone ((int) i); };
+        // オンになったときだけ処理する (オフになった通知で selectTone を呼ぶと、2つ選ばれた状態になる)
+        button.onClick = [this, i] { if (toneButtons[i].getToggleState()) selectTone ((int) i); };
         addAndMakeVisible (button);
     }
 

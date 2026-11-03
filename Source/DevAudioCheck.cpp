@@ -2,6 +2,7 @@
 
 #if JUCE_DEBUG
 #include <juce_audio_devices/juce_audio_devices.h>
+#include <juce_audio_processors/juce_audio_processors.h>
 #include "Audio/NamTone.h"
 
 namespace
@@ -98,6 +99,114 @@ namespace
                << juce::String (juce::Decibels::gainToDecibels ((float) std::sqrt (sumSquares / (double) sampleIndex)), 1) << " dBFS\n"
                << "output finite: " << (finite ? "yes" : "NO") << "\n\n";
     }
+
+    // VST3 プラグインを読み込み、チャンネル数・処理時間・編集画面の大きさ・状態の保存と復元を確かめる
+    // (練習画面では非同期で作るが、ここはメッセージループが動く前なので同期で作る)
+    void checkPlugin (const juce::File& vst3, juce::String& report)
+    {
+        constexpr double sampleRate = 48000.0;
+        constexpr int blockSize = 256;
+
+        report << "== VST3 plugin check ==\n" << "file: " << vst3.getFullPathName() << "\n";
+
+        juce::AudioPluginFormatManager formats;
+        juce::addDefaultFormatsToManager (formats);
+
+        juce::OwnedArray<juce::PluginDescription> types;
+        for (auto* format : formats.getFormats())
+            if (format->fileMightContainThisPluginType (vst3.getFullPathName()))
+                format->findAllTypesForFile (types, vst3.getFullPathName());
+
+        if (types.isEmpty())
+        {
+            report << "ERROR: no plugin types found\n\n";
+            return;
+        }
+
+        report << "name: " << types[0]->name << " / " << types[0]->manufacturerName << " / " << types[0]->version << "\n";
+
+        juce::String error;
+        auto plugin = formats.createPluginInstance (*types[0], sampleRate, blockSize, error);
+        if (plugin == nullptr)
+        {
+            report << "ERROR: " << error << "\n\n";
+            return;
+        }
+
+        plugin->setRateAndBufferSizeDetails (sampleRate, blockSize);
+        plugin->prepareToPlay (sampleRate, blockSize);
+        report << "inputs: " << plugin->getTotalNumInputChannels() << ", outputs: " << plugin->getTotalNumOutputChannels()
+               << ", latency: " << plugin->getLatencySamples() << " samples\n";
+
+        // 処理時間 (5 秒分)
+        const auto channels = juce::jmax (2, plugin->getTotalNumInputChannels(), plugin->getTotalNumOutputChannels());
+        juce::AudioBuffer<float> buffer (channels, blockSize);
+        juce::MidiBuffer midi;
+        const auto totalBlocks = (int) (5.0 * sampleRate / blockSize);
+        double totalMs = 0.0, worstMs = 0.0;
+        float peak = 0.0f;
+        juce::int64 sampleIndex = 0;
+
+        for (int b = 0; b < totalBlocks; ++b)
+        {
+            for (int i = 0; i < blockSize; ++i, ++sampleIndex)
+            {
+                const auto t = (double) (sampleIndex % (juce::int64) (sampleRate * 0.5)) / sampleRate;
+                const auto s = (float) (0.3 * std::exp (-t * 4.0) * std::sin (juce::MathConstants<double>::twoPi * 110.0 * (double) sampleIndex / sampleRate));
+                for (int ch = 0; ch < channels; ++ch)
+                    buffer.setSample (ch, i, ch < plugin->getTotalNumInputChannels() ? s : 0.0f);
+            }
+
+            const auto start = juce::Time::getHighResolutionTicks();
+            plugin->processBlock (buffer, midi);
+            const auto ms = juce::Time::highResolutionTicksToSeconds (juce::Time::getHighResolutionTicks() - start) * 1000.0;
+            totalMs += ms;
+            if (b >= 4)
+                worstMs = juce::jmax (worstMs, ms);
+            peak = juce::jmax (peak, buffer.getMagnitude (0, 0, blockSize));
+        }
+
+        const auto budgetMs = blockSize * 1000.0 / sampleRate;
+        report << "process average: " << juce::String (totalMs / totalBlocks, 3) << " ms, worst: " << juce::String (worstMs, 3)
+               << " ms (budget " << juce::String (budgetMs, 3) << " ms)\n"
+               << "output peak (left): " << juce::String (juce::Decibels::gainToDecibels (peak), 1) << " dBFS\n";
+
+        // 状態の保存と復元
+        juce::MemoryBlock state;
+        plugin->getStateInformation (state);
+        plugin->setStateInformation (state.getData(), (int) state.getSize());
+        juce::MemoryBlock again;
+        plugin->getStateInformation (again);
+        report << "state: " << (int) state.getSize() << " bytes, restored: " << (int) again.getSize() << " bytes, same: "
+               << (state == again ? "yes" : "no (plugin rewrites some values)") << "\n";
+
+        // 編集画面の大きさ (画面には出さない)
+        if (plugin->hasEditor())
+        {
+            std::unique_ptr<juce::AudioProcessorEditor> editor (plugin->createEditorAndMakeActive());
+            if (editor != nullptr)
+            {
+                report << "editor size: " << editor->getWidth() << " x " << editor->getHeight()
+                       << ", resizable: " << (editor->isResizable() ? "yes" : "no") << "\n";
+
+                // 小さくできるか: 半分の大きさを頼んで、実際にどうなったか
+                editor->setSize (editor->getWidth() / 2, editor->getHeight() / 2);
+                report << "after asking half size: " << editor->getWidth() << " x " << editor->getHeight() << "\n";
+
+                if (auto* constrainer = editor->getConstrainer())
+                    report << "constrainer min: " << constrainer->getMinimumWidth() << " x " << constrainer->getMinimumHeight()
+                           << ", fixed aspect: " << constrainer->getFixedAspectRatio() << "\n";
+            }
+            editor = nullptr;   // プラグインより先に消す
+        }
+        else
+        {
+            report << "editor: none (generic editor will be used)\n";
+        }
+
+        plugin->releaseResources();
+        report << "\n";
+    }
 }
 
 juce::String DevAudioCheck::run (const juce::String& commandLine)
@@ -115,6 +224,10 @@ juce::String DevAudioCheck::run (const juce::String& commandLine)
     const auto ir = argumentAfter (commandLine, "--ir");
     if (model.isNotEmpty())
         benchmarkNam (juce::File (model), ir.isNotEmpty() ? juce::File (ir) : juce::File(), report);
+
+    const auto plugin = argumentAfter (commandLine, "--plugin");
+    if (plugin.isNotEmpty())
+        checkPlugin (juce::File (plugin), report);
 
     folder.getChildFile ("audio-check.txt").replaceWithText (report);
     return report;

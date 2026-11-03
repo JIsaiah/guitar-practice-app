@@ -6,6 +6,7 @@
 #include <juce_audio_utils/juce_audio_utils.h>
 #include "../Model/TonePresets.h"
 #include "NamTone.h"
+#include "PluginTone.h"
 
 // 音声処理の中心 (設計書 5.1)
 //
@@ -83,6 +84,17 @@ public:
     };
     NamToneInfo getNamToneInfo() const;
 
+    //==== VST3 プラグインの音色 (TONE3000 など。メッセージスレッドから呼ぶ) ====
+    // プラグインを非同期で作り、準備ができたら差し替える。vst3File が空なら外す。
+    // 差し替える前に onAboutToReplace が呼ばれる: 画面は、そこで今のプラグインの編集画面を消すこと
+    // (編集画面はプラグインより先に消す必要がある)
+    void loadPluginToneAsync (const juce::File& vst3File, const juce::MemoryBlock& state, LoadCallback onDone);
+    void clearPluginTone();
+    PluginTone* getPluginTone() const noexcept { return ownedPluginTone.get(); }   // 編集画面を作るため
+    bool isPluginToneLoading() const noexcept  { return pluginToneLoading; }
+    std::function<void()> onPluginToneAboutToReplace;
+    std::function<void()> onPluginToneChanged;   // 差し替えた後 (画面は編集画面を作り直す)
+
     // ギターの入力の大きさ (dB)。NAM のモデルは、入る音の大きさで歪み方が変わる
     void setInputGainDb (float db) noexcept { inputGain.store (juce::Decibels::decibelsToGain (db)); }
 
@@ -129,6 +141,8 @@ private:
     std::shared_ptr<LoadedAudio> readAudioFile (const juce::File& file, juce::String& error);
     void installSource (std::shared_ptr<LoadedAudio> newSource);
     void installNamTone (std::shared_ptr<NamTone> newTone);
+    void installPluginTone (std::shared_ptr<PluginTone> newTone);
+    void updatePluginPreparation();   // デバイスの設定が変わったら、プラグインを準備し直す
     void processGuitar (const float* input, int numSamples, int toneType) noexcept;
     void pushTunerInput (const float* data, int numSamples) noexcept;
     void triggerClick (bool accent, double sampleRate) noexcept;
@@ -143,6 +157,13 @@ private:
     int loadGeneration = 0;
 
     std::shared_ptr<NamTone> ownedNamTone;
+
+    juce::AudioPluginFormatManager pluginFormats;   // VST3 (メッセージスレッドだけが使う)
+    std::shared_ptr<PluginTone> ownedPluginTone;
+    int pluginToneGeneration = 0;
+    bool pluginToneLoading = false;
+    // 準備し直し: オーディオスレッドから外した時点のコールバックの回数。-1 なら準備し直していない
+    juce::int64 pluginDetachedAtCallback = -1;
     juce::File namAmpFile, namCabinetFile;   // 選ばれているファイル (デバイスの設定が変わったら、読み込み直す)
     int namToneGeneration = 0;
     bool namToneLoading = false;
@@ -151,6 +172,7 @@ private:
     // スレッド間で共有する値
     std::atomic<LoadedAudio*> currentSource { nullptr };
     std::atomic<NamTone*> currentNamTone { nullptr };
+    std::atomic<PluginTone*> currentPluginTone { nullptr };
     std::atomic<int> deviceBufferSize { 512 };
     std::atomic<float> inputGain { 1.0f };
     std::atomic<float> inputPeak { 0.0f }, guitarPeak { 0.0f };

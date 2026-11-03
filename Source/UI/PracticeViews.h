@@ -316,6 +316,37 @@ private:
     juce::Label valueLabel;
 };
 
+// カード (角の丸い面) を並べる入れ物。右のパネルの、スクロールする部分の中身に使う
+class CardColumn final : public juce::Component
+{
+public:
+    std::vector<juce::Rectangle<int>> cards;   // 面を描く場所 (この部品の中の座標)
+
+    void paint (juce::Graphics& g) override
+    {
+        for (const auto& card : cards)
+        {
+            g.setColour (findColour (ThemeColourIds::panel));
+            g.fillRoundedRectangle (card.toFloat(), 8.0f);
+            g.setColour (findColour (ThemeColourIds::border));
+            g.drawRoundedRectangle (card.toFloat().reduced (0.5f), 8.0f, 1.0f);
+        }
+    }
+};
+
+// スクロールする枠。見えている範囲が変わったら知らせる (プラグインの画面を出す・隠すの判定に使う)
+class ScrollArea final : public juce::Viewport
+{
+public:
+    std::function<void()> onScrolled;
+
+    void visibleAreaChanged (const juce::Rectangle<int>&) override
+    {
+        if (onScrolled != nullptr)
+            onScrolled();
+    }
+};
+
 // チューナーなどを開いている間、後ろの画面を少し暗くする幕。クリックすると onClick (閉じる)
 class DimOverlay final : public juce::Component
 {

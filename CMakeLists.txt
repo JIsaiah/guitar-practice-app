@@ -90,6 +90,9 @@ target_sources(GuitarPractice PRIVATE
     Source/Web/WebResources.cpp
     Source/Audio/AudioEngine.cpp
     Source/Audio/NamTone.cpp
+    Source/Audio/PluginTone.cpp
+    Source/UI/PluginToneCard.cpp
+    Source/Platform/WindowOwner.cpp
     Source/DevAudioCheck.cpp
     Source/UI/ToneDetailPanel.cpp
     Source/Model/Session.cpp
@@ -140,6 +143,7 @@ target_compile_definitions(GuitarPractice PRIVATE
     JUCE_USE_CURL=0
     JUCE_USE_MP3AUDIOFORMAT=1
     JUCE_ASIO=1
+    JUCE_PLUGINHOST_VST3=1   # VST3 プラグイン (TONE3000 など) を鳴らす
     JUCE_APPLICATION_NAME_STRING="$<TARGET_PROPERTY:GuitarPractice,JUCE_PRODUCT_NAME>"
     JUCE_APPLICATION_VERSION_STRING="$<TARGET_PROPERTY:GuitarPractice,JUCE_VERSION>")
 

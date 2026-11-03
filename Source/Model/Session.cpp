@@ -86,12 +86,16 @@ juce::var Session::toVar() const
         { "layout",   makeObject ({ { "video_in_main_area", videoInMainArea } }) },
         { "loop",     makeObject ({ { "a_ms", loopStartMs }, { "b_ms", loopEndMs }, { "enabled", loopEnabled } }) },
         { "mixer",    makeObject ({ { "source", mixSource }, { "guitar", mixGuitar }, { "metronome", mixMetronome } }) },
-        { "tone",     makeObject ({ { "type", tonePresetId == "nam" ? "nam" : "builtin" },
+        { "tone",     makeObject ({ { "type", tonePresetId == "nam" ? "nam" : tonePresetId == "tone3000" ? "vst3" : "builtin" },
                                     { "preset_id", tonePresetId },
                                     { "nam_model", namModelPath },
                                     { "ir", irPath },
                                     { "input_gain_db", inputGainDb },
-                                    { "vst3", emptyArray() } }) },
+                                    // 設計書 6章の "vst3": プラグインのファイルと状態 (今は1つだけ)
+                                    { "vst3", pluginPath.isEmpty() ? emptyArray()
+                                                                   : juce::var (juce::Array<juce::var> {
+                                                                         makeObject ({ { "path", pluginPath },
+                                                                                       { "state", pluginState } }) }) } }) },
     });
 }
 
@@ -136,6 +140,13 @@ Session Session::fromVar (const juce::var& value)
     s.namModelPath = getOr<juce::String> (tone["nam_model"], {});
     s.irPath = getOr<juce::String> (tone["ir"], {});
     s.inputGainDb = getOr<double> (tone["input_gain_db"], 0.0);
+
+    if (const auto* plugins = tone["vst3"].getArray(); plugins != nullptr && ! plugins->isEmpty())
+    {
+        const auto& plugin = plugins->getReference (0);
+        s.pluginPath = getOr<juce::String> (plugin["path"], {});
+        s.pluginState = getOr<juce::String> (plugin["state"], {});
+    }
 
     return s;
 }

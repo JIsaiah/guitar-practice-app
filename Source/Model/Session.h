@@ -52,7 +52,9 @@ struct Session
     double mixGuitar = 1.0;
     double mixMetronome = 0.8;
 
-    juce::String tonePresetId = "clean-01";   // 簡易な音色の ID か、"nam"
+    juce::String tonePresetId = "clean-01";   // 簡易な音色の ID か、"nam"、"tone3000"
+    juce::String pluginPath;                   // VST3 プラグイン (TONE3000) の .vst3
+    juce::String pluginState;                  // プラグインの状態 (選んだ音色・つまみ)。Base64
     juce::String namModelPath;                 // NAM のアンプのモデル (.nam)
     juce::String irPath;                       // キャビネットの IR (.wav)
     double inputGainDb = 0.0;                  // ギターの入力の大きさ (dB)

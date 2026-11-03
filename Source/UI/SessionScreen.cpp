@@ -1,6 +1,7 @@
 #include "SessionScreen.h"
 #include "../Model/TonePresets.h"
 #include "../Model/YouTubeUrl.h"
+#include "../Audio/PluginLocator.h"
 #include "../Text.h"
 
 namespace
@@ -98,17 +99,77 @@ SessionScreen::SessionScreen (AudioEngine& e, SessionStore& s, ThemeManager& t, 
     chooseFileButton.onClick = [this] { chooseSourceFile(); };
     pasteUrlButton.onClick = [this] { pasteYouTubeUrl(); };
 
-    //==== 右: 音色 (簡易な音色 3 つと、NAM) ====
+    //==== 右: 音色 (簡易な音色 3 つ、TONE3000 プラグイン、NAM) ====
     const auto& presets = getTonePresets();
     for (size_t i = 0; i < toneButtons.size(); ++i)
     {
         auto& button = toneButtons[i];
-        button.setButtonText (i == namToneIndex ? juce::String ("NAM") : juce::String::fromUTF8 (presets[i].name));
+        button.setButtonText (i == pluginToneIndex ? juce::String ("TONE3000")
+                              : i == namToneIndex  ? juce::String ("NAM")
+                                                   : juce::String::fromUTF8 (presets[i].name));
         button.setClickingTogglesState (true);
         button.setRadioGroupId (1);
-        button.onClick = [this, i] { selectTone ((int) i, true); };
+        // ラジオボタンは、ほかのボタンを押したときに「オフになった」通知でも onClick が呼ばれる。
+        // そのとき selectTone を呼ぶと、オフにされたボタンをまたオンに戻してしまい、2つ選ばれた状態になる。
+        // オンになったときだけ処理する
+        button.onClick = [this, i] { if (toneButtons[i].getToggleState()) selectTone ((int) i, true); };
     }
     toneButtons[namToneIndex].setTooltip ("NAM のアンプのモデル (.nam) とキャビネットの IR (.wav) で鳴らします"_jp);
+    toneButtons[pluginToneIndex].setTooltip ("TONE3000 プラグインで鳴らします。音色とミキサーの間に、プラグインの画面が出ます"_jp);
+
+    //==== 右: TONE3000 プラグインのカード ====
+    pluginCard.onChooseFile = [this] { choosePluginFile(); };
+    pluginCard.onRescan = [this]
+    {
+        // 前に選んだファイルが無くなっていたら、標準の置き場所から探し直す
+        if (session.pluginPath.isNotEmpty() && ! juce::File (session.pluginPath).exists())
+            session.pluginPath = {};
+        loadPluginTone();
+    };
+    // カードの大きさが変わったら並べ直す。並べ直しの中でカードがまた知らせることがあるので、
+    // その場ではなく次のメッセージで、まとめて1回だけ並べ直す
+    pluginCard.onSizeChanged = [this]
+    {
+        if (relayoutPending)
+            return;
+        relayoutPending = true;
+        juce::MessageManager::callAsync ([safe = juce::Component::SafePointer (this)]
+        {
+            if (safe == nullptr)
+                return;
+            safe->relayoutPending = false;
+            safe->resized();
+        });
+    };
+
+    // エンジンからの知らせを受け取り、プラグインの編集画面を出す。
+    // 画面を切り替えるときは「新しい画面を作る → 古い画面を消す」の順なので、ここですぐに登録すると、
+    // 古い画面のデストラクタが登録を消してしまう。古い画面の編集画面もまだ残っている。
+    // そこで、古い画面が消えた後 (次のメッセージ) に登録し、編集画面を作る
+    juce::MessageManager::callAsync ([safe = juce::Component::SafePointer (this)]
+    {
+        if (safe == nullptr)
+            return;
+
+        // エンジンがプラグインを差し替える前に、編集画面を消す (編集画面はプラグインより先に消す決まり)
+        safe->engine.onPluginToneAboutToReplace = [safe] { if (safe != nullptr) safe->pluginCard.deleteEditor(); };
+        safe->engine.onPluginToneChanged = [safe]
+        {
+            if (safe == nullptr)
+                return;
+            safe->pluginCard.refreshEditor();
+            safe->pluginScrollPending = true;   // 出てきた編集画面の全体が見えるところまでスクロールする
+            safe->resized();
+        };
+
+        // すでにプラグインが読み込まれていれば (前の画面から、または読み込みが先に終わった)、編集画面を出す
+        if (safe->engine.getPluginTone() != nullptr)
+        {
+            safe->pluginCard.refreshEditor();
+            safe->pluginScrollPending = true;
+            safe->resized();
+        }
+    });
 
     toneSummaryLabel.setFont (juce::FontOptions (12.0f));
     toneDetailButton.setButtonText ("音色の設定…"_jp);
@@ -234,11 +295,12 @@ SessionScreen::SessionScreen (AudioEngine& e, SessionStore& s, ThemeManager& t, 
              &splitter, &sidePanelButton,
              &sourceHeading, &toneHeading, &mixerHeading, &offsetHeading,
              &videoView, &sourceInfoLabel, &sourceRemoveButton, &chooseFileButton, &pasteUrlButton,
-             &toneButtons[0], &toneButtons[1], &toneButtons[2], &toneButtons[3], &toneSummaryLabel, &toneDetailButton,
+             &toneButtons[0], &toneButtons[1], &toneButtons[2], &toneButtons[3], &toneButtons[4],
+             &toneSummaryLabel, &toneDetailButton,
              &sourceGainLabel, &guitarGainLabel, &metronomeGainLabel,
              &sourceGainSlider, &guitarGainSlider, &metronomeGainSlider, &sourceMuteButton,
              &bpmLabel, &bpmSlider, &tapButton, &scoreOffsetLabel, &scoreOffsetControl, &offsetLabel, &offsetControl,
-             &tunerButton,
+             &sideScroll, &tunerButton,
              &playHeading, &speedHeading, &metronomeHeading, &loopHeading,
              &toStartButton, &rewindButton, &playButton, &forwardButton, &speedSlider, &equalBarsButton,
              &metronomeButton, &metronomeSoloButton,
@@ -252,6 +314,21 @@ SessionScreen::SessionScreen (AudioEngine& e, SessionStore& s, ThemeManager& t, 
     }
 
     setWantsKeyboardFocus (true);
+
+    // 右のパネルの、音源のカードより下の部品は、スクロールする入れ物 (sideContent) に移す。
+    // 音色のボタンは、同じ入れ物の中にそろって入るので、ラジオボタン (1つだけ選ぶ) はそのまま働く
+    for (auto* c : std::initializer_list<juce::Component*> {
+             &toneHeading, &toneButtons[0], &toneButtons[1], &toneButtons[2], &toneButtons[3], &toneButtons[4],
+             &toneSummaryLabel, &toneDetailButton,
+             &mixerHeading, &sourceGainLabel, &guitarGainLabel, &metronomeGainLabel,
+             &sourceGainSlider, &guitarGainSlider, &metronomeGainSlider, &sourceMuteButton,
+             &offsetHeading, &bpmLabel, &bpmSlider, &tapButton, &scoreOffsetLabel, &scoreOffsetControl, &offsetLabel, &offsetControl })
+        sideContent.addAndMakeVisible (c);
+
+    sideContent.addChildComponent (pluginCard);
+    sideScroll.setViewedComponent (&sideContent, false);
+    sideScroll.setScrollBarsShown (true, false);   // 縦だけ (必要なときだけ出る)
+    sideScroll.onScrolled = [this] { updatePluginEditorVisibility(); };
 
     // URL の欄は、ダブルクリックで文字を入力できるようにする (上でキーボードを受け取らない設定にしたため戻す)
     sourceInfoLabel.setWantsKeyboardFocus (true);
@@ -313,6 +390,11 @@ SessionScreen::~SessionScreen()
     youtube.showCountdown (0);
     scoreViewer.showCountdown (0);
 
+    // プラグインはエンジンのもの (次の画面でも使える)。この画面の編集画面だけを消し、知らせの受け取りをやめる
+    engine.onPluginToneAboutToReplace = nullptr;
+    engine.onPluginToneChanged = nullptr;
+    pluginCard.deleteEditor();
+
     youtube.onKey = nullptr;
     scoreViewer.onLoaded = nullptr;
     scoreViewer.onError = nullptr;
@@ -329,9 +411,15 @@ SessionScreen::~SessionScreen()
 //==============================================================================
 void SessionScreen::applySessionToEngine()
 {
-    selectTone (session.tonePresetId == namTonePresetId ? namToneIndex : findTonePresetIndex (session.tonePresetId), false);
+    selectTone (session.tonePresetId == namTonePresetId    ? namToneIndex
+              : session.tonePresetId == pluginTonePresetId ? pluginToneIndex
+                                                           : findTonePresetIndex (session.tonePresetId), false);
     engine.setInputGainDb ((float) session.inputGainDb);
     loadNamTone();
+
+    // TONE3000 を使うセッションなら、プラグインを読み込み、保存した状態 (選んだ音色・つまみ) に戻す
+    if (session.tonePresetId == pluginTonePresetId || session.pluginPath.isNotEmpty())
+        loadPluginTone();
     applySourceGain();
     engine.setGuitarGain ((float) session.mixGuitar);
     engine.setMetronomeGain ((float) session.mixMetronome);
@@ -701,7 +789,8 @@ void SessionScreen::seekTo (double seconds)
 
 bool SessionScreen::isDirty() const
 {
-    return juce::JSON::toString (session.toVar()) != savedSnapshot;
+    // プラグインのつまみの変更は、セッションの値には表れないので別に見る (timerCallback で1秒ごとに確かめる)
+    return juce::JSON::toString (session.toVar()) != savedSnapshot || pluginStateChanged;
 }
 
 bool SessionScreen::writeToDisk()
@@ -721,6 +810,8 @@ bool SessionScreen::writeToDisk()
 
 bool SessionScreen::save()
 {
+    capturePluginState();   // TONE3000 で選んだ音色・つまみも保存する
+
     if (! writeToDisk())
     {
         setStatus ("保存できませんでした"_jp);
@@ -1416,10 +1507,38 @@ void SessionScreen::showOverlay (juce::Component* panel)
 // 音色
 void SessionScreen::selectTone (int index, bool fromUser)
 {
-    index = juce::jlimit (0, namToneIndex, index);
+    index = juce::jlimit (0, (int) toneButtons.size() - 1, index);
     toneButtons[(size_t) index].setToggleState (true, juce::dontSendNotification);
 
-    if (index == namToneIndex)
+    if (index == pluginToneIndex)
+    {
+        session.tonePresetId = pluginTonePresetId;
+        engine.setTone (ToneType::plugin);
+
+        // まだ読み込んでいなければ読み込む (見つからなければ、カードにダウンロードの案内が出る)
+        if (fromUser && engine.getPluginTone() == nullptr && ! engine.isPluginToneLoading())
+            loadPluginTone();
+
+        // 前のセッションから残っているプラグインを、そのまま使い始めたとき: このセッションのものとして記録する
+        if (fromUser && pluginBaselineState.isEmpty())
+            if (auto* tone = engine.getPluginTone())
+            {
+                session.pluginPath = tone->getFile().getFullPathName();
+                pluginBaselineState = tone->getState().toBase64Encoding();
+            }
+
+        // 音色とミキサーの間に出たカードの全体が見えるところまで、スクロールする (resized の最後で行う)。
+        // プラグインの画面は別のウィンドウで開く (読み込み中なら、できたときに開く)。
+        // TONE3000 を選んだままもう一度押したときも、閉じたウィンドウをまた開く
+        if (fromUser)
+        {
+            pluginScrollPending = true;
+            pluginCard.requestOpenWindow();
+        }
+
+        resized();
+    }
+    else if (index == namToneIndex)
     {
         session.tonePresetId = namTonePresetId;
         engine.setTone (ToneType::nam);
@@ -1436,6 +1555,114 @@ void SessionScreen::selectTone (int index, bool fromUser)
     }
 
     updateToneSummary();
+
+    // TONE3000 のカードを出す・しまう
+    if (pluginCard.isVisible() != isPluginToneSelected())
+        resized();
+}
+
+//==============================================================================
+// TONE3000 (VST3 プラグイン)
+bool SessionScreen::isPluginToneSelected() const noexcept
+{
+    return session.tonePresetId == pluginTonePresetId;
+}
+
+void SessionScreen::loadPluginTone()
+{
+    // セッションで選んであるファイル。なければ、標準の置き場所から TONE3000 を探す
+    auto file = session.pluginPath.isNotEmpty() ? juce::File (session.pluginPath) : PluginLocator::findTone3000();
+
+    if (! file.exists())
+    {
+        pluginCard.setState (PluginToneCard::State::notFound,
+                             session.pluginPath.isNotEmpty()
+                                 ? "プラグインが見つかりません: "_jp + session.pluginPath
+                                       + "\n移動・削除していないか確かめるか、TONE3000 をインストールし直してください。"_jp
+                                 : juce::String());
+        return;
+    }
+
+    // 保存した状態 (選んだ音色・つまみ)。別のプラグインに切り替えたときは使わない
+    juce::MemoryBlock state;
+    if (session.pluginState.isNotEmpty() && file.getFullPathName() == session.pluginPath)
+        state.fromBase64Encoding (session.pluginState);
+
+    pluginCard.setState (PluginToneCard::State::loading);
+
+    engine.loadPluginToneAsync (file, state, [safe = juce::Component::SafePointer (this), file] (bool succeeded, const juce::String& error)
+    {
+        if (safe == nullptr)
+            return;
+
+        if (! succeeded)
+        {
+            safe->pluginCard.setState (PluginToneCard::State::error, error);
+            return;
+        }
+
+        safe->session.pluginPath = file.getFullPathName();
+
+        // 読み込んだ直後の状態を「保存されている状態」とする (つまみを動かしたら、未保存の変更になる)
+        if (auto* tone = safe->engine.getPluginTone())
+            safe->pluginBaselineState = tone->getState().toBase64Encoding();
+        safe->pluginStateChanged = false;
+    });
+}
+
+void SessionScreen::choosePluginFile()
+{
+    const auto folders = PluginLocator::getVst3Folders();
+    fileChooser = std::make_unique<juce::FileChooser> ("VST3 プラグインを選ぶ"_jp, folders.getFirst(), "*.vst3");
+
+    // .vst3 はフォルダのこともあるので、フォルダも選べるようにする
+    fileChooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles
+                                  | juce::FileBrowserComponent::canSelectDirectories,
+                              [safe = juce::Component::SafePointer (this)] (const juce::FileChooser& chooser)
+    {
+        const auto file = chooser.getResult();
+        if (safe == nullptr || file == juce::File())
+            return;
+
+        safe->session.pluginPath = file.getFullPathName();
+        safe->session.pluginState = {};   // 別のプラグインなので、前の状態は使わない
+        safe->loadPluginTone();
+    });
+}
+
+void SessionScreen::capturePluginState()
+{
+    // TONE3000 を使っていないセッションには書かない (前のセッションのプラグインがエンジンに残っていることがあるため)
+    if (! isPluginToneSelected() && session.pluginPath.isEmpty())
+        return;
+
+    if (auto* tone = engine.getPluginTone())
+    {
+        const auto state = tone->getState().toBase64Encoding();
+        session.pluginPath = tone->getFile().getFullPathName();
+        session.pluginState = state;
+        pluginBaselineState = state;
+        pluginStateChanged = false;
+    }
+}
+
+void SessionScreen::updatePluginEditorVisibility()
+{
+    // プラグインの画面は Windows の別の窓として描かれ、ほかの部品の上にはみ出す。
+    // チューナーなどを重ねているとき、右のパネルを隠しているとき、スクロールで一部が隠れているときは出さない
+    bool allowed = pluginCard.isVisible() && sidePanelVisible
+                && tunerPanel == nullptr && tonePanel == nullptr && ! dimOverlay.isVisible();
+
+    // 上下が見えているかで判断する (幅は、パネルを広げて収めてある。収まらないときは別のウィンドウで開いている)
+    if (allowed)
+    {
+        const auto editorInContent = pluginCard.getEditorBounds().translated (pluginCard.getX(), pluginCard.getY());
+        const auto view = sideScroll.getViewArea();
+        allowed = ! editorInContent.isEmpty()
+               && editorInContent.getY() >= view.getY() && editorInContent.getBottom() <= view.getBottom();
+    }
+
+    pluginCard.setEditorAllowed (allowed);
 }
 
 void SessionScreen::loadNamTone()
@@ -1564,6 +1791,14 @@ void SessionScreen::timerCallback()
 
     timeline.setState (position, length, session.loopStartMs / 1000.0, session.loopEndMs / 1000.0, session.loopEnabled);
 
+    // プラグインのつまみを動かしたか (1秒ごと。状態を取り出すのは軽くないため)
+    if (--pluginStateCheckCountdown <= 0)
+    {
+        pluginStateCheckCountdown = 30;
+        if (auto* tone = engine.getPluginTone(); tone != nullptr && pluginBaselineState.isNotEmpty())
+            pluginStateChanged = tone->getState().toBase64Encoding() != pluginBaselineState;
+    }
+
     const auto dirty = isDirty();
     saveButton.setFixedText (FixedTextId::Save, dirty ? "保存 *"_jp : "保存"_jp);
     saveButton.setMarked (dirty);   // デスメタルモードでは * の代わりに印を出す
@@ -1662,6 +1897,9 @@ void SessionScreen::placeWebViews()
         scoreViewer.placeOver (scoreTarget);
     else
         scoreViewer.hide();
+
+    // プラグインの画面も、WebView と同じく別の窓なので、同じときに隠す
+    updatePluginEditorVisibility();
 }
 
 void SessionScreen::resized()
@@ -1736,15 +1974,22 @@ void SessionScreen::resized()
 
     //==== 右のパネルと境目 ====
     sideCards.clear();
-    const auto panelWidth = juce::jmin (settings.getSidePanelWidth(), area.getWidth() / 2);
+    auto panelWidth = juce::jmin (settings.getSidePanelWidth(), area.getWidth() / 2);
 
+    // TONE3000 のカードを出しているときは、プラグインの画面が入るよう、右のパネルを広げる (画面の幅の 6 割まで)。
+    // 6 割でも入らない画面は別のウィンドウで開くので、広げない
+    const bool showPlugin = isPluginToneSelected();
+    if (showPlugin && ! pluginCard.getEditorNaturalSize().isEmpty())
+    {
+        const auto wanted = pluginCard.getEditorNaturalSize().getWidth() + 24 + sideScroll.getScrollBarThickness() + 4;
+        if (wanted <= juce::roundToInt (area.getWidth() * 0.62f))
+            panelWidth = juce::jmax (panelWidth, wanted);
+    }
+
+    // スクロールする部分 (sideScroll) の中の部品は、sideScroll ごと隠せばよい
     for (auto* c : std::initializer_list<juce::Component*> {
-             &sourceHeading, &toneHeading, &mixerHeading, &offsetHeading, &splitter,
-             &videoView, &sourceInfoLabel, &sourceRemoveButton, &chooseFileButton, &pasteUrlButton,
-             &toneButtons[0], &toneButtons[1], &toneButtons[2], &toneButtons[3], &toneSummaryLabel, &toneDetailButton,
-             &sourceGainLabel, &guitarGainLabel, &metronomeGainLabel,
-             &sourceGainSlider, &guitarGainSlider, &metronomeGainSlider, &sourceMuteButton,
-             &bpmLabel, &bpmSlider, &tapButton, &scoreOffsetLabel, &scoreOffsetControl, &offsetLabel, &offsetControl })
+             &sourceHeading, &splitter, &videoView, &sourceInfoLabel, &sourceRemoveButton, &chooseFileButton, &pasteUrlButton,
+             &sideScroll })
         c->setVisible (sidePanelVisible);
 
     if (sidePanelVisible)
@@ -1773,9 +2018,26 @@ void SessionScreen::resized()
         constexpr int labelWidth = 84;       // 行の名前の列。狭くして、スライダーを長くする
 
         // 動画は 16:9 で最大 260px。縦が足りないときは、ほかのカードが入るように小さくする
+        constexpr int minVideoHeight = 90;
+        const auto videoFor16by9 = juce::roundToInt ((float) (panelWidth - 24) * 9.0f / 16.0f);
         const auto otherHeights = toneHeight + mixerHeight + tempoHeight + sourceExtra + cardChrome * 4;
-        const auto videoHeight = juce::jlimit (90, 260, juce::jmin (juce::roundToInt ((float) (panelWidth - 24) * 9.0f / 16.0f),
-                                                                    right.getHeight() - otherHeights));
+        auto videoHeight = juce::jlimit (minVideoHeight, 260, juce::jmin (videoFor16by9, right.getHeight() - otherHeights));
+
+        // TONE3000: プラグインの画面がスクロールする枠に丸ごと入るか調べる。
+        // 入るなら、その高さを空けるために動画を小さくする。入らなければ、カードは別のウィンドウで開く形になる
+        if (showPlugin)
+        {
+            const auto scrollHeightAtMost = right.getHeight() - (minVideoHeight + sourceExtra + cardChrome);
+            const auto contentWidthAtLeast = panelWidth - 24 - sideScroll.getScrollBarThickness() - 2;
+            pluginCard.setAvailableSpace (contentWidthAtLeast, scrollHeightAtMost - 16);
+
+            if (pluginCard.hasEditor() && ! pluginCard.isUsingWindow())
+            {
+                const auto pluginCardHeight = pluginCard.getPreferredHeight() + 16;
+                videoHeight = juce::jlimit (minVideoHeight, 260,
+                                            juce::jmin (videoFor16by9, right.getHeight() - (sourceExtra + cardChrome) - pluginCardHeight));
+            }
+        }
 
         // 音源: 見出し、動画 (16:9)、その下に URL かファイル名と、外すボタン
         auto source = card (videoHeight + sourceExtra);
@@ -1803,58 +2065,105 @@ void SessionScreen::resized()
             pasteUrlButton.setBounds (row);
         }
 
-        // 音色
-        auto tone = card (toneHeight);
-        toneHeading.setBounds (tone.removeFromTop (20));
-        tone.removeFromTop (4);
-        auto toneRow = tone.removeFromTop (36);
-        const auto toneWidth = (toneRow.getWidth() - 6 * (int) (toneButtons.size() - 1)) / (int) toneButtons.size();
-        for (auto& button : toneButtons)
+        //==== ここから下はスクロールする部分: 音色、(TONE3000)、ミキサー、テンポ ====
+        sideScroll.setBounds (right);
+        pluginCard.setVisible (showPlugin);
+
+        // 幅 width で並べ、全体の高さを返す (sideContent の中の座標)
+        const auto layoutColumn = [&] (int width)
         {
-            button.setBounds (toneRow.removeFromLeft (toneWidth));
-            toneRow.removeFromLeft (6);
-        }
+            sideContent.cards.clear();
+            auto column = juce::Rectangle<int> (0, 0, width, 100000);
 
-        // NAM のモデル名と、音色の設定を開くボタン
-        tone.removeFromTop (4);
-        auto summaryRow = tone.removeFromTop (28);
-        toneDetailButton.setBounds (summaryRow.removeFromRight (110).reduced (0, 1));
-        summaryRow.removeFromRight (6);
-        toneSummaryLabel.setBounds (summaryRow);
+            const auto contentCard = [&] (int height)
+            {
+                auto c = column.removeFromTop (height + 16);
+                sideContent.cards.push_back (c);
+                column.removeFromTop (8);
+                return c.reduced (12, 8);
+            };
 
-        // ミキサー。「音源」の行の右端にミュート (ほかの行も同じ幅を空けて、スライダーの長さを揃える)
-        auto mixer = card (mixerHeight);
-        mixerHeading.setBounds (mixer.removeFromTop (20));
-        mixer.removeFromTop (4);
-        for (auto [label, slider] : { std::pair<juce::Label*, juce::Slider*> { &sourceGainLabel, &sourceGainSlider },
-                                      { &guitarGainLabel, &guitarGainSlider },
-                                      { &metronomeGainLabel, &metronomeGainSlider } })
-        {
-            auto row = mixer.removeFromTop (rowHeight);
-            label->setBounds (row.removeFromLeft (labelWidth));
-            auto muteArea = row.removeFromRight (64);
-            if (slider == &sourceGainSlider)
-                sourceMuteButton.setBounds (muteArea.reduced (0, 3).withTrimmedLeft (6));
-            slider->setBounds (row);
-        }
+            // 音色
+            auto tone = contentCard (toneHeight);
+            toneHeading.setBounds (tone.removeFromTop (20));
+            tone.removeFromTop (4);
+            auto toneRow = tone.removeFromTop (36);
+            const auto toneWidth = (toneRow.getWidth() - 4 * (int) (toneButtons.size() - 1)) / (int) toneButtons.size();
+            for (auto& button : toneButtons)
+            {
+                button.setBounds (toneRow.removeFromLeft (toneWidth));
+                toneRow.removeFromLeft (4);
+            }
 
-        // テンポ: BPM と TAP、タブ譜だけのずらし、拍の位置のずらし
-        auto tempo = card (tempoHeight);
-        offsetHeading.setBounds (tempo.removeFromTop (20));
-        tempo.removeFromTop (4);
+            // NAM のモデル名と、音色の設定を開くボタン
+            tone.removeFromTop (4);
+            auto summaryRow = tone.removeFromTop (28);
+            toneDetailButton.setBounds (summaryRow.removeFromRight (110).reduced (0, 1));
+            summaryRow.removeFromRight (6);
+            toneSummaryLabel.setBounds (summaryRow);
 
-        auto bpmRow = tempo.removeFromTop (rowHeight);
-        bpmLabel.setBounds (bpmRow.removeFromLeft (labelWidth));
-        tapButton.setBounds (bpmRow.removeFromRight (64).reduced (0, 3).withTrimmedLeft (6));
-        bpmSlider.setBounds (bpmRow);
+            // TONE3000 (音色とミキサーの間)
+            if (showPlugin)
+                pluginCard.setBounds (contentCard (pluginCard.getPreferredHeight()));
 
-        for (auto [label, control] : { std::pair<juce::Label*, OffsetControl*> { &scoreOffsetLabel, &scoreOffsetControl },
-                                       { &offsetLabel, &offsetControl } })
-        {
+            // ミキサー。「音源」の行の右端にミュート (ほかの行も同じ幅を空けて、スライダーの長さを揃える)
+            auto mixer = contentCard (mixerHeight);
+            mixerHeading.setBounds (mixer.removeFromTop (20));
+            mixer.removeFromTop (4);
+            for (auto [label, slider] : { std::pair<juce::Label*, juce::Slider*> { &sourceGainLabel, &sourceGainSlider },
+                                          { &guitarGainLabel, &guitarGainSlider },
+                                          { &metronomeGainLabel, &metronomeGainSlider } })
+            {
+                auto row = mixer.removeFromTop (rowHeight);
+                label->setBounds (row.removeFromLeft (labelWidth));
+                auto muteArea = row.removeFromRight (64);
+                if (slider == &sourceGainSlider)
+                    sourceMuteButton.setBounds (muteArea.reduced (0, 3).withTrimmedLeft (6));
+                slider->setBounds (row);
+            }
+
+            // テンポ: BPM と TAP、タブ譜だけのずらし、拍の位置のずらし
+            auto tempo = contentCard (tempoHeight);
+            offsetHeading.setBounds (tempo.removeFromTop (20));
             tempo.removeFromTop (4);
-            auto row = tempo.removeFromTop (rowHeight);
-            label->setBounds (row.removeFromLeft (labelWidth));
-            control->setBounds (row.reduced (0, 1));
+
+            auto bpmRow = tempo.removeFromTop (rowHeight);
+            bpmLabel.setBounds (bpmRow.removeFromLeft (labelWidth));
+            tapButton.setBounds (bpmRow.removeFromRight (64).reduced (0, 3).withTrimmedLeft (6));
+            bpmSlider.setBounds (bpmRow);
+
+            for (auto [label, control] : { std::pair<juce::Label*, OffsetControl*> { &scoreOffsetLabel, &scoreOffsetControl },
+                                           { &offsetLabel, &offsetControl } })
+            {
+                tempo.removeFromTop (4);
+                auto row = tempo.removeFromTop (rowHeight);
+                label->setBounds (row.removeFromLeft (labelWidth));
+                control->setBounds (row.reduced (0, 1));
+            }
+
+            return column.getY() - 8;   // 最後のカードの下の間は数えない
+        };
+
+        // まず全体の幅で並べ、縦に収まらなければ、スクロールバーの分だけ狭くして並べ直す
+        auto contentWidth = right.getWidth();
+        auto contentHeight = layoutColumn (contentWidth);
+        if (contentHeight > right.getHeight())
+        {
+            contentWidth -= sideScroll.getScrollBarThickness() + 2;
+            contentHeight = layoutColumn (contentWidth);
+        }
+
+        sideContent.setSize (contentWidth, contentHeight);
+        sideContent.repaint();
+
+        // TONE3000 を選んだとき・画面が出てきたとき: カードの全体が見えるところまでスクロールする
+        if (pluginScrollPending && showPlugin)
+        {
+            pluginScrollPending = false;
+            const auto view = sideScroll.getViewArea();
+            const auto cardArea = pluginCard.getBounds().expanded (0, 8);
+            if (cardArea.getY() < view.getY() || cardArea.getBottom() > view.getBottom())
+                sideScroll.setViewPosition (0, juce::jmax (0, juce::jmin (cardArea.getY(), cardArea.getBottom() - view.getHeight())));
         }
     }
     else

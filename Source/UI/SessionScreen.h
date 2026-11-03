@@ -17,6 +17,7 @@
 #include "PracticeViews.h"
 #include "TunerPanel.h"
 #include "ToneDetailPanel.h"
+#include "PluginToneCard.h"
 
 // 練習画面 (設計書 4.2)
 //   左: タブ譜 (alphaTab) と再生位置バー     右: 音源 (動画)・音色・ミキサー・ずらし (隠せる・幅を変えられる)
@@ -123,6 +124,11 @@ private:
     void toggleTuner();
     void selectTone (int index, bool fromUser);   // index: 0〜2 が簡易な音色、3 が NAM
     void loadNamTone();                           // セッションの NAM のファイルを、エンジンに読み込ませる
+    void loadPluginTone();                        // TONE3000 プラグインを探して、エンジンに読み込ませる
+    void choosePluginFile();
+    void capturePluginState();                    // プラグインの状態をセッションに入れる (保存の前)
+    void updatePluginEditorVisibility();          // 全体が見えているときだけ、プラグインの画面を出す
+    bool isPluginToneSelected() const noexcept;
     void updateToneSummary();
     void toggleTonePanel();
     void showOverlay (juce::Component* panel);    // チューナー・音色の設定を開いたとき (後ろを暗くする)
@@ -206,10 +212,23 @@ private:
     juce::Label sourceInfoLabel;        // 動画の真下: YouTube の URL (ダブルクリックで変更) か、音源のファイル名
     TrashButton sourceRemoveButton;     // 音源を外す
     juce::TextButton chooseFileButton, pasteUrlButton;   // 音源がないとき
-    std::array<juce::TextButton, 4> toneButtons;   // クリーン・クランチ・歪み・NAM
+    std::array<juce::TextButton, 5> toneButtons;   // クリーン・クランチ・歪み・TONE3000・NAM
     juce::Label toneSummaryLabel;                  // NAM のモデルと IR の名前
     juce::TextButton toneDetailButton;             // 音色の設定 (NAM) を開く
-    static constexpr int namToneIndex = 3;
+    static constexpr int pluginToneIndex = 3, namToneIndex = 4;
+
+    // TONE3000 (VST3 プラグイン) のカード。TONE3000 を選んでいるときだけ、音色とミキサーの間に出す
+    PluginToneCard pluginCard { engine };
+    bool pluginStateChanged = false;   // プラグインのつまみを動かした (保存されていない)
+    juce::String pluginBaselineState;  // 読み込んだとき・保存したときのプラグインの状態 (比べる元)
+    bool pluginScrollPending = false;  // 次に並べたとき、TONE3000 のカードの全体が見えるところまでスクロールする
+    bool relayoutPending = false;      // 並べ直しを次のメッセージで行う予定がある
+    int pluginStateCheckCountdown = 0;
+
+    // 右のパネルのうち、音源のカードより下 (音色・TONE3000・ミキサー・テンポ) はスクロールする
+    // (TONE3000 の画面が入ると、縦に収まらないため。動画 (WebView) はスクロールさせない)
+    ScrollArea sideScroll;
+    CardColumn sideContent;
     juce::Label sourceGainLabel, guitarGainLabel, metronomeGainLabel;
     WheelSlider sourceGainSlider, guitarGainSlider, metronomeGainSlider;
     juce::TextButton sourceMuteButton;   // 音源だけのミュート

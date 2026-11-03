@@ -11,7 +11,8 @@ enum class ToneType
     clean = 0,
     crunch,
     drive,
-    nam
+    nam,
+    plugin   // VST3 プラグイン (TONE3000 など)
 };
 
 struct TonePreset
@@ -34,6 +35,9 @@ inline const std::array<TonePreset, 3>& getTonePresets()
 
 // NAM の音色 (セッションの tone.preset_id に入る値)
 inline constexpr const char* namTonePresetId = "nam";
+
+// VST3 プラグイン (TONE3000) の音色 (セッションの tone.preset_id に入る値)
+inline constexpr const char* pluginTonePresetId = "tone3000";
 
 inline int findTonePresetIndex (const juce::String& id)
 {
