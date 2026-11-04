@@ -87,11 +87,23 @@ juce::String DevSnapshots::renderAll (const juce::File& folder)
         {
             const std::pair<const char*, double> songs[] { { "Hotel California (ソロ)", 391.0 }, { "Crazy Train", 296.0 },
                                                            { "Master of Puppets", 0.0 }, { "Sweet Child O' Mine", 356.0 } };
+            // 一覧の列 (アーティスト・BPM・難易度・チューニング) の見本
+            const char* const artists[] { "Eagles", "Ozzy Osbourne", "", "Guns N' Roses" };
+            const char* const tunings[] { "E Standard", "E Standard", "", "Eb Standard" };
+            const double bpms[] { 74.0, 138.0, 212.0, 125.0 };
+            const int stars[] { 4, 3, 0, 5 };
+
             std::vector<Session> saved;
+            int index = 0;
             for (const auto& [title, length] : songs)
             {
                 Session s;
                 s.title = juce::String::fromUTF8 (title);
+                s.artist = artists[index];
+                s.tuning = tunings[index];
+                s.bpm = bpms[index];
+                s.difficulty = stars[index];
+                ++index;
                 s.sourceType = SourceType::local;
                 s.lengthSeconds = length;
                 store.save (s);
@@ -197,6 +209,27 @@ juce::String DevSnapshots::renderAll (const juce::File& folder)
                 snap (tuner, TunerPanel::preferredWidth, TunerPanel::preferredHeight, "tuner_sharp" + suffix);
                 tuner.setTestFrequency (110.2);   // ほぼ合っている
                 snap (tuner, TunerPanel::preferredWidth, TunerPanel::preferredHeight, "tuner_ok" + suffix);
+
+                // メトロノームのビジュアライザー: 4/4 の1拍目、3/4 の3拍目、9/8 の4拍目、止まっているとき (縦に並べる)
+                {
+                    juce::Image strip (juce::Image::ARGB, 116, 4 * 36, true);
+                    {
+                        juce::Graphics g (strip);
+                        g.fillAll (theme.getPalette().panel);
+                        MetronomeDots dots;
+                        dots.setLookAndFeel (&juce::LookAndFeel::getDefaultLookAndFeel());
+                        dots.setSize (116, 32);
+                        const int states[][3] { { 4, 4, 0 }, { 3, 4, 2 }, { 9, 8, 3 }, { 4, 4, -1 } };
+                        for (int i = 0; i < 4; ++i)
+                        {
+                            dots.setState (states[i][0], states[i][1], states[i][2]);
+                            g.drawImageAt (dots.createComponentSnapshot (dots.getLocalBounds(), true, 1.0f), 0, i * 36);
+                        }
+                        dots.setLookAndFeel (nullptr);
+                    }
+                    if (savePng (strip, folder.getChildFile ("metronome_dots" + suffix)))
+                        log << "wrote metronome_dots" << suffix << "\n";
+                }
             }
 
             // 設定の「文字の大きさ」と「アクセントの色」を変えたとき (ダーク、120%、青)

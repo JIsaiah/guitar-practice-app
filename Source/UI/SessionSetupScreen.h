@@ -3,13 +3,16 @@
 #include <juce_gui_basics/juce_gui_basics.h>
 #include "../Audio/TapTempo.h"
 #include "../Model/Session.h"
+#include "../Web/ScoreViewer.h"
 
 // 新しいセッションを作る画面 (設計書 4.1 の 2〜5)
 // 音源 → タブ譜 (任意) → 音色 → BPM の順に決めて、練習を始める
+// タブ譜を選ぶと、タブ譜に書かれているテンポ・アーティスト・チューニングを自動で入れる (設計書 #11)。
+// タブ譜は、練習画面と同じ ScoreViewer (alphaTab) で読む。この画面では ScoreViewer を表示しない
 class SessionSetupScreen final : public juce::Component
 {
 public:
-    SessionSetupScreen();
+    explicit SessionSetupScreen (ScoreViewer& scoreReader);
 
     std::function<void()> onCancel;
     std::function<void (Session)> onStart;
@@ -24,15 +27,17 @@ private:
     void selectTone (int index);
     void tap();
     void updateState();
+    void readScoreDetails();   // タブ譜を読み、テンポなどが分かったら入れる
 
+    ScoreViewer& scoreReader;
     Session session;
     TapTempo tapTempo;
     std::unique_ptr<juce::FileChooser> fileChooser;
 
     juce::Label heading;
-    juce::Label titleLabel, sourceLabel, scoreLabel, toneLabel, bpmLabel;
-    juce::Label sourceValue, scoreValue;
-    juce::TextEditor titleEditor;
+    juce::Label titleLabel, artistLabel, sourceLabel, scoreLabel, toneLabel, bpmLabel, tuningLabel;
+    juce::Label sourceValue, scoreValue, bpmNote;
+    juce::TextEditor titleEditor, artistEditor, tuningEditor;
     juce::TextButton sourceFileButton, youtubeButton, scoreFileButton, scoreClearButton;
     std::array<juce::TextButton, 3> toneButtons;
     juce::Slider bpmSlider;

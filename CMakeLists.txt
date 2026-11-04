@@ -179,6 +179,7 @@ target_sources(GuitarPracticeTests PRIVATE
     Tests/PlaybackSettingsResolverTests.cpp
     Tests/CountdownControllerTests.cpp
     Tests/SetlistPlayerTests.cpp
+    Tests/MusicInfoTests.cpp
     Source/Model/Session.cpp
     Source/Model/SessionStore.cpp
     Source/Library/SessionLibrary.cpp

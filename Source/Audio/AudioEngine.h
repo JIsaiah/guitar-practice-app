@@ -55,6 +55,15 @@ public:
     void setBpm (double bpm) noexcept { metronomeBpm.store (juce::jlimit (20.0, 400.0, bpm)); }
     void setSyncOffsetSeconds (double seconds) noexcept { syncOffsetSeconds.store (seconds); }
 
+    // メトロノームが拍を数えている時計 (秒。拍の位置のずらしを引いたもの)。ビジュアライザー用。
+    // 音源・YouTube・「単体で鳴らす」のどれかが動いているときだけ running が true
+    struct BeatClock
+    {
+        double seconds = 0.0;
+        bool running = false;
+    };
+    BeatClock getBeatClock() const noexcept { return { beatClockSeconds.load(), beatClockRunning.load() }; }
+
     //==== 外部の時計 (YouTube。設計書 5.2) ====
     // YouTube の再生位置が届くたびに、メッセージスレッドから呼ぶ。
     // 再生中はメトロノームがこの時計に合わせる。オーディオスレッドは届いた値の間を自分で進め、
@@ -187,6 +196,8 @@ private:
     std::atomic<bool> metronomeEnabled { false }, metronomeResetRequested { false }, metronomeSolo { false };
     std::atomic<double> metronomeBpm { 120.0 };
     std::atomic<double> syncOffsetSeconds { 0.0 };
+    std::atomic<double> beatClockSeconds { 0.0 };   // オーディオスレッドが1ブロックごとに書く
+    std::atomic<bool> beatClockRunning { false };
     std::atomic<float> sourceGain { 1.0f }, guitarGain { 1.0f }, metronomeGain { 0.8f };
     std::atomic<int> tone { (int) ToneType::clean };
     std::atomic<bool> tunerActive { false };

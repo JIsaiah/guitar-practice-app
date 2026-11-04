@@ -303,7 +303,7 @@ SessionScreen::SessionScreen (AudioEngine& e, SessionStore& s, ThemeManager& t, 
              &sideScroll, &tunerButton,
              &playHeading, &speedHeading, &metronomeHeading, &loopHeading,
              &toStartButton, &rewindButton, &playButton, &forwardButton, &speedSlider, &equalBarsButton,
-             &metronomeButton, &metronomeSoloButton,
+             &metronomeButton, &metronomeSoloButton, &metronomeDots,
              &loopStartButton, &loopEndButton, &loopButton })
     {
         addAndMakeVisible (c);
@@ -729,6 +729,14 @@ void SessionScreen::chooseScoreFile()
 
             safe->updateLoop();
             safe->updateSkipButtons();
+
+            // 曲の詳細も、タブ譜に書かれていれば入れる (一覧に出る)。
+            // チューニングはタブ譜ごとに違うので上書きし、アーティストは空のときだけ入れる
+            if (safe->scoreViewer.getScoreTuning().isNotEmpty())
+                safe->session.tuning = safe->scoreViewer.getScoreTuning();
+            if (safe->session.artist.isEmpty())
+                safe->session.artist = safe->scoreViewer.getScoreArtist();
+
             if (tempo <= 0.0)
                 return;
 
@@ -1226,6 +1234,26 @@ void SessionScreen::setLoopPoint (bool isStart)
 bool SessionScreen::usesScoreBars() const
 {
     return session.scorePath.isNotEmpty() && ! scoreViewer.getBarStartBeats().empty();
+}
+
+// メトロノームのビジュアライザー
+//   メトロノームが拍を数えている時計 (オーディオスレッドが書く) から、今が小節の何拍目かを求める。
+//   拍子はタブ譜から (なければ 4/4)。止まっているときは、今の位置の小節の拍子だけを出して、ドットは点けない
+void SessionScreen::updateMetronomeDots (double positionBeats)
+{
+    static const std::vector<double> noBars;
+    static const std::vector<MusicInfo::TimeSignature> noSignatures;
+
+    const bool scoreBars = usesScoreBars();
+    const auto& bars = scoreBars ? scoreViewer.getBarStartBeats() : noBars;
+    const auto& signatures = scoreBars ? scoreViewer.getBarSignatures() : noSignatures;
+
+    const auto clock = engine.getBeatClock();
+    const bool running = clock.running && clock.seconds >= 0.0;
+    const auto beats = running ? clock.seconds * session.bpm / 60.0 : positionBeats;
+
+    const auto where = MusicInfo::locateBeat (beats, bars, signatures);
+    metronomeDots.setState (where.signature.numerator, where.signature.denominator, running ? where.beatInBar : -1);
 }
 
 // 小節の頭の位置 (秒) = 小節の頭の拍 × 60 ÷ BPM + ずらし
@@ -1777,6 +1805,7 @@ void SessionScreen::timerCallback()
     const auto beat = beats >= 0.0 ? (int) std::floor (beats) % 4 + 1 : 0;
     positionLabel.setText ("小節 "_jp + juce::String (bar) + "   拍 "_jp + juce::String (beat), juce::dontSendNotification);
     scoreView.setBarAndBeat (bar, beat);
+    updateMetronomeDots (beats);
     // タブ譜は「拍の位置」+「タブ譜だけ」。針はページの中で、速度と経過時間からなめらかに進める
     const auto rate = isYouTube() ? youtube.getState().rate : session.speedPercent / 100.0;
     scoreViewer.setPosition (position, session.bpm, getScoreOffsetSeconds(), rate, playing);
@@ -1929,9 +1958,10 @@ void SessionScreen::resized()
 
     constexpr int gap = 6, groupGap = 28;
     constexpr int playWidth = 84 + 84 + 100 + 84 + gap * 3;
-    constexpr int metronomeWidth = 120 + 120 + gap;
+    constexpr int dotsWidth = 116;   // 拍子 ("4/4") とドット。拍子の数が多いときは、ドットを小さくして収める
+    constexpr int metronomeWidth = 104 + 104 + dotsWidth + gap * 2;
     constexpr int loopWidth = 96 + 96 + 96 + gap * 2;
-    const auto speedWidth = juce::jlimit (160, 360, bottom.getWidth() - playWidth - metronomeWidth - loopWidth - groupGap * 3);
+    const auto speedWidth = juce::jlimit (130, 360, bottom.getWidth() - playWidth - metronomeWidth - loopWidth - groupGap * 3);
 
     // 見出し (20px) と、その下に部品の行 (残り)
     const auto group = [&] (SectionHeading& heading, int width, bool divider)
@@ -1964,8 +1994,9 @@ void SessionScreen::resized()
     speedSlider.setBounds (speed);
 
     auto metronome = group (metronomeHeading, metronomeWidth, true);
-    place (metronome, metronomeButton, 120);
-    place (metronome, metronomeSoloButton, 120);
+    place (metronome, metronomeButton, 104);
+    place (metronome, metronomeSoloButton, 104);
+    place (metronome, metronomeDots, dotsWidth);
 
     auto loop = group (loopHeading, loopWidth, false);
     place (loop, loopStartButton, 96);

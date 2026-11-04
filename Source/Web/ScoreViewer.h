@@ -2,6 +2,7 @@
 
 #include <juce_gui_extra/juce_gui_extra.h>
 #include "../Theme/Palette.h"
+#include "../Model/MusicInfo.h"
 
 // タブ譜の表示 (設計書 #5、PoC-3)
 // - WebView2 の中で alphaTab (同梱) を動かし、タブ譜を描く
@@ -36,6 +37,13 @@ public:
 
     // 各小節が曲の頭から何拍目 (4分音符の数) で始まるか。タブ譜の拍子から求める。タブ譜がなければ空
     const std::vector<double>& getBarStartBeats() const noexcept { return barStartBeats; }
+    // 各小節の拍子 (getBarStartBeats() と同じ数)
+    const std::vector<MusicInfo::TimeSignature>& getBarSignatures() const noexcept { return barSignatures; }
+
+    // タブ譜に書かれている曲の情報 (読み込めたあと)。無ければ空
+    const juce::String& getScoreTitle() const noexcept { return scoreTitle; }
+    const juce::String& getScoreArtist() const noexcept { return scoreArtist; }
+    const juce::String& getScoreTuning() const noexcept { return scoreTuning; }   // 例: "Drop D"
 
     std::function<void (double tempo)> onLoaded;   // 読み込めたとき (タブ譜のテンポ)
     std::function<void (const juce::String& message)> onError;
@@ -58,6 +66,8 @@ private:
     int loadCount = 0;
     double scoreTempo = 0.0;
     std::vector<double> barStartBeats;
+    std::vector<MusicInfo::TimeSignature> barSignatures;
+    juce::String scoreTitle, scoreArtist, scoreTuning;
     double lastSentSeconds = -1.0, lastSentBpm = 0.0, lastSentOffset = 0.0, lastSentRate = 1.0, lastSentAtMs = 0.0;
     bool lastSentPlaying = false;
 

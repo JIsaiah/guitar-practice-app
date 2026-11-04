@@ -446,3 +446,60 @@ public:
     void lookAndFeelChanged() override { setColour (textColourId, findColour (ThemeColourIds::textMuted)); }
     void parentHierarchyChanged() override { lookAndFeelChanged(); }
 };
+
+// メトロノームのビジュアライザー。小節の拍子の分子の数だけドットを並べ、今の拍を点ける
+// (4/4 ならドット4個、9/8 なら9個)。小節の頭 (1つ目) は少し大きく描く
+class MetronomeDots final : public juce::Component
+{
+public:
+    // numerator/denominator: 今の小節の拍子。activeBeat: 点ける拍 (0 から)。-1 なら点けない (止まっているとき)
+    void setState (int numerator, int denominator, int activeBeat)
+    {
+        numerator = juce::jlimit (1, 32, numerator);
+        if (numerator != count || denominator != unit || activeBeat != active)
+        {
+            count = numerator;
+            unit = denominator;
+            active = activeBeat;
+            repaint();
+        }
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        auto area = getLocalBounds().toFloat();
+
+        // 左に拍子 ("4/4")
+        g.setColour (findColour (ThemeColourIds::textMuted));
+        g.setFont (AppLookAndFeel::scaled (juce::FontOptions (13.0f, juce::Font::bold)));
+        g.drawText (juce::String (count) + "/" + juce::String (unit), area.removeFromLeft (34.0f),
+                    juce::Justification::centredLeft);
+
+        // ドットの大きさは、数が多いときは幅に収まるよう小さくする
+        const auto pitch = juce::jmin (area.getHeight(), area.getWidth() / (float) count);
+        const auto radius = juce::jlimit (2.0f, 7.0f, pitch * 0.36f);
+        const auto accent = findColour (ThemeColourIds::accent);
+        const auto idle = findColour (ThemeColourIds::textMuted);
+
+        for (int i = 0; i < count; ++i)
+        {
+            const auto centre = juce::Point<float> (area.getX() + pitch * ((float) i + 0.5f), area.getCentreY());
+            const auto r = i == 0 ? radius * 1.25f : radius;
+            const auto dot = juce::Rectangle<float> (r * 2.0f, r * 2.0f).withCentre (centre);
+
+            if (i == active)
+            {
+                g.setColour (i == 0 ? accent : accent.withMultipliedAlpha (0.8f));
+                g.fillEllipse (dot);
+            }
+            else
+            {
+                g.setColour (idle.withAlpha (0.55f));
+                g.drawEllipse (dot.reduced (0.75f), 1.5f);
+            }
+        }
+    }
+
+private:
+    int count = 4, unit = 4, active = -1;
+};

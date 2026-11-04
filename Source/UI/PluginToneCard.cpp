@@ -173,10 +173,22 @@ void PluginToneCard::openWindow()
     if (auto* top = getTopLevelComponent(); top != nullptr && top->isOnDesktop())
         WindowOwner::setOwner (window->getWindowHandle(), top->getWindowHandle());
 
-    // 初めて開くときは、アプリのウィンドウの中央に置く
+    // 初めて開くときは、アプリのウィンドウの中央に置く。
+    // ただし、画面 (モニターの作業領域) からはみ出さないようにする。
+    // プラグインの画面はアプリより大きいことがあり (Archetype Misha Mansoor X は 1131 × 738)、
+    // 中央に合わせるだけだと左上が画面の外に出て、ウィンドウが見えなくなる
     if (! window->isVisible())
+    {
         if (auto* top = getTopLevelComponent())
-            window->setTopLeftPosition (top->getScreenBounds().getCentre() - juce::Point<int> (window->getWidth() / 2, window->getHeight() / 2));
+        {
+            auto bounds = window->getBounds().withCentre (top->getScreenBounds().getCentre());
+
+            if (const auto* display = juce::Desktop::getInstance().getDisplays().getDisplayForRect (top->getScreenBounds()))
+                bounds = bounds.constrainedWithin (display->userBounds.toNearestInt());
+
+            window->setTopLeftPosition (bounds.getPosition());
+        }
+    }
 
     window->setVisible (true);
     window->toFront (true);
@@ -187,6 +199,26 @@ void PluginToneCard::visibilityChanged()
     // 音色を TONE3000 から変えたら (カードが隠れたら)、プラグインのウィンドウも隠す
     if (! isVisible() && window != nullptr)
         window->setVisible (false);
+}
+
+bool PluginToneCard::isWindowShowing() const
+{
+    return window != nullptr && window->isShowing();
+}
+
+juce::Rectangle<int> PluginToneCard::getWindowScreenBounds() const
+{
+    return window != nullptr ? window->getScreenBounds() : juce::Rectangle<int>();
+}
+
+juce::Rectangle<int> PluginToneCard::getEditorSize() const
+{
+    return editor != nullptr ? editor->getLocalBounds() : juce::Rectangle<int>();
+}
+
+void* PluginToneCard::getWindowNativeHandle() const
+{
+    return window != nullptr && window->isOnDesktop() ? window->getWindowHandle() : nullptr;
 }
 
 //==============================================================================

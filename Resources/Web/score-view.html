@@ -80,6 +80,9 @@
       send("loaded", {
         title: s.title || "", artist: s.artist || "", tempo: s.tempo || 0,
         bars: barStartBeats,   // 各小節が曲の頭から何拍目で始まるか (アプリがループを小節の頭に合わせるのに使う)
+        // 各小節の拍子 [分子, 分母] (メトロノームのビジュアライザーのドットの数)
+        sigs: s.masterBars.map(function (mb) { return [mb.timeSignatureNumerator, mb.timeSignatureDenominator]; }),
+        tuning: trackTuning(s, currentTrack),   // 弦の音の高さ (MIDI。1弦から)。名前はアプリが付ける
         tracks: s.tracks.map(function (t) { return t.name || ""; })
       });
     });
@@ -162,7 +165,25 @@
     }
   };
 
+  let currentTrack = 0;
+
+  // 選んだトラックの、弦の音の高さ。ドラムなど弦のないトラックなら、弦のある最初のトラックを使う
+  function trackTuning(s, track) {
+    const tuningOf = function (t) {
+      if (!t || !t.staves) return [];
+      for (const st of t.staves) {
+        const notes = st.tuning || (st.stringTuning && st.stringTuning.tunings) || [];
+        if (notes.length > 0 && !st.isPercussion) return Array.from(notes);
+      }
+      return [];
+    };
+    let notes = tuningOf(s.tracks[track]);
+    for (let i = 0; notes.length === 0 && i < s.tracks.length; i++) notes = tuningOf(s.tracks[i]);
+    return notes;
+  }
+
   function load(url, track) {
+    currentTrack = track;
     showMessage("タブ譜を読み込んでいます…");
     cursor.style.opacity = 0; barHighlight.style.opacity = 0;
     fetch(url).then(function (r) {

@@ -12,7 +12,8 @@ namespace
     }
 }
 
-SessionSetupScreen::SessionSetupScreen()
+SessionSetupScreen::SessionSetupScreen (ScoreViewer& reader)
+    : scoreReader (reader)
 {
     heading.setText ("新しいセッション"_jp, juce::dontSendNotification);
     heading.setFont (juce::FontOptions (24.0f, juce::Font::bold));
@@ -23,12 +24,20 @@ SessionSetupScreen::SessionSetupScreen()
     scoreLabel.setText ("2. タブ譜 (任意)"_jp, juce::dontSendNotification);
     toneLabel.setText ("3. 音色"_jp, juce::dontSendNotification);
     bpmLabel.setText ("4. BPM"_jp, juce::dontSendNotification);
-    for (auto* label : { &titleLabel, &sourceLabel, &scoreLabel, &toneLabel, &bpmLabel, &sourceValue, &scoreValue })
+    artistLabel.setText ("アーティスト"_jp, juce::dontSendNotification);
+    tuningLabel.setText ("チューニング"_jp, juce::dontSendNotification);
+    for (auto* label : { &titleLabel, &artistLabel, &sourceLabel, &scoreLabel, &toneLabel, &bpmLabel, &tuningLabel,
+                         &sourceValue, &scoreValue, &bpmNote })
         addAndMakeVisible (label);
 
     titleEditor.setTextToShowWhenEmpty ("音源を選ぶと自動で入ります"_jp, juce::Colours::grey);
     titleEditor.onTextChange = [this] { session.title = titleEditor.getText().trim(); };
-    addAndMakeVisible (titleEditor);
+    artistEditor.setTextToShowWhenEmpty ("任意。タブ譜に書かれていれば自動で入ります"_jp, juce::Colours::grey);
+    artistEditor.onTextChange = [this] { session.artist = artistEditor.getText().trim(); };
+    tuningEditor.setTextToShowWhenEmpty ("例: E Standard、Drop D。タブ譜から自動で入ります"_jp, juce::Colours::grey);
+    tuningEditor.onTextChange = [this] { session.tuning = tuningEditor.getText().trim(); };
+    for (auto* editor : { &titleEditor, &artistEditor, &tuningEditor })
+        addAndMakeVisible (editor);
 
     sourceFileButton.setButtonText ("ファイルを選ぶ…"_jp);
     youtubeButton.setButtonText ("YouTube の URL を貼り付け"_jp);
@@ -37,7 +46,7 @@ SessionSetupScreen::SessionSetupScreen()
     sourceFileButton.onClick = [this] { chooseSourceFile(); };
     youtubeButton.onClick = [this] { pasteYouTubeUrl(); };
     scoreFileButton.onClick = [this] { chooseScoreFile(); };
-    scoreClearButton.onClick = [this] { session.scorePath = {}; updateState(); };
+    scoreClearButton.onClick = [this] { session.scorePath = {}; bpmNote.setText ({}, juce::dontSendNotification); updateState(); };
     for (auto* button : { &sourceFileButton, &youtubeButton, &scoreFileButton, &scoreClearButton })
         addAndMakeVisible (button);
 
@@ -60,7 +69,9 @@ SessionSetupScreen::SessionSetupScreen()
     {
         session.bpm = bpmSlider.getValue();
         session.tempoOrigin = TempoOrigin::manual;
+        bpmNote.setText ({}, juce::dontSendNotification);
     };
+    bpmNote.setColour (juce::Label::textColourId, juce::Colours::grey);
     addAndMakeVisible (bpmSlider);
 
     tapButton.setButtonText ("TAP");
@@ -135,7 +146,60 @@ void SessionSetupScreen::chooseScoreFile()
 
                                   session.scorePath = file.getFullPathName();
                                   updateState();
+                                  readScoreDetails();
                               });
+}
+
+void SessionSetupScreen::readScoreDetails()
+{
+    bpmNote.setText ("タブ譜を読んでいます…"_jp, juce::dontSendNotification);
+    const auto path = session.scorePath;
+
+    // 練習画面に移ると、練習画面が自分の処理に置き換える。この画面が先に消えても落ちないよう SafePointer で見る
+    // (この画面のデストラクタでは消さない。新しい画面が作られたあとに古い画面が消えるため、練習画面の処理を消してしまう)
+    scoreReader.onLoaded = [safe = juce::Component::SafePointer (this), path] (double tempo)
+    {
+        if (safe == nullptr || safe->session.scorePath != path)
+            return;
+
+        auto& s = *safe;
+        juce::StringArray filled;
+
+        if (tempo > 0.0)
+        {
+            s.bpmSlider.setValue (std::round (tempo), juce::dontSendNotification);
+            s.session.bpm = s.bpmSlider.getValue();
+            s.session.tempoOrigin = TempoOrigin::score;
+            filled.add ("BPM " + juce::String (juce::roundToInt (tempo)));
+        }
+
+        // 入っていない欄だけ埋める (自分で書いたものは消さない)
+        const auto fill = [&filled] (juce::TextEditor& editor, const juce::String& value, const juce::String& name)
+        {
+            if (editor.isEmpty() && value.isNotEmpty())
+            {
+                editor.setText (value, juce::sendNotification);
+                filled.add (name);
+            }
+        };
+        fill (s.titleEditor, s.scoreReader.getScoreTitle(), "曲名"_jp);
+        fill (s.artistEditor, s.scoreReader.getScoreArtist(), "アーティスト"_jp);
+        fill (s.tuningEditor, s.scoreReader.getScoreTuning(), "チューニング"_jp);
+
+        juce::String note;
+        if (! filled.isEmpty())
+            note = "タブ譜から入れました: "_jp + filled.joinIntoString ("、"_jp);
+        if (tempo <= 0.0)
+            note << (note.isEmpty() ? "" : "。") << "タブ譜にテンポが書かれていません。TAP か手入力で決めてください"_jp;
+        s.bpmNote.setText (note, juce::dontSendNotification);
+    };
+    scoreReader.onError = [safe = juce::Component::SafePointer (this)] (const juce::String&)
+    {
+        if (safe != nullptr)
+            safe->bpmNote.setText ("タブ譜を読めませんでした。BPM は TAP か手入力で決めてください"_jp, juce::dontSendNotification);
+    };
+
+    scoreReader.load (juce::File (path), 0);
 }
 
 void SessionSetupScreen::selectTone (int index)
@@ -151,6 +215,7 @@ void SessionSetupScreen::tap()
         bpmSlider.setValue (std::round (*bpm), juce::dontSendNotification);
         session.bpm = bpmSlider.getValue();
         session.tempoOrigin = TempoOrigin::tap;
+        bpmNote.setText ({}, juce::dontSendNotification);
     }
 }
 
@@ -191,6 +256,7 @@ void SessionSetupScreen::resized()
     };
 
     titleEditor.setBounds (nextRow (titleLabel).removeFromLeft (480));
+    artistEditor.setBounds (nextRow (artistLabel).removeFromLeft (480));
 
     auto sourceRow = nextRow (sourceLabel);
     sourceFileButton.setBounds (sourceRow.removeFromLeft (160));
@@ -217,6 +283,10 @@ void SessionSetupScreen::resized()
     bpmSlider.setBounds (bpmRow.removeFromLeft (360));
     bpmRow.removeFromLeft (8);
     tapButton.setBounds (bpmRow.removeFromLeft (100));
+    bpmRow.removeFromLeft (12);
+    bpmNote.setBounds (bpmRow);
+
+    tuningEditor.setBounds (nextRow (tuningLabel).removeFromLeft (480));
 
     auto buttons = getLocalBounds().reduced (24).removeFromBottom (48);
     startButton.setBounds (buttons.removeFromRight (200));

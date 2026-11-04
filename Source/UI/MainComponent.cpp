@@ -239,7 +239,7 @@ void MainComponent::connectSetlist (SessionScreen& screen, const juce::String& s
 
 void MainComponent::showSetup()
 {
-    auto screen = std::make_unique<SessionSetupScreen>();
+    auto screen = std::make_unique<SessionSetupScreen> (scoreViewer);   // タブ譜のテンポなどを読むのに使う (画面には出さない)
 
     screen->onCancel = [this] { navigate ([] (MainComponent& m) { m.showList(); }); };
     screen->onStart = [this] (Session session)

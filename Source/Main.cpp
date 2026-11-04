@@ -27,6 +27,13 @@ public:
             return;
         }
 
+        // 開発用: プラグインの画面のウィンドウが開くかを確かめて終わる (DevAudioCheck.h)
+        if (commandLine.contains (DevAudioCheck::pluginWindowTestFlag))
+        {
+            devTest = DevAudioCheck::startPluginWindowTest (commandLine, [this] { quit(); });
+            return;
+        }
+
         // 開発用: オーディオデバイスの一覧と、NAM の処理時間を確かめて終わる (DevAudioCheck.h)
         if (commandLine.contains (DevAudioCheck::commandLineFlag))
         {
@@ -61,6 +68,7 @@ public:
 
     void shutdown() override
     {
+        devTest = nullptr;   // 開発用のテスト (--plugin-window-test) で起動したとき
         mainWindow = nullptr;
 
         if (audioEngine == nullptr)   // --render-logos で起動したとき
@@ -119,6 +127,7 @@ private:
     std::unique_ptr<ThemeManager> themeManager;
     std::unique_ptr<AppSettings> appSettings;
     std::unique_ptr<MainWindow> mainWindow;
+    std::unique_ptr<juce::Timer> devTest;   // 開発用のテスト (Debug のみで使う)
 };
 
 START_JUCE_APPLICATION (GuitarPracticeApplication)

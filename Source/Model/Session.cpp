@@ -78,6 +78,9 @@ juce::var Session::toVar() const
         { "version",    currentVersion },
         { "session_id", sessionId },
         { "title",      title },
+        { "artist",     artist },
+        { "tuning",     tuning },
+        { "difficulty", difficulty },
         { "source",   source },
         { "score",    makeObject ({ { "path", scorePath }, { "track_index", scoreTrackIndex } }) },
         { "tempo",    makeObject ({ { "bpm", bpm }, { "origin", toString (tempoOrigin) } }) },
@@ -105,6 +108,9 @@ Session Session::fromVar (const juce::var& value)
 
     s.sessionId = getOr<juce::String> (value["session_id"], {});
     s.title = getOr<juce::String> (value["title"], {});
+    s.artist = getOr<juce::String> (value["artist"], {});
+    s.tuning = getOr<juce::String> (value["tuning"], {});
+    s.difficulty = juce::jlimit (0, maxDifficulty, getOr<int> (value["difficulty"], 0));
 
     const auto& source = value["source"];
     s.sourceType = sourceTypeFromString (getOr<juce::String> (source["type"], "none"));

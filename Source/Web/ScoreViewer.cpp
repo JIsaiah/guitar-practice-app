@@ -105,6 +105,8 @@ void ScoreViewer::load (const juce::File& file, int trackIndex)
     rendered = false;
     scoreTempo = 0.0;
     barStartBeats.clear();
+    barSignatures.clear();
+    scoreTitle = scoreArtist = scoreTuning = {};
     lastSentSeconds = -1.0;
     pending.erase (std::remove_if (pending.begin(), pending.end(),
                                    [] (const juce::var& c) { return c["type"] == "load" || c["type"] == "clear"; }),
@@ -198,6 +200,20 @@ void ScoreViewer::handleEvent (const juce::var& event)
         if (const auto* bars = event["bars"].getArray())
             for (const auto& beats : *bars)
                 barStartBeats.push_back ((double) beats);
+
+        barSignatures.clear();
+        if (const auto* sigs = event["sigs"].getArray())
+            for (const auto& sig : *sigs)
+                barSignatures.push_back ({ (int) sig[0], (int) sig[1] });
+
+        std::vector<int> strings;
+        if (const auto* notes = event["tuning"].getArray())
+            for (const auto& note : *notes)
+                strings.push_back ((int) note);
+
+        scoreTitle = event["title"].toString().trim();
+        scoreArtist = event["artist"].toString().trim();
+        scoreTuning = MusicInfo::describeTuning (strings);
 
         if (onLoaded != nullptr)
             onLoaded (scoreTempo);

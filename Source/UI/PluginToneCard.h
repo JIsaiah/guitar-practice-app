@@ -44,6 +44,12 @@ public:
     // この幅で並べたときに必要な高さ
     int getPreferredHeight() const;
 
+    // 確認用 (開発用のテストで使う): プラグインの画面のウィンドウが出ているか、どこに出ているか
+    bool isWindowShowing() const;
+    juce::Rectangle<int> getWindowScreenBounds() const;
+    juce::Rectangle<int> getEditorSize() const;
+    void* getWindowNativeHandle() const;   // Windows の窓の番号 (WindowOwner::describe で調べる)
+
     void resized() override;
     void visibilityChanged() override;
 

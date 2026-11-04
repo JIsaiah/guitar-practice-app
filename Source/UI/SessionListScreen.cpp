@@ -31,6 +31,7 @@ SessionListScreen::SessionListScreen (SessionLibrary& l, SetlistStore& sl, Theme
     setlistsTab.onClick = [this] { if (setlistsTab.getToggleState()) showTab (Tab::setlists); };
 
     listBox.setRowHeight (48);
+    listBox.setTooltip ("星をクリックで難易度。右クリックで詳細の編集"_jp);
     addAndMakeVisible (listBox);
 
     newButton.setFixedText (FixedTextId::NewSession, "+ 新しいセッション"_jp);
@@ -218,37 +219,288 @@ void SessionListScreen::deleteSelected()
     });
 }
 
+//==============================================================================
+// 一覧の列: 曲名・アーティスト・BPM・難易度 (星)・チューニング・長さ・更新日時
+namespace
+{
+    constexpr int starSize = 22;
+    constexpr int headerHeight = 24;
+
+    juce::String formatLength (double seconds)
+    {
+        if (seconds <= 0.0)
+            return "—"_jp;   // 練習画面で一度開くと分かる
+
+        const auto total = juce::roundToInt (seconds);
+        return juce::String (total / 60) + ":" + juce::String (total % 60).paddedLeft ('0', 2);
+    }
+
+    void drawStars (juce::Graphics& g, juce::Rectangle<int> area, int filled, juce::Colour on, juce::Colour off)
+    {
+        for (int i = 0; i < Session::maxDifficulty; ++i)
+        {
+            const auto cell = juce::Rectangle<float> ((float) (area.getX() + i * starSize), (float) area.getY(),
+                                                      (float) starSize, (float) area.getHeight());
+            juce::Path star;
+            star.addStar (cell.getCentre(), 5, starSize * 0.2f, starSize * 0.42f);
+
+            if (i < filled)
+            {
+                g.setColour (on);
+                g.fillPath (star);
+            }
+            else
+            {
+                g.setColour (off);
+                g.strokePath (star, juce::PathStrokeType (1.2f));
+            }
+        }
+    }
+}
+
+SessionListScreen::Columns SessionListScreen::layoutColumns (int width, int height)
+{
+    auto area = juce::Rectangle<int> (0, 0, width, height).reduced (12, 0);
+    Columns c;
+
+    const auto take = [&area] (int w)
+    {
+        auto r = area.removeFromRight (w);
+        area.removeFromRight (12);
+        return r;
+    };
+
+    c.modified = take (128);
+    c.length = take (56);
+    c.tuning = take (130);
+    c.difficulty = take (starSize * Session::maxDifficulty);
+    c.bpm = take (48);
+
+    // 残りを曲名 6 : アーティスト 4 で分ける
+    const auto titleWidth = area.getWidth() * 6 / 10;
+    c.title = area.removeFromLeft (titleWidth);
+    area.removeFromLeft (12);
+    c.artist = area;
+    return c;
+}
+
+int SessionListScreen::starAt (const Columns& columns, int x)
+{
+    const auto offset = x - columns.difficulty.getX();
+    if (offset < 0 || offset >= starSize * Session::maxDifficulty)
+        return 0;
+
+    return offset / starSize + 1;
+}
+
 void SessionListScreen::paintListBoxItem (int row, juce::Graphics& g, int width, int height, bool selected)
 {
     if (! juce::isPositiveAndBelow (row, (int) entries.size()))
         return;
 
     const auto& entry = entries[(size_t) row];
+    const auto columns = layoutColumns (width, height);
 
     if (selected)
         g.fillAll (listBox.findColour (ThemeColourIds::listSelection));
 
     const auto textColour = listBox.findColour (juce::ListBox::textColourId);
+    const auto muted = textColour.withAlpha (0.6f);
+
     g.setColour (textColour);
     g.setFont (AppLookAndFeel::scaled (juce::FontOptions (17.0f)));
-    g.drawText (entry.title.isEmpty() ? "(無題)"_jp : entry.title,
-                12, 0, width - 220, height, juce::Justification::centredLeft);
+    g.drawText (entry.title.isEmpty() ? "(無題)"_jp : entry.title, columns.title, juce::Justification::centredLeft);
+
+    g.setFont (AppLookAndFeel::scaled (juce::FontOptions (14.0f)));
+    g.setColour (entry.artist.isEmpty() ? muted : textColour);
+    g.drawText (entry.artist.isEmpty() ? "—"_jp : entry.artist, columns.artist, juce::Justification::centredLeft);
+
+    g.setColour (textColour);
+    g.drawText (entry.bpm > 0.0 ? juce::String (juce::roundToInt (entry.bpm)) : "—"_jp, columns.bpm,
+                juce::Justification::centredRight);
+
+    g.setColour (entry.tuning.isEmpty() ? muted : textColour);
+    g.drawText (entry.tuning.isEmpty() ? "—"_jp : entry.tuning, columns.tuning, juce::Justification::centredLeft);
+
+    g.setColour (textColour);
+    g.drawText (formatLength (entry.lengthSeconds), columns.length, juce::Justification::centredRight);
+
+    drawStars (g, columns.difficulty, entry.difficulty,
+               listBox.findColour (ThemeColourIds::accent), textColour.withAlpha (0.35f));
 
     g.setColour (textColour.withAlpha (0.5f));
     g.setFont (AppLookAndFeel::scaled (juce::FontOptions (13.0f)));
-    g.drawText (entry.modified.formatted ("%Y/%m/%d %H:%M"),
-                width - 200, 0, 188, height, juce::Justification::centredRight);
+    g.drawText (entry.modified.formatted ("%Y/%m/%d %H:%M"), columns.modified, juce::Justification::centredRight);
 }
 
-void SessionListScreen::listBoxItemDoubleClicked (int row, const juce::MouseEvent&)
+void SessionListScreen::listBoxItemClicked (int row, const juce::MouseEvent& e)
 {
+    if (! juce::isPositiveAndBelow (row, (int) entries.size()))
+        return;
+
+    if (e.mods.isPopupMenu())
+    {
+        listBox.selectRow (row);
+        showRowMenu (row);
+        return;
+    }
+
+    // 星をクリックすると、そこまで塗る。塗ってある一番右の星をもう一度押すと、0 に戻す
+    const auto columns = layoutColumns (listBox.getVisibleRowWidth(), listBox.getRowHeight());
+    if (const auto star = starAt (columns, e.x); star > 0)
+        setDifficulty (row, star == entries[(size_t) row].difficulty ? 0 : star);
+}
+
+void SessionListScreen::listBoxItemDoubleClicked (int row, const juce::MouseEvent& e)
+{
+    // 星を続けて押したときに、セッションが開いてしまわないように
+    const auto columns = layoutColumns (listBox.getVisibleRowWidth(), listBox.getRowHeight());
+    if (starAt (columns, e.x) > 0)
+        return;
+
     listBox.selectRow (row);
     openSelected();
+}
+
+void SessionListScreen::setDifficulty (int row, int stars)
+{
+    auto& entry = entries[(size_t) row];
+    if (store.update (entry.id, [stars] (Session& s) { s.difficulty = stars; }).has_value())
+    {
+        entry.difficulty = stars;
+        listBox.repaintRow (row);
+    }
+}
+
+void SessionListScreen::showRowMenu (int row)
+{
+    juce::PopupMenu menu;
+    menu.addItem (1, "詳細を編集…"_jp);
+    menu.addItem (2, "開く"_jp);
+    menu.addSeparator();
+    menu.addItem (3, "削除"_jp);
+
+    menu.showMenuAsync (juce::PopupMenu::Options().withMousePosition(),
+                        [safe = juce::Component::SafePointer (this), row] (int result)
+    {
+        if (safe == nullptr || ! juce::isPositiveAndBelow (row, (int) safe->entries.size()))
+            return;
+
+        switch (result)
+        {
+            case 1: safe->editDetails (row); break;
+            case 2: safe->openSelected(); break;
+            case 3: safe->deleteSelected(); break;
+            default: break;
+        }
+    });
+}
+
+// 「詳細を編集…」: 曲名・アーティスト・BPM・チューニング
+void SessionListScreen::editDetails (int row)
+{
+    const auto entry = entries[(size_t) row];
+
+    detailsWindow = std::make_unique<juce::AlertWindow> ("詳細を編集"_jp, juce::String(), juce::MessageBoxIconType::NoIcon, this);
+    detailsWindow->addTextEditor ("title", entry.title, "曲名"_jp);
+    detailsWindow->addTextEditor ("artist", entry.artist, "アーティスト"_jp);
+    detailsWindow->addTextEditor ("bpm", juce::String (juce::roundToInt (entry.bpm)), "BPM (20〜400)"_jp);
+    detailsWindow->addTextEditor ("tuning", entry.tuning, "チューニング"_jp);
+
+    if (auto* bpm = detailsWindow->getTextEditor ("bpm"))
+        bpm->setInputRestrictions (3, "0123456789");
+    if (auto* tuning = detailsWindow->getTextEditor ("tuning"))
+        tuning->setTextToShowWhenEmpty ("例: E Standard、Drop D、D A D G A D"_jp, juce::Colours::grey);
+
+    detailsWindow->addButton ("保存"_jp, 1, juce::KeyPress (juce::KeyPress::returnKey));
+    detailsWindow->addButton ("キャンセル"_jp, 0, juce::KeyPress (juce::KeyPress::escapeKey));
+
+    detailsWindow->enterModalState (true, juce::ModalCallbackFunction::create (
+        [safe = juce::Component::SafePointer (this), id = entry.id] (int result)
+    {
+        if (safe == nullptr || safe->detailsWindow == nullptr)
+            return;
+
+        auto& w = *safe->detailsWindow;
+        const auto title = w.getTextEditorContents ("title").trim();
+        const auto artist = w.getTextEditorContents ("artist").trim();
+        const auto bpmText = w.getTextEditorContents ("bpm").trim();
+        const auto tuning = w.getTextEditorContents ("tuning").trim();
+        safe->detailsWindow.reset();
+
+        if (result != 1)
+            return;
+
+        const auto bpm = bpmText.getDoubleValue();
+        if (bpm < 20.0 || bpm > 400.0)
+        {
+            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "BPM の値"_jp,
+                                                    "BPM は 20〜400 の数で入力してください。変更は保存していません。"_jp);
+            return;
+        }
+
+        const auto updated = safe->store.update (id, [&] (Session& s)
+        {
+            s.title = title;
+            s.artist = artist;
+            s.tuning = tuning;
+            if (juce::roundToInt (s.bpm) != juce::roundToInt (bpm))
+            {
+                s.bpm = bpm;
+                s.tempoOrigin = TempoOrigin::manual;
+            }
+        });
+
+        if (! updated.has_value())
+        {
+            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "保存できませんでした"_jp, {});
+            return;
+        }
+
+        // 選んでいる行はそのまま、表示だけ直す。曲名はセットリストにも出るので、そちらも直す
+        safe->library.noteSaved (*updated);
+        for (size_t i = 0; i < safe->entries.size(); ++i)
+        {
+            auto& e = safe->entries[i];
+            if (e.id != id)
+                continue;
+
+            e.title = updated->title;
+            e.artist = updated->artist;
+            e.tuning = updated->tuning;
+            e.bpm = updated->bpm;
+            safe->listBox.repaintRow ((int) i);
+        }
+        safe->picker.setSessions (safe->entries);
+        safe->setlistPanel.refresh();
+    }), false);
 }
 
 void SessionListScreen::paint (juce::Graphics& g)
 {
     g.fillAll (getLookAndFeel().findColour (juce::ResizableWindow::backgroundColourId));
+
+    if (currentTab != Tab::sessions || entries.empty())
+        return;
+
+    // 列の見出し (行と同じ位置に)
+    const auto columns = layoutColumns (listBox.getVisibleRowWidth(), headerArea.getHeight());
+    const auto origin = headerArea.getPosition();
+
+    g.setColour (findColour (ThemeColourIds::textMuted));
+    g.setFont (AppLookAndFeel::scaled (juce::FontOptions (12.5f, juce::Font::bold)));
+
+    const auto heading = [&] (juce::Rectangle<int> column, const juce::String& text, juce::Justification j)
+    {
+        g.drawText (text, column + origin, j);
+    };
+    heading (columns.title, "曲名"_jp, juce::Justification::centredLeft);
+    heading (columns.artist, "アーティスト"_jp, juce::Justification::centredLeft);
+    heading (columns.bpm, "BPM", juce::Justification::centredRight);
+    heading (columns.difficulty, "難易度"_jp, juce::Justification::centredLeft);
+    heading (columns.tuning, "チューニング"_jp, juce::Justification::centredLeft);
+    heading (columns.length, "長さ"_jp, juce::Justification::centredRight);
+    heading (columns.modified, "更新"_jp, juce::Justification::centredRight);
 }
 
 void SessionListScreen::paintOverChildren (juce::Graphics& g)
@@ -298,5 +550,6 @@ void SessionListScreen::resized()
     deleteButton.setBounds (buttons.removeFromRight (100));
 
     area.removeFromBottom (12);
+    headerArea = area.removeFromTop (headerHeight);
     listBox.setBounds (area);
 }

@@ -136,6 +136,7 @@ private:
 
     // 小節の頭 (ループの A・B を合わせる先)。タブ譜があればその拍子で、なければ 4/4 とみなす
     bool usesScoreBars() const;
+    void updateMetronomeDots (double positionBeats);   // positionBeats: 止まっているときに拍子を見る位置 (4分音符の数)
     int barIndexNear (double seconds) const;     // いちばん近い小節の頭の番号 (0 = 1小節目)
     int barIndexAt (double seconds) const;       // その位置を含む小節の番号
     double barStartSeconds (int index) const;   // 小節の頭の位置 (秒)
@@ -251,6 +252,7 @@ private:
     WheelSlider speedSlider;
     FixedTextButton metronomeButton;
     juce::TextButton metronomeSoloButton;
+    MetronomeDots metronomeDots;   // 拍子の数だけのドットで、今の拍を見せる
     juce::TextButton loopStartButton, loopEndButton;
     FixedTextButton loopButton;
 

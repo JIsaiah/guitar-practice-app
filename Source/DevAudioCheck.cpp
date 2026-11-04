@@ -3,7 +3,10 @@
 #if JUCE_DEBUG
 #include <juce_audio_devices/juce_audio_devices.h>
 #include <juce_audio_processors/juce_audio_processors.h>
+#include "Audio/AudioEngine.h"
 #include "Audio/NamTone.h"
+#include "UI/PluginToneCard.h"
+#include "Platform/WindowOwner.h"
 
 namespace
 {
@@ -231,5 +234,92 @@ juce::String DevAudioCheck::run (const juce::String& commandLine)
 
     folder.getChildFile ("audio-check.txt").replaceWithText (report);
     return report;
+}
+
+//==============================================================================
+namespace
+{
+    // プラグインの画面のウィンドウのテスト。持ち主役の小さなウィンドウにカードを入れ、
+    // エンジンにプラグインを非同期で読み込ませ、カードにウィンドウを開かせる。数秒後に様子を書き出して終わる
+    class PluginWindowTest final : public juce::Timer
+    {
+    public:
+        PluginWindowTest (const juce::File& outputFolder, const juce::File& vst3, std::function<void()> finished)
+            : folder (outputFolder), onFinished (std::move (finished))
+        {
+            folder.createDirectory();
+            log << "plugin: " << vst3.getFullPathName() << "\n";
+
+            card = std::make_unique<PluginToneCard> (engine);
+            card->setSize (380, 200);
+            owner = std::make_unique<juce::DocumentWindow> ("plugin-window-test owner", juce::Colours::darkgrey,
+                                                            juce::DocumentWindow::closeButton);
+            owner->setUsingNativeTitleBar (true);
+            owner->setContentNonOwned (card.get(), true);
+            owner->setTopLeftPosition (40, 40);
+            owner->setVisible (true);
+
+            // 練習画面と同じつなぎ方
+            engine.onPluginToneAboutToReplace = [this] { card->deleteEditor(); };
+            engine.onPluginToneChanged = [this]
+            {
+                card->refreshEditor();
+                log << elapsed() << " installed, editor created: " << (card->hasEditor() ? "yes" : "no")
+                    << ", window showing: " << (card->isWindowShowing() ? "yes" : "no") << "\n";
+            };
+
+            card->requestOpenWindow();   // TONE3000 のボタンを押したのと同じ (できたときに開く)
+            engine.loadPluginToneAsync (vst3, {}, [this] (bool ok, const juce::String& error)
+            {
+                log << elapsed() << " load: " << (ok ? juce::String ("ok") : error) << "\n";
+            });
+
+            startTimer (10000);   // 重いプラグインは読み込みに数秒かかるので、待ってから調べる
+        }
+
+        ~PluginWindowTest() override
+        {
+            engine.onPluginToneAboutToReplace = nullptr;
+            engine.onPluginToneChanged = nullptr;
+            card->deleteEditor();   // プラグインより先に、画面とウィンドウを消す
+            owner = nullptr;
+            card = nullptr;
+        }
+
+    private:
+        void timerCallback() override
+        {
+            stopTimer();
+            log << elapsed() << " check\n"
+                << "editor size: " << card->getEditorSize().toString() << "\n"
+                << "window showing (JUCE): " << (card->isWindowShowing() ? "yes" : "no") << "\n"
+                << "window bounds (JUCE): " << card->getWindowScreenBounds().toString() << "\n"
+                << "window (Windows): " << WindowOwner::describe (card->getWindowNativeHandle()) << "\n";
+            folder.getChildFile ("plugin-window.txt").replaceWithText (log);
+
+            if (onFinished != nullptr)
+                onFinished();
+        }
+
+        juce::String elapsed() const
+        {
+            return "[" + juce::String ((juce::Time::getMillisecondCounterHiRes() - startMs) / 1000.0, 2) + "s]";
+        }
+
+        double startMs = juce::Time::getMillisecondCounterHiRes();
+        juce::File folder;
+        std::function<void()> onFinished;
+        AudioEngine engine;   // デバイスは開かない (音は出さない)
+        std::unique_ptr<PluginToneCard> card;
+        std::unique_ptr<juce::DocumentWindow> owner;
+        juce::String log;
+    };
+}
+
+std::unique_ptr<juce::Timer> DevAudioCheck::startPluginWindowTest (const juce::String& commandLine, std::function<void()> onFinished)
+{
+    return std::make_unique<PluginWindowTest> (juce::File (argumentAfter (commandLine, pluginWindowTestFlag)),
+                                               juce::File (argumentAfter (commandLine, "--plugin")),
+                                               std::move (onFinished));
 }
 #endif

@@ -552,6 +552,9 @@ void AudioEngine::audioDeviceIOCallbackWithContext (const float* const* inputs, 
         sourceRight = source->buffer.getReadPointer (source->buffer.getNumChannels() > 1 ? 1 : 0);
     }
 
+    double blockBeatClock = 0.0;   // ブロックの最後のサンプルでの、メトロノームの時計 (ビジュアライザーに渡す)
+    bool blockClockRunning = false;
+
     for (int i = 0; i < numSamples; ++i)
     {
         float left = 0.0f, right = 0.0f;
@@ -607,6 +610,10 @@ void AudioEngine::audioDeviceIOCallbackWithContext (const float* const* inputs, 
             soloClockSeconds += 1.0 / sampleRate;
         }
 
+        blockClockRunning = sourcePlaying || externalRunning || soloRunning;
+        if (blockClockRunning)
+            blockBeatClock = musicTime;
+
         if (metronomeOn && (sourcePlaying || externalRunning || soloRunning))
         {
             const auto beat = (juce::int64) std::floor (musicTime * bpm / 60.0);
@@ -634,6 +641,9 @@ void AudioEngine::audioDeviceIOCallbackWithContext (const float* const* inputs, 
 
     if (guitarBlockPeak > guitarPeak.load())
         guitarPeak.store (guitarBlockPeak);
+
+    beatClockSeconds.store (blockBeatClock);
+    beatClockRunning.store (blockClockRunning);
 
     if (source != nullptr)
         positionSeconds.store (readPosition / source->sampleRate);

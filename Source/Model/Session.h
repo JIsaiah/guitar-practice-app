@@ -27,6 +27,12 @@ struct Session
     juce::String sessionId;  // ファイルの中に持つ ID (UUID)。セットリストはこれで曲を指す。ファイルを移動・改名しても変わらない
     juce::String title;
 
+    // 曲の詳細 (一覧に表示する。一覧の右クリック「詳細を編集…」で変えられる)
+    juce::String artist;
+    juce::String tuning;     // 例: "E Standard"、"Drop D"、"D A D G A D"。タブ譜から自動で入ることがある
+    int difficulty = 0;      // 難易度 (星の数 0〜5。0 = 未設定)。一覧の星をクリックして決める
+    static constexpr int maxDifficulty = 5;
+
     SourceType sourceType = SourceType::none;
     juce::String sourcePath;  // local のとき
     juce::String youtubeUrl;  // youtube のとき

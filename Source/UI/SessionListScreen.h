@@ -37,7 +37,20 @@ private:
     int getNumRows() override { return (int) entries.size(); }
     void paintListBoxItem (int row, juce::Graphics& g, int width, int height, bool selected) override;
     void listBoxItemDoubleClicked (int row, const juce::MouseEvent&) override;
+    void listBoxItemClicked (int row, const juce::MouseEvent&) override;   // 星 (難易度) と右クリックのメニュー
     void selectedRowsChanged (int) override { updateButtons(); }
+
+    // 一覧の列 (見出しと行で同じ位置を使う)
+    struct Columns
+    {
+        juce::Rectangle<int> title, artist, bpm, difficulty, tuning, length, modified;
+    };
+    static Columns layoutColumns (int width, int height);
+    static int starAt (const Columns& columns, int x);   // x の位置の星 (1〜5)。星の上でなければ 0
+
+    void setDifficulty (int row, int stars);
+    void showRowMenu (int row);
+    void editDetails (int row);
 
     void changeListenerCallback (juce::ChangeBroadcaster*) override;   // テーマが変わったとき
     void refresh();
@@ -66,4 +79,7 @@ private:
     SetlistPanel setlistPanel;
     SessionPickerPanel picker;
     juce::String pickerTargetId;   // 追加先のセットリスト (カードは読み直しで作り直されるので ID で持つ)
+
+    juce::Rectangle<int> headerArea;   // 一覧の列の見出し (曲名・アーティスト…)
+    std::unique_ptr<juce::AlertWindow> detailsWindow;   // 「詳細を編集…」のダイアログ
 };

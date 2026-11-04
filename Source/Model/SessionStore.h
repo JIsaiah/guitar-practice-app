@@ -16,6 +16,9 @@ public:
         juce::String title;
         juce::Time modified;
         double lengthSeconds = 0.0;   // 0 = 不明
+        juce::String artist, tuning;
+        double bpm = 0.0;
+        int difficulty = 0;
     };
 
     SessionStore();
@@ -25,6 +28,10 @@ public:
     std::optional<Session> load (const juce::String& id);   // session_id が無ければ付けて保存し直す
     bool save (Session& session);  // id・sessionId が空なら採番する
     bool remove (const juce::String& id);
+
+    // 読み込み → change で書き換え → 保存。一覧の並び (更新日時の新しい順) は変えない。
+    // 一覧で曲の詳細や難易度を変えたときに使う (星をクリックした行が、一番上に飛ばないように)
+    std::optional<Session> update (const juce::String& id, const std::function<void (Session&)>& change);
 
     // session_id の無い古いファイルに ID を付けて保存し直す (setlist-mode.md 3.1 のマイグレーション)
     void assignMissingSessionIds();

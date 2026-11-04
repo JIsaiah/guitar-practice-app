@@ -23,11 +23,17 @@ std::vector<SessionStore::Entry> SessionStore::list() const
         if (! parsed.isObject())
             continue;
 
-        entries.push_back ({ file.getFileNameWithoutExtension(),
-                             parsed["session_id"].toString(),
-                             parsed["title"].toString(),
-                             file.getLastModificationTime(),
-                             (double) parsed["source"]["length_sec"] });
+        Entry entry;
+        entry.id = file.getFileNameWithoutExtension();
+        entry.sessionId = parsed["session_id"].toString();
+        entry.title = parsed["title"].toString();
+        entry.modified = file.getLastModificationTime();
+        entry.lengthSeconds = (double) parsed["source"]["length_sec"];
+        entry.artist = parsed["artist"].toString();
+        entry.tuning = parsed["tuning"].toString();
+        entry.bpm = (double) parsed["tempo"]["bpm"];
+        entry.difficulty = juce::jlimit (0, Session::maxDifficulty, (int) parsed["difficulty"]);
+        entries.push_back (entry);
     }
 
     std::sort (entries.begin(), entries.end(),
@@ -69,6 +75,23 @@ bool SessionStore::save (Session& session)
 bool SessionStore::remove (const juce::String& id)
 {
     return fileFor (id).deleteFile();
+}
+
+std::optional<Session> SessionStore::update (const juce::String& id, const std::function<void (Session&)>& change)
+{
+    auto session = load (id);
+    if (! session.has_value())
+        return std::nullopt;
+
+    const auto file = fileFor (id);
+    const auto modified = file.getLastModificationTime();
+
+    change (*session);
+    if (! save (*session))
+        return std::nullopt;
+
+    file.setLastModificationTime (modified);   // 並び順を変えない
+    return session;
 }
 
 void SessionStore::assignMissingSessionIds()
