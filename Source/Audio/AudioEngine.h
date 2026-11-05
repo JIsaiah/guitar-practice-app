@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <memory>
+#include <optional>
 #include <vector>
 #include <juce_audio_utils/juce_audio_utils.h>
 #include "../Model/TonePresets.h"
@@ -74,6 +75,10 @@ public:
     //==== ミキサー (3系統) と音色 ====
     void setSourceGain (float gain) noexcept    { sourceGain.store (gain); }
     void setGuitarGain (float gain) noexcept    { guitarGain.store (gain); }
+    // ギターの音を出すか。練習画面が開いている間だけ true にする (一覧や新規作成の画面では鳴らさない)
+    void setGuitarMonitoring (bool on) noexcept { guitarMonitoring.store (on); }
+    // ギターの総音量 (設定画面)。ミキサーの「ギター」に掛ける
+    void setGuitarMasterGain (float gain) noexcept { guitarMasterGain.store (gain); }
     void setMetronomeGain (float gain) noexcept { metronomeGain.store (gain); }
     void setTone (ToneType type) noexcept       { tone.store ((int) type); }
 
@@ -97,10 +102,16 @@ public:
     // プラグインを非同期で作り、準備ができたら差し替える。vst3File が空なら外す。
     // 差し替える前に onAboutToReplace が呼ばれる: 画面は、そこで今のプラグインの編集画面を消すこと
     // (編集画面はプラグインより先に消す必要がある)
+    //
+    // プラグインは **同時に1つだけ** 持つ。新しいものを作る前に、今のものを外して消し終えてから作る。
+    // Archetype Misha Mansoor X は、2つ目を作ったり、2つ目の画面を開いたりすると、1つ目が残っている間は落ちる
+    // (クラッシュダンプと --plugin-window-test で確認)。
+    // 同じファイルで、保存した状態があるときは、作り直さずに状態だけ戻す (セットリストで同じプラグインの曲が続くとき)
     void loadPluginToneAsync (const juce::File& vst3File, const juce::MemoryBlock& state, LoadCallback onDone);
     void clearPluginTone();
     PluginTone* getPluginTone() const noexcept { return ownedPluginTone.get(); }   // 編集画面を作るため
     bool isPluginToneLoading() const noexcept  { return pluginToneLoading; }
+    int getNumRetired() const noexcept { return (int) retired.size(); }   // 確認用: まだ消していない古いもの (音源・NAM・プラグイン)
     std::function<void()> onPluginToneAboutToReplace;
     std::function<void()> onPluginToneChanged;   // 差し替えた後 (画面は編集画面を作り直す)
 
@@ -135,6 +146,8 @@ private:
     {
         std::shared_ptr<void> object;
         juce::uint64 callbackCountAtRetire;
+        juce::uint32 keepUntilMs = 0;   // この時刻 (Time::getMillisecondCounter) までは消さない
+        bool isPlugin = false;
     };
 
     // AudioIODeviceCallback
@@ -151,6 +164,8 @@ private:
     void installSource (std::shared_ptr<LoadedAudio> newSource);
     void installNamTone (std::shared_ptr<NamTone> newTone);
     void installPluginTone (std::shared_ptr<PluginTone> newTone);
+    void startPendingPluginLoad();    // 古いプラグインを消し終えていれば、待っている読み込みを始める
+    bool hasRetiredPlugin() const;
     void updatePluginPreparation();   // デバイスの設定が変わったら、プラグインを準備し直す
     void processGuitar (const float* input, int numSamples, int toneType) noexcept;
     void pushTunerInput (const float* data, int numSamples) noexcept;
@@ -171,6 +186,16 @@ private:
     std::shared_ptr<PluginTone> ownedPluginTone;
     int pluginToneGeneration = 0;
     bool pluginToneLoading = false;
+
+    // 古いプラグインが消えるのを待っている読み込み
+    struct PendingPluginLoad
+    {
+        juce::File file;
+        juce::MemoryBlock state;
+        LoadCallback onDone;
+        int generation = 0;
+    };
+    std::optional<PendingPluginLoad> pendingPluginLoad;
     // 準備し直し: オーディオスレッドから外した時点のコールバックの回数。-1 なら準備し直していない
     juce::int64 pluginDetachedAtCallback = -1;
     juce::File namAmpFile, namCabinetFile;   // 選ばれているファイル (デバイスの設定が変わったら、読み込み直す)
@@ -201,6 +226,8 @@ private:
     std::atomic<float> sourceGain { 1.0f }, guitarGain { 1.0f }, metronomeGain { 0.8f };
     std::atomic<int> tone { (int) ToneType::clean };
     std::atomic<bool> tunerActive { false };
+    std::atomic<bool> guitarMonitoring { false };
+    std::atomic<float> guitarMasterGain { 1.0f };
     std::atomic<bool> externalActive { false }, externalPlaying { false };
     std::atomic<double> externalPosition { 0.0 }, externalRate { 1.0 };
     std::atomic<juce::uint32> externalSerial { 0 };

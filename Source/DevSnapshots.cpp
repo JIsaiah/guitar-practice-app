@@ -230,6 +230,13 @@ juce::String DevSnapshots::renderAll (const juce::File& folder)
                     if (savePng (strip, folder.getChildFile ("metronome_dots" + suffix)))
                         log << "wrote metronome_dots" << suffix << "\n";
                 }
+
+                // 大きな表示 (ドットをクリックしたとき)。7/8 の3拍目
+                {
+                    MetronomeBigWindow big;
+                    big.getDots().setState (7, 8, 2);
+                    snap (big, 260 + 7 * 110, 220, "metronome_big" + suffix);
+                }
             }
 
             // 設定の「文字の大きさ」と「アクセントの色」を変えたとき (ダーク、120%、青)

@@ -241,19 +241,38 @@ namespace
 {
     // プラグインの画面のウィンドウのテスト。持ち主役の小さなウィンドウにカードを入れ、
     // エンジンにプラグインを非同期で読み込ませ、カードにウィンドウを開かせる。数秒後に様子を書き出して終わる
+    // 持ち主役のウィンドウ。閉じる知らせが来たら記録する (アプリのウィンドウなら、アプリが終わるところ)
+    class OwnerWindow final : public juce::DocumentWindow
+    {
+    public:
+        explicit OwnerWindow (std::function<void()> onCloseRequest)
+            : DocumentWindow ("plugin-window-test owner", juce::Colours::darkgrey, DocumentWindow::closeButton),
+              onClose (std::move (onCloseRequest)) {}
+
+        void closeButtonPressed() override { if (onClose != nullptr) onClose(); }
+
+    private:
+        std::function<void()> onClose;
+    };
+
     class PluginWindowTest final : public juce::Timer
     {
     public:
-        PluginWindowTest (const juce::File& outputFolder, const juce::File& vst3, std::function<void()> finished)
-            : folder (outputFolder), onFinished (std::move (finished))
+        PluginWindowTest (const juce::File& outputFolder, const juce::File& vst3, bool closeFirst, std::function<void()> finished)
+            : folder (outputFolder), vst3File (vst3), closeBeforeReplace (closeFirst), onFinished (std::move (finished))
         {
+            unloadFirst = juce::JUCEApplicationBase::getCommandLineParameters().contains ("--unload-first");
             folder.createDirectory();
             log << "plugin: " << vst3.getFullPathName() << "\n";
 
             card = std::make_unique<PluginToneCard> (engine);
             card->setSize (380, 200);
-            owner = std::make_unique<juce::DocumentWindow> ("plugin-window-test owner", juce::Colours::darkgrey,
-                                                            juce::DocumentWindow::closeButton);
+            owner = std::make_unique<OwnerWindow> ([this]
+            {
+                // アプリのウィンドウなら、ここでアプリが終わる (プラグインの画面を閉じたときに来たら問題)
+                log << elapsed() << " !! the owner window received a close request\n";
+                folder.getChildFile ("plugin-window.txt").replaceWithText (log);
+            });
             owner->setUsingNativeTitleBar (true);
             owner->setContentNonOwned (card.get(), true);
             owner->setTopLeftPosition (40, 40);
@@ -287,19 +306,89 @@ namespace
         }
 
     private:
+        // 手順: 開いたか調べる → 閉じる (閉じるボタンと同じ) → 開き直す → プラグインを差し替える (曲の切り替えと同じ)
+        //       → 古いプラグインが消えるまで待つ → 終わり。途中で落ちれば、ログはそこで止まる
         void timerCallback() override
         {
             stopTimer();
-            log << elapsed() << " check\n"
-                << "editor size: " << card->getEditorSize().toString() << "\n"
-                << "window showing (JUCE): " << (card->isWindowShowing() ? "yes" : "no") << "\n"
-                << "window bounds (JUCE): " << card->getWindowScreenBounds().toString() << "\n"
-                << "window (Windows): " << WindowOwner::describe (card->getWindowNativeHandle()) << "\n";
-            folder.getChildFile ("plugin-window.txt").replaceWithText (log);
+            ++step;
 
-            if (onFinished != nullptr)
-                onFinished();
+            const auto describe = [this]
+            {
+                log << "  editor: " << (card->hasEditor() ? card->getEditorSize().toString() : juce::String ("none"))
+                    << ", window showing: " << (card->isWindowShowing() ? "yes" : "no") << "\n";
+            };
+
+            switch (step)
+            {
+                case 1:
+                    log << elapsed() << " check (opened)\n"
+                        << "window bounds (JUCE): " << card->getWindowScreenBounds().toString() << "\n"
+                        << "window (Windows): " << WindowOwner::describe (card->getWindowNativeHandle()) << "\n";
+                    describe();
+                    log << elapsed() << " close window\n";
+                    WindowOwner::postCloseRequest (card->getWindowNativeHandle());   // ウィンドウの × を押したのと同じ
+                    startTimer (1500);
+                    break;
+
+                case 2:
+                    log << elapsed() << " after close\n";
+                    describe();
+                    log << elapsed() << " reopen\n";
+                    card->requestOpenWindow();
+                    startTimer (3000);
+                    break;
+
+                case 3:
+                    log << elapsed() << " after reopen\n";
+                    describe();
+                    log << elapsed() << " replace plugin (same file, like moving to the next song)"
+                        << (closeBeforeReplace ? ", closing the editor first" : "") << "\n";
+                    if (closeBeforeReplace || unloadFirst)
+                        card->deleteEditor();
+                    if (unloadFirst)
+                    {
+                        log << elapsed() << " unloading the first instance\n";
+                        engine.clearPluginTone();
+                    }
+                    folder.getChildFile ("plugin-window.txt").replaceWithText (log);
+
+                    juce::Timer::callAfterDelay (unloadFirst ? 5000 : closeBeforeReplace ? 1000 : 0, [this]
+                    {
+                        log << elapsed() << " creating the second instance (retired: " << engine.getNumRetired() << ")\n";
+                        folder.getChildFile ("plugin-window.txt").replaceWithText (log);
+                        engine.loadPluginToneAsync (vst3File, {}, [this] (bool ok, const juce::String& error)
+                        {
+                            log << elapsed() << " second load: " << (ok ? juce::String ("ok") : error) << "\n";
+                            folder.getChildFile ("plugin-window.txt").replaceWithText (log);
+                        });
+                        card->requestOpenWindow();   // 読み込み中なので、できたときに開く
+                    });
+                    startTimer (1000);   // 読み込み (数秒) + 古いプラグインを消すまでの待ち (3秒)。1秒ごとに記録する
+                    break;
+
+                default:
+                    if (step < 3 + 16)
+                    {
+                        log << elapsed() << " tick (retired: " << engine.getNumRetired() << ")\n";
+                        folder.getChildFile ("plugin-window.txt").replaceWithText (log);
+                        startTimer (1000);
+                        return;
+                    }
+
+                    log << elapsed() << " after replace (old plugin should be freed)\n";
+                    describe();
+                    log << "finished without crash\n";
+                    folder.getChildFile ("plugin-window.txt").replaceWithText (log);
+                    if (onFinished != nullptr)
+                        onFinished();
+                    return;
+            }
+
+            folder.getChildFile ("plugin-window.txt").replaceWithText (log);   // 途中で落ちても、そこまでは残る
         }
+
+        int step = 0;
 
         juce::String elapsed() const
         {
@@ -307,11 +396,13 @@ namespace
         }
 
         double startMs = juce::Time::getMillisecondCounterHiRes();
-        juce::File folder;
+        juce::File folder, vst3File;
+        bool closeBeforeReplace = false;   // --close-before-replace: 差し替えの前に編集画面を消す
+        bool unloadFirst = false;          // --unload-first: 古いプラグインを消してから、新しいものを作る
         std::function<void()> onFinished;
         AudioEngine engine;   // デバイスは開かない (音は出さない)
         std::unique_ptr<PluginToneCard> card;
-        std::unique_ptr<juce::DocumentWindow> owner;
+        std::unique_ptr<OwnerWindow> owner;
         juce::String log;
     };
 }
@@ -320,6 +411,7 @@ std::unique_ptr<juce::Timer> DevAudioCheck::startPluginWindowTest (const juce::S
 {
     return std::make_unique<PluginWindowTest> (juce::File (argumentAfter (commandLine, pluginWindowTestFlag)),
                                                juce::File (argumentAfter (commandLine, "--plugin")),
+                                               commandLine.contains ("--close-before-replace"),
                                                std::move (onFinished));
 }
 #endif

@@ -185,10 +185,16 @@ public:
     }
 
 private:
-    static constexpr int timeWidth = 230;
+    // 時間の表示の幅は、文字の幅に合わせる (バーを時間の表示のすぐ手前まで伸ばす。作者の指示)。
+    // 数字が変わるたびにバーの長さが変わらないよう、決まった見本の文字列で測る
+    int getTimeWidth() const
+    {
+        const auto font = juce::Font (AppLookAndFeel::scaled (juce::FontOptions (24.0f, juce::Font::bold)));
+        return (int) std::ceil (juce::GlyphArrangement::getStringWidth (font, "00:00.0 / 00:00.0")) + 4;
+    }
 
-    juce::Rectangle<int> getTimeArea() const { return getLocalBounds().removeFromRight (timeWidth); }
-    juce::Rectangle<int> getBarArea() const  { return getLocalBounds().withTrimmedRight (timeWidth + 12).reduced (12, 0); }
+    juce::Rectangle<int> getTimeArea() const { return getLocalBounds().removeFromRight (getTimeWidth()); }
+    juce::Rectangle<int> getBarArea() const  { return getLocalBounds().withTrimmedRight (getTimeWidth() + 14).withTrimmedLeft (12); }
 
     float xFor (double seconds) const
     {
@@ -449,20 +455,43 @@ public:
 
 // メトロノームのビジュアライザー。小節の拍子の分子の数だけドットを並べ、今の拍を点ける
 // (4/4 ならドット4個、9/8 なら9個)。小節の頭 (1つ目) は少し大きく描く
-class MetronomeDots final : public juce::Component
+class MetronomeDots final : public juce::Component,
+                            public juce::SettableTooltipClient
 {
 public:
     // numerator/denominator: 今の小節の拍子。activeBeat: 点ける拍 (0 から)。-1 なら点けない (止まっているとき)
     void setState (int numerator, int denominator, int activeBeat)
     {
         numerator = juce::jlimit (1, 32, numerator);
+        const auto now = juce::Time::getMillisecondCounterHiRes();
+
         if (numerator != count || denominator != unit || activeBeat != active)
         {
+            if (activeBeat != active && activeBeat >= 0)
+                litAtMs = now;   // 新しい拍: ここから光を弱めていく
+
             count = numerator;
             unit = denominator;
             active = activeBeat;
             repaint();
         }
+        else if (active >= 0 && now - litAtMs < glowMs + 50.0)
+        {
+            repaint();   // 光が弱まっていく途中 (呼ぶ側のタイマー 30 回/秒 で描き直す)
+        }
+    }
+
+    int getCount() const noexcept { return count; }
+
+    // 大きく表示する (画面の真ん中に出すとき)。ドットと拍子の文字を、部品の高さに合わせて大きくする
+    void setLarge (bool shouldBeLarge) { large = shouldBeLarge; repaint(); }
+
+    std::function<void()> onClick;   // クリックされた (練習画面が、大きな表示を出す・消す)
+
+    void mouseUp (const juce::MouseEvent& e) override
+    {
+        if (onClick != nullptr && getLocalBounds().contains (e.getPosition()))
+            onClick();
     }
 
     void paint (juce::Graphics& g) override
@@ -470,14 +499,15 @@ public:
         auto area = getLocalBounds().toFloat();
 
         // 左に拍子 ("4/4")
+        const auto labelSize = large ? area.getHeight() * 0.32f : 13.0f;
         g.setColour (findColour (ThemeColourIds::textMuted));
-        g.setFont (AppLookAndFeel::scaled (juce::FontOptions (13.0f, juce::Font::bold)));
-        g.drawText (juce::String (count) + "/" + juce::String (unit), area.removeFromLeft (34.0f),
+        g.setFont (AppLookAndFeel::scaled (juce::FontOptions (labelSize, juce::Font::bold)));
+        g.drawText (juce::String (count) + "/" + juce::String (unit), area.removeFromLeft (labelSize * 2.6f),
                     juce::Justification::centredLeft);
 
         // ドットの大きさは、数が多いときは幅に収まるよう小さくする
         const auto pitch = juce::jmin (area.getHeight(), area.getWidth() / (float) count);
-        const auto radius = juce::jlimit (2.0f, 7.0f, pitch * 0.36f);
+        const auto radius = juce::jlimit (2.0f, large ? area.getHeight() * 0.3f : 7.0f, pitch * 0.36f);
         const auto accent = findColour (ThemeColourIds::accent);
         const auto idle = findColour (ThemeColourIds::textMuted);
 
@@ -489,7 +519,19 @@ public:
 
             if (i == active)
             {
-                g.setColour (i == 0 ? accent : accent.withMultipliedAlpha (0.8f));
+                // 光: 拍の頭で強く、だんだん弱まる。外側ほど薄い円を重ねて、ぼんやり光って見せる
+                const auto elapsed = juce::Time::getMillisecondCounterHiRes() - litAtMs;
+                const auto glow = (float) juce::jlimit (0.0, 1.0, 1.0 - elapsed / glowMs);
+                const auto glowColour = i == 0 ? accent.brighter (0.3f) : accent;
+
+                for (int ring = 4; ring >= 1; --ring)
+                {
+                    const auto spread = r * (1.0f + 0.22f * (float) ring);
+                    g.setColour (glowColour.withAlpha ((0.10f + 0.22f * glow) / (float) ring));
+                    g.fillEllipse (juce::Rectangle<float> (spread * 2.0f, spread * 2.0f).withCentre (centre));
+                }
+
+                g.setColour ((i == 0 ? accent : accent.withMultipliedAlpha (0.85f)).brighter (0.5f * glow));
                 g.fillEllipse (dot);
             }
             else
@@ -501,5 +543,55 @@ public:
     }
 
 private:
+    static constexpr double glowMs = 350.0;   // 拍の頭の光が弱まるまでの時間
     int count = 4, unit = 4, active = -1;
+    double litAtMs = 0.0;
+    bool large = false;
+};
+
+// メトロノームのビジュアライザーを、画面の真ん中に大きく出すウィンドウ (小さいドットをクリックすると出る)。
+// タブ譜や動画は WebView (Windows の別の窓) で、アプリの部品より手前に描かれるため、
+// 練習画面の部品として重ねると隠れてしまう。そこで、枠のない別のウィンドウにして、アプリのウィンドウの手前に出す。
+// クリックすると閉じる
+class MetronomeBigWindow final : public juce::Component
+{
+public:
+    MetronomeBigWindow()
+    {
+        setOpaque (false);   // 角を丸くして、まわりを透かす
+        dots.setLarge (true);
+        dots.setInterceptsMouseClicks (false, false);
+        addAndMakeVisible (dots);
+        setMouseCursor (juce::MouseCursor::PointingHandCursor);
+    }
+
+    std::function<void()> onClose;
+    MetronomeDots& getDots() noexcept { return dots; }
+
+    void paint (juce::Graphics& g) override
+    {
+        const auto bounds = getLocalBounds().toFloat().reduced (1.0f);
+        g.setColour (findColour (ThemeColourIds::panel).withAlpha (0.94f));
+        g.fillRoundedRectangle (bounds, 18.0f);
+        g.setColour (findColour (ThemeColourIds::border));
+        g.drawRoundedRectangle (bounds, 18.0f, 1.5f);
+
+        g.setColour (findColour (ThemeColourIds::textMuted));
+        g.setFont (AppLookAndFeel::scaled (juce::FontOptions (13.0f)));
+        g.drawText ("クリックで閉じる"_jp, getLocalBounds().removeFromBottom (30), juce::Justification::centred);
+    }
+
+    void resized() override
+    {
+        dots.setBounds (getLocalBounds().reduced (36, 30).withTrimmedBottom (10));
+    }
+
+    void mouseUp (const juce::MouseEvent&) override
+    {
+        if (onClose != nullptr)
+            onClose();
+    }
+
+private:
+    MetronomeDots dots;
 };

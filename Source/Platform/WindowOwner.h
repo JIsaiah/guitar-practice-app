@@ -14,4 +14,7 @@ namespace WindowOwner
     // 確認用: ウィンドウが本当に表示されているか、位置、子ウィンドウ (プラグインが描画に使う窓) の数と表示の状態を文字にする
     // (画面を撮影せずに、プラグインの画面が出ているかを確かめるため)
     std::string describe (void* window);
+
+    // 確認用: ウィンドウの閉じるボタンを押したのと同じ知らせ (WM_CLOSE) を送る
+    void postCloseRequest (void* window);
 }

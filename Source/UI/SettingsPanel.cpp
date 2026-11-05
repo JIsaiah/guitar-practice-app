@@ -68,7 +68,6 @@ SettingsPanel::SettingsPanel (AppSettings& s, ThemeManager& t, juce::AudioDevice
 
     setUpRow (skipRow, "戻る・進むの幅"_jp, "秒"_jp, AppSettings::minSkipSeconds, AppSettings::maxSkipSeconds);
     setUpRow (speedRow, "速度"_jp, "%", 1, 50);
-    setUpRow (bpmRow, "BPM", {}, 1, 20);
     setUpRow (volumeRow, "音量"_jp, "%", 1, 50);
     setUpRow (offsetRow, "ずらし"_jp, "ms", 1, 500);
 
@@ -77,10 +76,18 @@ SettingsPanel::SettingsPanel (AppSettings& s, ThemeManager& t, juce::AudioDevice
     setUpRow (songGapRow, "セットリストの待ち時間"_jp, "秒"_jp, 0, AppSettings::maxSongGapSeconds);
     songGapRow.value.setTooltip ("セットリストで次の曲を始めるまでの時間 (曲が終わったときと、「次の曲」「前の曲」を押したとき)"_jp);
 
+    // ギターの総音量: 曲ごとのミキサーの「ギター」に、さらに掛ける。動かすとすぐに音が変わる
+    setUpRow (guitarMasterRow, "ギターの総音量"_jp, "%", 0, AppSettings::maxGuitarMasterPercent);
+    guitarMasterRow.value.setSliderStyle (juce::Slider::LinearHorizontal);
+    guitarMasterRow.value.setTextBoxStyle (juce::Slider::TextBoxRight, false, 48, 24);
+    guitarMasterRow.value.setDoubleClickReturnValue (true, 100.0);
+    guitarMasterRow.value.setTooltip ("すべての曲のギターの音量に掛けます。ギターが全体的に大きいときに下げます (ダブルクリックで 100%)"_jp);
+    guitarMasterRow.value.onValueChange = [this] { settings.setGuitarMasterPercent ((int) guitarMasterRow.value.getValue()); };
+
     skipRow.value.onValueChange = [this] { settings.setSkipSeconds ((int) skipRow.value.getValue()); };
     preStartDelayRow.value.onValueChange = [this] { settings.setPreStartDelaySeconds ((int) preStartDelayRow.value.getValue()); };
     songGapRow.value.onValueChange = [this] { settings.setSongGapSeconds ((int) songGapRow.value.getValue()); };
-    for (auto* row : { &speedRow, &bpmRow, &volumeRow, &offsetRow })
+    for (auto* row : { &speedRow, &volumeRow, &offsetRow })
         row->value.onValueChange = [this] { storeWheelSteps(); };
 
     //==== デスメタルモード ====
@@ -203,12 +210,12 @@ void SettingsPanel::updateFromSettings()
     textScaleBox.setSelectedId (nearest + 1, juce::dontSendNotification);
 
     skipRow.value.setValue (settings.getSkipSeconds(), juce::dontSendNotification);
+    guitarMasterRow.value.setValue (settings.getGuitarMasterPercent(), juce::dontSendNotification);
     preStartDelayRow.value.setValue (settings.getPreStartDelaySeconds(), juce::dontSendNotification);
     songGapRow.value.setValue (settings.getSongGapSeconds(), juce::dontSendNotification);
 
     const auto& steps = settings.getWheelSteps();
     speedRow.value.setValue (steps.speedPercent, juce::dontSendNotification);
-    bpmRow.value.setValue (steps.bpm, juce::dontSendNotification);
     volumeRow.value.setValue (steps.volumePercent, juce::dontSendNotification);
     offsetRow.value.setValue (steps.offsetMs, juce::dontSendNotification);
 
@@ -231,7 +238,7 @@ void SettingsPanel::storeWheelSteps()
 {
     AppSettings::WheelSteps steps;
     steps.speedPercent = (int) speedRow.value.getValue();
-    steps.bpm = (int) bpmRow.value.getValue();
+    steps.bpm = 1;
     steps.volumePercent = (int) volumeRow.value.getValue();
     steps.offsetMs = (int) offsetRow.value.getValue();
     settings.setWheelSteps (steps);
@@ -285,10 +292,11 @@ void SettingsPanel::resized()
     row (skipRow.label, skipRow.value, &skipRow.unit);
     row (preStartDelayRow.label, preStartDelayRow.value, &preStartDelayRow.unit);
     row (songGapRow.label, songGapRow.value, &songGapRow.unit);
+    row (guitarMasterRow.label, guitarMasterRow.value, &guitarMasterRow.unit, 230);
 
     area.removeFromTop (4);
     wheelHeading.setBounds (area.removeFromTop (24));
-    for (auto* r : { &speedRow, &bpmRow, &volumeRow, &offsetRow })
+    for (auto* r : { &speedRow, &volumeRow, &offsetRow })
         row (r->label, r->value, &r->unit);
 
     //==== デスメタルモード ====

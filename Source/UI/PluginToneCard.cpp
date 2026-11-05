@@ -1,15 +1,20 @@
 #include "PluginToneCard.h"
 #include "../Audio/PluginLocator.h"
 #include "../Platform/WindowOwner.h"
+#include "../AppLog.h"
 #include "../Text.h"
 
-// プラグインの編集画面を入れるウィンドウ。閉じるボタンでは隠すだけ (カードの「プラグインの画面を開く」で、また出す)
+// プラグインの編集画面を入れるウィンドウ。
+// 閉じるボタンでは、編集画面ごと消す (カードの「プラグインの画面を開く」で作り直す)。
+// 隠すだけにすると、プラグインの画面が見えない窓にぶら下がったまま残る。DAW も閉じたら消すのがふつうで、
+// 隠したままにしていると Archetype Misha Mansoor X が落ちることがあった
 class PluginToneCard::PluginWindow final : public juce::DocumentWindow
 {
 public:
-    PluginWindow (const juce::String& name, juce::AudioProcessorEditor& editor)
+    PluginWindow (const juce::String& name, juce::AudioProcessorEditor& editor, std::function<void()> onCloseRequested)
         : DocumentWindow (name, juce::LookAndFeel::getDefaultLookAndFeel().findColour (juce::ResizableWindow::backgroundColourId),
-                          DocumentWindow::closeButton | DocumentWindow::minimiseButton)
+                          DocumentWindow::closeButton | DocumentWindow::minimiseButton),
+          onClose (std::move (onCloseRequested))
     {
         setUsingNativeTitleBar (true);
 
@@ -22,7 +27,15 @@ public:
             setResizeLimits (200, 150, 8000, 6000);
     }
 
-    void closeButtonPressed() override { setVisible (false); }
+    // このウィンドウの処理の途中で自分を消さないよう、消すのは次のメッセージで (カードが行う)
+    void closeButtonPressed() override
+    {
+        if (onClose != nullptr)
+            onClose();
+    }
+
+private:
+    std::function<void()> onClose;
 };
 
 //==============================================================================
@@ -33,7 +46,7 @@ PluginToneCard::PluginToneCard (AudioEngine& e)
     messageLabel.setJustificationType (juce::Justification::topLeft);
     messageLabel.setMinimumHorizontalScale (1.0f);
 
-    downloadButton.setButtonText ("ダウンロードページを開く"_jp);
+    downloadButton.setButtonText ("TONE3000 (無料) のページを開く"_jp);
     downloadButton.setTooltip (juce::String (PluginLocator::tone3000DownloadUrl));
     downloadButton.onClick = [] { juce::URL (PluginLocator::tone3000DownloadUrl).launchInDefaultBrowser(); };
 
@@ -74,8 +87,8 @@ void PluginToneCard::setState (State newState, const juce::String& message)
     {
         case State::notFound:
             messageLabel.setText (message.isNotEmpty() ? message
-                                  : "TONE3000 プラグインが見つかりません。\n"
-                                    "公式サイトから無料でダウンロードしてインストールし、「探し直す」を押してください。"_jp,
+                                  : "「VST3 を選ぶ…」でプラグインを選んでください。\n"
+                                    "無料の TONE3000 なら、入れてから「探し直す」を押します。"_jp,
                                   juce::dontSendNotification);
             break;
         case State::loading:
@@ -95,11 +108,11 @@ void PluginToneCard::setState (State newState, const juce::String& message)
 
 void PluginToneCard::updateControls()
 {
-    titleLabel.setText (state == State::ready && pluginName.isNotEmpty() ? pluginName : juce::String ("TONE3000"),
+    titleLabel.setText (state == State::ready && pluginName.isNotEmpty() ? pluginName : "VST プラグイン"_jp,
                         juce::dontSendNotification);
 
     const bool needsHelp = state == State::notFound || state == State::error;
-    const bool ready = state == State::ready && editor != nullptr;
+    const bool ready = state == State::ready;
 
     downloadButton.setVisible (needsHelp);
     rescanButton.setVisible (needsHelp);
@@ -113,19 +126,40 @@ void PluginToneCard::updateControls()
 }
 
 //==============================================================================
+// エンジンのプラグインが変わった (または、この画面が受け取りを始めた)。
+// 編集画面は、ウィンドウを開くときにだけ作る (見えない編集画面を持ち続けない)
 void PluginToneCard::refreshEditor()
 {
+    const bool wasOpen = window != nullptr && window->isVisible();
     deleteEditor();
 
     auto* tone = engine.getPluginTone();
     if (tone == nullptr)
+    {
+        // 差し替えの途中 (古いプラグインを外した)。開いていたなら、新しいプラグインができたときに開き直す
+        if (wasOpen)
+            openWhenReady = true;
         return;
+    }
+
+    pluginName = tone->getName();
+    setState (State::ready);
+
+    if (openWhenReady || wasOpen)
+        openWindow();
+}
+
+bool PluginToneCard::createEditorWindow()
+{
+    auto* tone = engine.getPluginTone();
+    if (tone == nullptr)
+        return false;
 
     auto& instance = tone->getInstance();
 
     // ほかの場所 (消える途中の前の画面など) がまだ編集画面を持っていたら、作らない (二重に持つと、二重に消してしまう)
     if (instance.getActiveEditor() != nullptr)
-        return;
+        return false;
 
     // 編集画面がないプラグインは、つまみを並べただけの汎用の画面にする
     // (createEditorAndMakeActive は、すでに編集画面があれば nullptr を返す)
@@ -134,36 +168,54 @@ void PluginToneCard::refreshEditor()
     if (editor == nullptr)
         editor = std::make_unique<juce::GenericAudioProcessorEditor> (instance);
 
-    pluginName = tone->getName();
-
     // 編集画面は、最初から別のウィンドウの中に作る (途中で親を変えると表示されないことがあるため)
-    window = std::make_unique<PluginWindow> (pluginName, *editor);
+    window = std::make_unique<PluginWindow> (pluginName, *editor, [this] { closeWindow(); });
+    return true;
+}
 
-    setState (State::ready);
+void PluginToneCard::closeWindow()
+{
+    // ウィンドウの閉じるボタンの処理の途中で、そのウィンドウを消さないよう、次のメッセージで消す
+    AppLog::write ("プラグインのウィンドウを閉じる");
 
-    if (openWhenReady)
-        openWindow();
+    juce::MessageManager::callAsync ([safe = juce::Component::SafePointer (this)]
+    {
+        if (safe == nullptr)
+            return;
+
+        safe->deleteEditor();
+
+        // 手前に出ていたウィンドウを消すと、Windows はほかのアプリのウィンドウを前に出すことがある
+        // (アプリが閉じたように見える)。アプリのウィンドウを前に出しておく
+        if (auto* top = safe->getTopLevelComponent(); top != nullptr && top->isOnDesktop())
+            top->toFront (true);
+
+        AppLog::write ("プラグインのウィンドウを閉じた");
+    });
 }
 
 void PluginToneCard::deleteEditor()
 {
-    window = nullptr;   // ウィンドウを先に消す (中身として編集画面を指しているため)
-    editor = nullptr;   // プラグインより先に消す
+    // 編集画面を先に消す。編集画面のデストラクタが、プラグインに「画面を外す」(VST3 の removed) を知らせる。
+    // ウィンドウを先に消すと、プラグインの窓 (Windows の HWND) が、プラグインが知らないうちに壊され、
+    // その後に届いたメッセージでプラグインが落ちる (Archetype Misha Mansoor X のクラッシュダンプで確認)
+    editor = nullptr;   // ウィンドウからも自動で外れる (ウィンドウは中身を SafePointer で持つ)
+    window = nullptr;
 }
 
 void PluginToneCard::requestOpenWindow()
 {
-    if (window != nullptr)
+    if (state == State::ready && engine.getPluginTone() != nullptr && ! engine.isPluginToneLoading())
         openWindow();
     else
-        openWhenReady = true;   // 読み込み中・まだ作っていない: できたときに開く
+        openWhenReady = true;   // 読み込み中: できたときに開く
 }
 
 void PluginToneCard::openWindow()
 {
     openWhenReady = false;
 
-    if (window == nullptr)
+    if (window == nullptr && ! createEditorWindow())
         return;
 
     // アプリのウィンドウを持ち主にして、その手前に出す (アプリをクリックしても後ろに隠れない)
@@ -196,9 +248,9 @@ void PluginToneCard::openWindow()
 
 void PluginToneCard::visibilityChanged()
 {
-    // 音色を TONE3000 から変えたら (カードが隠れたら)、プラグインのウィンドウも隠す
-    if (! isVisible() && window != nullptr)
-        window->setVisible (false);
+    // 音色を TONE3000 から変えたら (カードが隠れたら)、プラグインのウィンドウを閉じる (編集画面ごと消す)
+    if (! isVisible())
+        deleteEditor();
 }
 
 bool PluginToneCard::isWindowShowing() const
@@ -225,7 +277,7 @@ void* PluginToneCard::getWindowNativeHandle() const
 int PluginToneCard::getPreferredHeight() const
 {
     const bool needsHelp = state == State::notFound || state == State::error;
-    const bool ready = state == State::ready && editor != nullptr;
+    const bool ready = state == State::ready;
     return headerHeight + 4 + 44 + (needsHelp ? messageHeight - 44 + 8 + 30 + 6 + 30 : 0) + (ready ? 4 + 30 : 0);
 }
 

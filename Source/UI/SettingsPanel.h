@@ -63,7 +63,8 @@ private:
     juce::Label generalHeading, deathMetalHeading, advancedHeading, wheelHeading, colourHeading, colourNote, colourError, audioHeading;
     juce::Label themeLabel, textScaleLabel;
     juce::ComboBox themeBox, textScaleBox;
-    Row skipRow, preStartDelayRow, songGapRow, speedRow, bpmRow, volumeRow, offsetRow;
+    Row skipRow, preStartDelayRow, songGapRow, speedRow, volumeRow, offsetRow;
+    Row guitarMasterRow;   // ギターの総音量 (横のスライダー)   // BPM のホイールは常に 1 (作者の指示で設定から外した)
 
     juce::ToggleButton deathMetalToggle;
     juce::TextButton logoTunerButton;

@@ -12,6 +12,8 @@
 //   途中で親を変える (カードからウィンドウへ移す) と表示されないことがあるため
 // - 別のウィンドウは、アプリのウィンドウを持ち主にする (アプリの後ろに隠れない。WindowOwner)
 // - 大きさを変えられるプラグイン (Neural DSP など) は、ウィンドウの大きさを変えられる
+// - 編集画面は、ウィンドウを開くときに作り、閉じたら消す (見えない編集画面を残さない)
+// - 消す順番は「編集画面 → ウィンドウ」(deleteEditor)。逆にするとプラグインが落ちることがある
 // - 編集画面は、プラグインより先に消す必要がある。エンジンがプラグインを差し替える前に deleteEditor() を呼んでもらう
 class PluginToneCard final : public juce::Component
 {
@@ -33,6 +35,8 @@ public:
 
     // プラグインの画面のウィンドウを開く。まだ編集画面がなければ、できたときに開く
     void requestOpenWindow();
+    // ウィンドウを閉じる (閉じるボタンと同じ)。編集画面ごと、次のメッセージで消す
+    void closeWindow();
 
     // 練習画面の中に埋め込む形 (今は使っていない) のための入り口。今は常に別のウィンドウ
     void setAvailableSpace (int, int) {}
@@ -57,6 +61,7 @@ private:
     class PluginWindow;
 
     void openWindow();
+    bool createEditorWindow();   // 編集画面と、それを入れるウィンドウを作る (まだ出さない)
     void updateControls();
 
     AudioEngine& engine;

@@ -2,6 +2,7 @@
 #include "../Model/TonePresets.h"
 #include "../Model/YouTubeUrl.h"
 #include "../Audio/PluginLocator.h"
+#include "../Platform/WindowOwner.h"
 #include "../Text.h"
 
 namespace
@@ -104,7 +105,9 @@ SessionScreen::SessionScreen (AudioEngine& e, SessionStore& s, ThemeManager& t, 
     for (size_t i = 0; i < toneButtons.size(); ++i)
     {
         auto& button = toneButtons[i];
-        button.setButtonText (i == pluginToneIndex ? juce::String ("TONE3000")
+        // TONE3000 は同梱できないので、ボタンは VST プラグインにする (作者の指示。TONE3000 は選べるものの1つ)。
+        // 「VSTプラグイン」はボタンの幅に入らないので「VST」(NAM と同じく短く)
+        button.setButtonText (i == pluginToneIndex ? juce::String ("VST")
                               : i == namToneIndex  ? juce::String ("NAM")
                                                    : juce::String::fromUTF8 (presets[i].name));
         button.setClickingTogglesState (true);
@@ -115,7 +118,7 @@ SessionScreen::SessionScreen (AudioEngine& e, SessionStore& s, ThemeManager& t, 
         button.onClick = [this, i] { if (toneButtons[i].getToggleState()) selectTone ((int) i, true); };
     }
     toneButtons[namToneIndex].setTooltip ("NAM のアンプのモデル (.nam) とキャビネットの IR (.wav) で鳴らします"_jp);
-    toneButtons[pluginToneIndex].setTooltip ("TONE3000 プラグインで鳴らします。音色とミキサーの間に、プラグインの画面が出ます"_jp);
+    toneButtons[pluginToneIndex].setTooltip ("VST3 プラグイン (TONE3000、Neural DSP など) で鳴らします。プラグインの画面は別のウィンドウで開きます"_jp);
 
     //==== 右: TONE3000 プラグインのカード ====
     pluginCard.onChooseFile = [this] { choosePluginFile(); };
@@ -252,6 +255,9 @@ SessionScreen::SessionScreen (AudioEngine& e, SessionStore& s, ThemeManager& t, 
     forwardButton.onClick = [this] { perform (Command::fastForward); };
     metronomeButton.onClick = [this] { perform (Command::toggleMetronome); };
     metronomeSoloButton.onClick = [this] { toggleMetronomeSolo(); };
+    metronomeDots.onClick = [this] { toggleBigMetronome(); };
+    metronomeDots.setTooltip ("クリックすると、画面の真ん中に大きく出します"_jp);
+    metronomeDots.setMouseCursor (juce::MouseCursor::PointingHandCursor);
     loopStartButton.onClick = [this] { perform (Command::setLoopStart); };
     loopEndButton.onClick = [this] { perform (Command::setLoopEnd); };
     loopButton.onClick = [this] { perform (Command::toggleLoop); };
@@ -1103,7 +1109,12 @@ void SessionScreen::checkSongEnd (bool playing, double position, double length)
     if (! openContext.isSetlist() || songEndNotified || playing || ! wasPlaying)
         return;
 
-    if (session.loopEnabled || length <= 0.0 || position < length - 0.25)
+    // YouTube は「終了」の状態 (0) でも終わりとみなす。位置の報告は間をあけて届くので、
+    // 最後に届いた位置が、動画の長さより少し手前のことがある
+    const bool reachedEnd = (length > 0.0 && position >= length - 0.25)
+                            || (isYouTube() && youtube.getState().playerState == 0);
+
+    if (session.loopEnabled || ! reachedEnd)
         return;   // 途中で止めた
 
     songEndNotified = true;
@@ -1248,12 +1259,60 @@ void SessionScreen::updateMetronomeDots (double positionBeats)
     const auto& bars = scoreBars ? scoreViewer.getBarStartBeats() : noBars;
     const auto& signatures = scoreBars ? scoreViewer.getBarSignatures() : noSignatures;
 
+    // メトロノームがオフのときは動かさない (作者の指示)。「曲に合わせる」か「単体で鳴らす」がオンのときだけ
+    const bool metronomeActive = metronomeOn || engine.isMetronomeSolo();
     const auto clock = engine.getBeatClock();
-    const bool running = clock.running && clock.seconds >= 0.0;
+    const bool running = metronomeActive && clock.running && clock.seconds >= 0.0;
     const auto beats = running ? clock.seconds * session.bpm / 60.0 : positionBeats;
 
     const auto where = MusicInfo::locateBeat (beats, bars, signatures);
-    metronomeDots.setState (where.signature.numerator, where.signature.denominator, running ? where.beatInBar : -1);
+    const auto active = running ? where.beatInBar : -1;
+    metronomeDots.setState (where.signature.numerator, where.signature.denominator, active);
+
+    if (bigMetronome != nullptr)
+    {
+        bigMetronome->getDots().setState (where.signature.numerator, where.signature.denominator, active);
+        placeBigMetronome();   // アプリのウィンドウを動かしたときも、真ん中に付いていく
+    }
+}
+
+void SessionScreen::toggleBigMetronome()
+{
+    if (bigMetronome != nullptr)
+    {
+        bigMetronome = nullptr;
+        return;
+    }
+
+    bigMetronome = std::make_unique<MetronomeBigWindow>();
+    bigMetronome->onClose = [safe = juce::Component::SafePointer (this)]
+    {
+        // このウィンドウのクリックの処理の途中で消さないよう、次のメッセージで消す
+        juce::MessageManager::callAsync ([safe] { if (safe != nullptr) safe->bigMetronome = nullptr; });
+    };
+
+    // 枠のないウィンドウ。アプリのウィンドウを持ち主にして、その手前に出す (タブ譜・動画の WebView より手前)
+    bigMetronome->addToDesktop (0);
+    if (auto* top = getTopLevelComponent(); top != nullptr && top->isOnDesktop())
+        WindowOwner::setOwner (bigMetronome->getWindowHandle(), top->getWindowHandle());
+
+    placeBigMetronome();
+    bigMetronome->setVisible (true);
+}
+
+void SessionScreen::placeBigMetronome()
+{
+    if (bigMetronome == nullptr)
+        return;
+
+    // 画面 (練習画面) の真ん中。幅は画面の 7 割まで、ドットが多いときは広げる
+    const auto screen = getScreenBounds();
+    const auto count = juce::jlimit (1, 32, metronomeDots.getCount());
+    const auto width = juce::jmin (juce::roundToInt (screen.getWidth() * 0.7), 260 + count * 110);
+    const auto bounds = juce::Rectangle<int> (width, 220).withCentre (screen.getCentre());
+
+    if (bigMetronome->getBounds() != bounds)
+        bigMetronome->setBounds (bounds);
 }
 
 // 小節の頭の位置 (秒) = 小節の頭の拍 × 60 ÷ BPM + ずらし
@@ -1606,7 +1665,7 @@ void SessionScreen::loadPluginTone()
         pluginCard.setState (PluginToneCard::State::notFound,
                              session.pluginPath.isNotEmpty()
                                  ? "プラグインが見つかりません: "_jp + session.pluginPath
-                                       + "\n移動・削除していないか確かめるか、TONE3000 をインストールし直してください。"_jp
+                                       + "\n移動・削除していないか確かめるか、「VST3 を選ぶ…」で選び直してください。"_jp
                                  : juce::String());
         return;
     }
@@ -1849,10 +1908,11 @@ void SessionScreen::changeListenerCallback (juce::ChangeBroadcaster*)
 void SessionScreen::applyAppSettings()
 {
     updateSkipButtons();
+    engine.setGuitarMasterGain ((float) settings.getGuitarMasterPercent() / 100.0f);   // ギターの総音量 (設定画面)
 
     const auto& steps = settings.getWheelSteps();
     speedSlider.wheelStep = steps.speedPercent;
-    bpmSlider.wheelStep = steps.bpm;
+    bpmSlider.wheelStep = 1.0;   // BPM はいつも 1 ずつ (作者の指示。設定では変えられない)
     for (auto* slider : { &sourceGainSlider, &guitarGainSlider, &metronomeGainSlider })
         slider->wheelStep = steps.volumePercent / 100.0;
 

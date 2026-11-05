@@ -21,6 +21,16 @@ void WindowOwner::setOwner (void* window, void* owner)
    #endif
 }
 
+void WindowOwner::postCloseRequest (void* window)
+{
+   #ifdef _WIN32
+    if (window != nullptr)
+        PostMessageW (static_cast<HWND> (window), WM_CLOSE, 0, 0);
+   #else
+    (void) window;
+   #endif
+}
+
 std::string WindowOwner::describe (void* window)
 {
    #ifdef _WIN32

@@ -27,6 +27,11 @@ public:
     static constexpr int maxSongGapSeconds = 30;
     static constexpr int defaultSongGapSeconds = 3;
 
+    // ギターの総音量 (%)。曲ごとのミキサーの「ギター」に、さらに掛ける (ギターが全体的に大きいとき用。作者の指示)
+    int getGuitarMasterPercent() const noexcept { return guitarMasterPercent; }
+    void setGuitarMasterPercent (int percent);
+    static constexpr int maxGuitarMasterPercent = 150;
+
     // 一覧で開いていたセットリスト (練習画面から戻ったときと、次の起動のときに開いたままにする)
     juce::StringArray getExpandedSetlists() const;
     void setExpandedSetlists (const juce::StringArray& setlistIds);
@@ -65,6 +70,7 @@ private:
     int skipSeconds = 5;
     int preStartDelaySeconds = defaultPreStartDelaySeconds;
     int songGapSeconds = defaultSongGapSeconds;
+    int guitarMasterPercent = 100;
     WheelSteps wheel;
     int sidePanelWidth = 400;
     bool scoreEqualBars = false;

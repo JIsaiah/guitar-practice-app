@@ -13,6 +13,7 @@ namespace
     constexpr const char* sidePanelWidthKey = "sidePanelWidth";
     constexpr const char* scoreEqualBarsKey = "scoreEqualBars";
     constexpr const char* libraryTabKey = "libraryTab";
+    constexpr const char* guitarMasterKey = "guitarMasterPercent";
 }
 
 AppSettings::AppSettings (juce::PropertiesFile& f)
@@ -21,6 +22,7 @@ AppSettings::AppSettings (juce::PropertiesFile& f)
     skipSeconds = juce::jlimit (minSkipSeconds, maxSkipSeconds, file.getIntValue (skipKey, 5));
     preStartDelaySeconds = juce::jlimit (0, maxPreStartDelaySeconds, file.getIntValue (preStartDelayKey, defaultPreStartDelaySeconds));
     songGapSeconds = juce::jlimit (0, maxSongGapSeconds, file.getIntValue (songGapKey, defaultSongGapSeconds));
+    guitarMasterPercent = juce::jlimit (0, maxGuitarMasterPercent, file.getIntValue (guitarMasterKey, 100));
     wheel.speedPercent = juce::jlimit (1, 50, file.getIntValue (wheelSpeedKey, 5));
     wheel.bpm = juce::jlimit (1, 20, file.getIntValue (wheelBpmKey, 1));
     wheel.volumePercent = juce::jlimit (1, 50, file.getIntValue (wheelVolumeKey, 5));
@@ -74,6 +76,16 @@ void AppSettings::setSongGapSeconds (int seconds)
     }
 }
 
+void AppSettings::setGuitarMasterPercent (int percent)
+{
+    percent = juce::jlimit (0, maxGuitarMasterPercent, percent);
+    if (percent != guitarMasterPercent)
+    {
+        guitarMasterPercent = percent;
+        save();
+    }
+}
+
 juce::StringArray AppSettings::getExpandedSetlists() const
 {
     return juce::StringArray::fromTokens (file.getValue (expandedSetlistsKey), ",", {});
@@ -103,6 +115,7 @@ void AppSettings::save()
     file.setValue (skipKey, skipSeconds);
     file.setValue (preStartDelayKey, preStartDelaySeconds);
     file.setValue (songGapKey, songGapSeconds);
+    file.setValue (guitarMasterKey, guitarMasterPercent);
     file.setValue (wheelSpeedKey, wheel.speedPercent);
     file.setValue (wheelBpmKey, wheel.bpm);
     file.setValue (wheelVolumeKey, wheel.volumePercent);

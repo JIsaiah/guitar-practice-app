@@ -253,6 +253,9 @@ private:
     FixedTextButton metronomeButton;
     juce::TextButton metronomeSoloButton;
     MetronomeDots metronomeDots;   // 拍子の数だけのドットで、今の拍を見せる
+    std::unique_ptr<MetronomeBigWindow> bigMetronome;   // ドットをクリックすると、画面の真ん中に大きく出す
+    void toggleBigMetronome();
+    void placeBigMetronome();
     juce::TextButton loopStartButton, loopEndButton;
     FixedTextButton loopButton;
 

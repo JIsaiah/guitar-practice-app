@@ -7,6 +7,7 @@
 #include "SettingsPanel.h"
 #include "../Theme/Dev/MetalLogoTuner.h"
 #include "../TimingLog.h"
+#include "../AppLog.h"
 
 MainComponent::MainComponent (AudioEngine& e, SessionLibrary& l, SetlistStore& sl, ThemeManager& t, AppSettings& a)
     : engine (e), library (l), store (l.getStore()), setlistStore (sl), theme (t), settings (a)
@@ -48,7 +49,13 @@ void MainComponent::paintOverChildren (juce::Graphics&)
     }
 }
 
-MainComponent::~MainComponent() = default;
+MainComponent::~MainComponent()
+{
+    // 画面を先に消す。練習画面のデストラクタは、YouTube のプレイヤーやタブ譜の WebView (このクラスのメンバー) を使って
+    // 後片付けをする。メンバーは宣言と逆の順に消えるので、何もしないとプレイヤーが先に消え、
+    // アプリを閉じるときに落ちる (クラッシュダンプで確認)
+    currentScreen.reset();
+}
 
 void MainComponent::resized()
 {
@@ -340,7 +347,17 @@ void MainComponent::navigate (std::function<void (MainComponent&)> action)
 
 void MainComponent::setScreen (std::unique_ptr<juce::Component> screen)
 {
-    currentScreen = std::move (screen);
+    currentScreen = std::move (screen);   // 古い画面は、ここで消える
+
+    // ギターの音は、練習画面だけで出す (作者の指示)。古い画面が消えたあとに決める
+    // (練習画面のコンストラクタ・デストラクタで切り替えると、新しい画面を作ってから古い画面を消す順番のため、
+    //  古い画面のデストラクタが、新しい画面で出した音を止めてしまう)
+    engine.setGuitarMonitoring (dynamic_cast<SessionScreen*> (currentScreen.get()) != nullptr);
+
+    AppLog::write (dynamic_cast<SessionScreen*> (currentScreen.get()) != nullptr      ? "画面: 練習画面"_jp
+                   : dynamic_cast<SessionListScreen*> (currentScreen.get()) != nullptr ? "画面: 一覧"_jp
+                                                                                       : "画面: 新規作成"_jp);
+
     addAndMakeVisible (*currentScreen);
     currentScreen->setBounds (getLocalBounds());
 

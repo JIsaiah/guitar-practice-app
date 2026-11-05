@@ -1,5 +1,6 @@
 #include <juce_gui_extra/juce_gui_extra.h>
 #include "Audio/AudioEngine.h"
+#include "AppLog.h"
 #include "AppSettings.h"
 #include "DevAudioCheck.h"
 #include "DevSnapshots.h"
@@ -64,6 +65,7 @@ public:
         setlistStore = std::make_unique<SetlistStore>();
         mainWindow = std::make_unique<MainWindow> (getApplicationName(), *audioEngine, *sessionLibrary, *setlistStore,
                                                    *themeManager, *appSettings);
+        AppLog::write ("起動 (" + getApplicationVersion() + ")");
     }
 
     void shutdown() override
@@ -73,6 +75,8 @@ public:
 
         if (audioEngine == nullptr)   // --render-logos で起動したとき
             return;
+
+        AppLog::write ("終了");
 
         if (auto state = audioEngine->createDeviceState())
             properties.getUserSettings()->setValue (audioDeviceKey, state.get());
@@ -86,7 +90,12 @@ public:
         themeManager = nullptr;   // 画面がすべて消えてから、LookAndFeel を消す
     }
 
-    void systemRequestedQuit() override { quit(); }
+    void systemRequestedQuit() override
+    {
+        if (audioEngine != nullptr)
+            AppLog::write ("終了の要求");
+        quit();
+    }
     void anotherInstanceStarted (const juce::String&) override {}
 
 private:
@@ -110,6 +119,7 @@ private:
 
         void closeButtonPressed() override
         {
+            AppLog::write ("アプリのウィンドウの × が押された");
             JUCEApplication::getInstance()->systemRequestedQuit();
         }
 

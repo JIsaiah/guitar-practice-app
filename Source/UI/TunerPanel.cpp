@@ -9,11 +9,14 @@ namespace
     constexpr double inTuneCents = 5.0;   // これ以内なら「合っている」
     constexpr int segmentsPerSide = 10;   // 片側の目盛りの数 (1つ 5 セント)
 
-    // 標準チューニングの弦 (MIDI 番号 → 弦の番号)
+    // 標準チューニングの弦 (MIDI 番号 → 弦の番号)。7弦・8弦ギターの低い弦も含める
+    // (ほかの音でも、音名とずれは出る。弦の番号が出ないだけ)
     int guitarStringFor (int midi)
     {
         switch (midi)
         {
+            case 30: return 8;  // F#1 (8弦)
+            case 35: return 7;  // B1 (7弦)
             case 40: return 6;  // E2
             case 45: return 5;  // A2
             case 50: return 4;  // D3

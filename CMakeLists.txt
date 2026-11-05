@@ -180,6 +180,7 @@ target_sources(GuitarPracticeTests PRIVATE
     Tests/CountdownControllerTests.cpp
     Tests/SetlistPlayerTests.cpp
     Tests/MusicInfoTests.cpp
+    Tests/PitchDetectorTests.cpp
     Source/Model/Session.cpp
     Source/Model/SessionStore.cpp
     Source/Library/SessionLibrary.cpp

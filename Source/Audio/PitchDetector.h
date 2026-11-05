@@ -15,8 +15,11 @@ inline double detectPitchHz (const float* samples, int numSamples, double sample
     if (std::sqrt (energy / numSamples) < 0.005)
         return 0.0;  // 音が小さすぎる
 
+    // 低いほうは 38Hz まで (多弦ギター: 7弦の B1 = 61.7Hz、ドロップ A = 55Hz、8弦の F#1 = 46.2Hz、ドロップ E = 41.2Hz)。
+    // 以前は 60Hz までで、7弦・8弦の低い弦が測れなかった。
+    // 1周期の2倍以上のサンプルが要るので、48kHz・4096 サンプルなら 38Hz まで測れる (それより少なければ、測れる範囲が狭まる)
     const int minLag = std::max (2, (int) (sampleRate / 1000.0));  // 1000Hz まで
-    const int maxLag = std::min (numSamples / 2, (int) (sampleRate / 60.0));  // 60Hz まで
+    const int maxLag = std::min (numSamples / 2, (int) (sampleRate / 38.0));
     const int window = numSamples - maxLag;
 
     if (maxLag <= minLag + 1)
