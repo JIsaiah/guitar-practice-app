@@ -212,6 +212,119 @@ namespace
     }
 }
 
+//==============================================================================
+// メトロノームの確認: エンジンの処理を直接動かして、クリックがいつ鳴ったかを数える (音は出さない)
+namespace
+{
+    struct ClickRun
+    {
+        juce::Array<double> clickTimes;   // クリックが鳴り始めた時刻 (秒。この確認の頭から)
+    };
+
+    // seconds 秒分を 256 サンプルずつ処理する。perBlock はブロックの前に呼ぶ (YouTube の時計を進めるなど)
+    ClickRun renderClicks (AudioEngine& engine, double seconds, std::function<void (double now)> perBlock = nullptr)
+    {
+        constexpr double rate = 48000.0;
+        constexpr int block = 256;
+        juce::AudioBuffer<float> buffer (2, block);
+        ClickRun run;
+        int silentSamples = 100000;
+
+        for (int done = 0; done < (int) (seconds * rate); done += block)
+        {
+            if (perBlock != nullptr)
+                perBlock (done / rate);
+
+            engine.renderBlockForTest (buffer.getArrayOfWritePointers(), 2, block, rate);
+
+            const auto* data = buffer.getReadPointer (0);
+            for (int i = 0; i < block; ++i)
+            {
+                if (std::abs (data[i]) > 0.01f)
+                {
+                    if (silentSamples > 2000)
+                        run.clickTimes.add ((done + i) / rate);
+                    silentSamples = 0;
+                }
+                else
+                {
+                    ++silentSamples;
+                }
+            }
+        }
+        return run;
+    }
+
+    juce::String describe (const ClickRun& run)
+    {
+        juce::StringArray times;
+        for (auto t : run.clickTimes)
+            times.add (juce::String (t, 3));
+        return juce::String (run.clickTimes.size()) + " clicks: " + times.joinIntoString (", ");
+    }
+}
+
+juce::String DevAudioCheck::runMetronomeCheck (const juce::String& commandLine)
+{
+    const juce::File folder (argumentAfter (commandLine, metronomeCheckFlag));
+    folder.createDirectory();
+    juce::String report;
+
+    AudioEngine engine;   // デバイスは開かない
+    engine.setBpm (120.0);
+    engine.setMetronomeGain (0.8f);
+
+    // 1. 単体で鳴らす
+    engine.setMetronomeEnabled (true);
+    engine.setMetronomeSolo (true);
+    report << "1. solo, 120 BPM, 3 s: " << describe (renderClicks (engine, 3.0)) << "\n";
+    engine.setMetronomeSolo (false);
+
+    // 2. YouTube の時計 (10 秒から再生)。曲に合わせる、開始位置なし (拍の位置 0)
+    const auto youtube = [&engine] (double from)
+    {
+        return [&engine, from] (double now) { engine.setExternalClock (from + now, 1.0, true); };
+    };
+    engine.setSyncOffsetSeconds (0.0);
+    report << "2. YouTube from 10 s, offset 0, 3 s: " << describe (renderClicks (engine, 3.0, youtube (10.0))) << "\n";
+    engine.setExternalClock (13.0, 1.0, false);
+    renderClicks (engine, 0.1);
+
+    // 3. 開始位置 11.5 秒 (10 秒から再生 → 1.5 秒後から鳴るはず)
+    engine.setSyncOffsetSeconds (11.5);
+    report << "3. YouTube from 10 s, start 11.5 s, 3 s: " << describe (renderClicks (engine, 3.0, youtube (10.0))) << "\n";
+    engine.setExternalClock (13.0, 1.0, false);
+    renderClicks (engine, 0.1);
+
+    // 5. 実際の YouTube に近い届き方: 50ms ごとに、少し古い (0〜80ms 遅れた) 位置が届く。BPM 237
+    {
+        engine.setBpm (237.0);
+        engine.setSyncOffsetSeconds (0.0);
+        juce::Random random (1);
+        double nextReport = 0.0;
+        const auto realistic = [&] (double now)
+        {
+            if (now >= nextReport)
+            {
+                nextReport += 0.05;
+                engine.setExternalClock (20.0 + now - random.nextDouble() * 0.08, 1.0, true);
+            }
+        };
+        report << "5. YouTube (reports every 50 ms, 0-80 ms late), 237 BPM, 3 s: " << describe (renderClicks (engine, 3.0, realistic)) << "\n";
+        engine.setExternalClock (23.0, 1.0, false);
+        renderClicks (engine, 0.1);
+        engine.setBpm (120.0);
+    }
+
+    // 4. メトロノームがオフ
+    engine.setMetronomeEnabled (false);
+    engine.setSyncOffsetSeconds (0.0);
+    report << "4. YouTube, metronome off: " << describe (renderClicks (engine, 2.0, youtube (10.0))) << "\n";
+
+    folder.getChildFile ("metronome-check.txt").replaceWithText (report);
+    return report;
+}
+
 juce::String DevAudioCheck::run (const juce::String& commandLine)
 {
     const juce::File folder (argumentAfter (commandLine, commandLineFlag));

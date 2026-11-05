@@ -254,7 +254,7 @@ juce::String DevSnapshots::renderAll (const juce::File& folder)
 
                 // 再生バーの針: ふだん / バーの上 / 針の近く (縦に並べて1枚にする)
                 {
-                    juce::Image strip (juce::Image::ARGB, 700, 3 * 50, true);
+                    juce::Image strip (juce::Image::ARGB, 700, 5 * 50, true);
                     {
                         juce::Graphics g (strip);
                         g.fillAll (theme.getPalette().background);
@@ -267,6 +267,13 @@ juce::String DevSnapshots::renderAll (const juce::File& folder)
                             bar.setTestHover (states[i].first, states[i].second);
                             g.drawImageAt (bar.createComponentSnapshot (bar.getLocalBounds(), true, 1.0f), 0, i * 50);
                         }
+
+                        // メトロノームの開始位置の目印 / 拡大モード (ダブルクリックして押し続けたとき)
+                        bar.setTestHover (false, false);
+                        bar.setMarker (93.25);
+                        g.drawImageAt (bar.createComponentSnapshot (bar.getLocalBounds(), true, 1.0f), 0, 3 * 50);
+                        bar.setTestZoom (93.875);
+                        g.drawImageAt (bar.createComponentSnapshot (bar.getLocalBounds(), true, 1.0f), 0, 4 * 50);
                     }
                     if (savePng (strip, folder.getChildFile ("timeline_states.png")))
                         log << "wrote timeline_states.png\n";

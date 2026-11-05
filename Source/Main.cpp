@@ -58,6 +58,15 @@ public:
             return;
         }
 
+        // 開発用: メトロノームのクリックがいつ鳴るかを数えて終わる (DevAudioCheck.h)
+        if (commandLine.contains (DevAudioCheck::metronomeCheckFlag))
+        {
+            AppLog::setEnabled (false);
+            DevAudioCheck::runMetronomeCheck (commandLine);
+            quit();
+            return;
+        }
+
         // 開発用: オーディオデバイスの一覧と、NAM の処理時間を確かめて終わる (DevAudioCheck.h)
         if (commandLine.contains (DevAudioCheck::commandLineFlag))
         {

@@ -65,6 +65,12 @@ public:
     };
     BeatClock getBeatClock() const noexcept { return { beatClockSeconds.load(), beatClockRunning.load() }; }
 
+    // 確認用: メトロノームのクリックを鳴らした回数 (起動してから)。動作ログに書いて、鳴っていたかを確かめる
+    int getClickCount() const noexcept { return clickCount.load(); }
+    bool isMetronomeEnabled() const noexcept { return metronomeEnabled.load(); }
+    double getSyncOffsetSeconds() const noexcept { return syncOffsetSeconds.load(); }
+    double getBpm() const noexcept { return metronomeBpm.load(); }
+
     //==== 外部の時計 (YouTube。設計書 5.2) ====
     // YouTube の再生位置が届くたびに、メッセージスレッドから呼ぶ。
     // 再生中はメトロノームがこの時計に合わせる。オーディオスレッドは届いた値の間を自分で進め、
@@ -111,6 +117,14 @@ public:
     void clearPluginTone();
     PluginTone* getPluginTone() const noexcept { return ownedPluginTone.get(); }   // 編集画面を作るため
     bool isPluginToneLoading() const noexcept  { return pluginToneLoading; }
+   #if JUCE_DEBUG
+    // 開発用 (--metronome-check): オーディオデバイスを開かずに、オーディオの処理を1ブロック分だけ動かす
+    void renderBlockForTest (float* const* outputs, int numOutputs, int numSamples, double sampleRate)
+    {
+        deviceSampleRate.store (sampleRate);
+        audioDeviceIOCallbackWithContext (nullptr, 0, outputs, numOutputs, numSamples, {});
+    }
+   #endif
     int getNumRetired() const noexcept { return (int) retired.size(); }   // 確認用: まだ消していない古いもの (音源・NAM・プラグイン)
     std::function<void()> onPluginToneAboutToReplace;
     std::function<void()> onPluginToneChanged;   // 差し替えた後 (画面は編集画面を作り直す)
@@ -223,6 +237,7 @@ private:
     std::atomic<double> syncOffsetSeconds { 0.0 };
     std::atomic<double> beatClockSeconds { 0.0 };   // オーディオスレッドが1ブロックごとに書く
     std::atomic<bool> beatClockRunning { false };
+    std::atomic<int> clickCount { 0 };   // オーディオスレッドが増やすだけ (確認用)
     std::atomic<float> sourceGain { 1.0f }, guitarGain { 1.0f }, metronomeGain { 0.8f };
     std::atomic<int> tone { (int) ToneType::clean };
     std::atomic<bool> tunerActive { false };

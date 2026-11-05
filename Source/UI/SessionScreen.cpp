@@ -3,6 +3,7 @@
 #include "../Model/YouTubeUrl.h"
 #include "../Audio/PluginLocator.h"
 #include "../Platform/WindowOwner.h"
+#include "../AppLog.h"
 #include "../Text.h"
 
 namespace
@@ -256,6 +257,27 @@ SessionScreen::SessionScreen (AudioEngine& e, SessionStore& s, ThemeManager& t, 
     metronomeButton.onClick = [this] { perform (Command::toggleMetronome); };
     metronomeSoloButton.onClick = [this] { toggleMetronomeSolo(); };
     metronomeDots.onClick = [this] { toggleBigMetronome(); };
+
+    metronomeStartButton.onClick = [this] { setMetronomeStartHere(); };
+    metronomeStartButton.onRightClick = [this]
+    {
+        if (session.metronomeStartMs <= 0)
+            return;
+
+        juce::PopupMenu menu;
+        menu.addItem (1, "開始位置を解除"_jp);
+        menu.addItem (2, "開始位置へ移動"_jp);
+        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&metronomeStartButton),
+                            [safe = juce::Component::SafePointer (this)] (int result)
+        {
+            if (safe == nullptr)
+                return;
+            if (result == 1)
+                safe->clearMetronomeStart();
+            if (result == 2 && safe->sourceReady)
+                safe->seekTo (safe->session.metronomeStartMs / 1000.0);
+        });
+    };
     metronomeDots.setTooltip ("クリックすると、画面の真ん中に大きく出します"_jp);
     metronomeDots.setMouseCursor (juce::MouseCursor::PointingHandCursor);
     loopStartButton.onClick = [this] { perform (Command::setLoopStart); };
@@ -309,7 +331,7 @@ SessionScreen::SessionScreen (AudioEngine& e, SessionStore& s, ThemeManager& t, 
              &sideScroll, &tunerButton,
              &playHeading, &speedHeading, &metronomeHeading, &loopHeading,
              &toStartButton, &rewindButton, &playButton, &forwardButton, &speedSlider, &equalBarsButton,
-             &metronomeButton, &metronomeSoloButton, &metronomeDots,
+             &metronomeButton, &metronomeSoloButton, &metronomeDots, &metronomeStartButton,
              &loopStartButton, &loopEndButton, &loopButton })
     {
         addAndMakeVisible (c);
@@ -1324,7 +1346,7 @@ double SessionScreen::barStartSeconds (int index) const
     const auto& bars = scoreViewer.getBarStartBeats();
 
     double beats = index * 4.0;
-    double offset = session.syncOffsetMs / 1000.0;
+    double offset = getMetronomeOffsetSeconds();   // 4/4 とみなすときは、メトロノームと同じ起点
 
     if (usesScoreBars())
     {
@@ -1419,8 +1441,61 @@ void SessionScreen::updateLoop()
 void SessionScreen::setSyncOffset (int ms)
 {
     session.syncOffsetMs = juce::jlimit (OffsetControl::minMs, OffsetControl::maxMs, ms);
-    engine.setSyncOffsetSeconds (session.syncOffsetMs / 1000.0);
     offsetControl.setValue (session.syncOffsetMs);
+    updateMetronomeStart();   // エンジンには「拍の位置 + 開始位置」を送る
+}
+
+//==============================================================================
+// メトロノームの開始位置 (動画モード)
+//   動画モードでは、メトロノームの拍を「開始位置 + 拍の位置」から数える。それより前は鳴らない
+//   (エンジンは、拍の起点より前 (時計がマイナス) では鳴らさない)。
+//   タブ譜モードでは、タブ譜の小節に合わせたいので使わない
+bool SessionScreen::isMetronomeStartActive() const
+{
+    return session.metronomeStartMs > 0 && ! isBarMode();
+}
+
+double SessionScreen::getMetronomeOffsetSeconds() const
+{
+    return (session.syncOffsetMs + (isMetronomeStartActive() ? session.metronomeStartMs : 0)) / 1000.0;
+}
+
+void SessionScreen::setMetronomeStartHere()
+{
+    if (! sourceReady)
+        return;
+
+    session.metronomeStartMs = juce::jmax (1, juce::roundToInt (getPosition() * 1000.0));   // 0 は「指定なし」なので 1ms 以上
+    setStatus ("メトロノームを "_jp + formatTime (session.metronomeStartMs / 1000.0) + " から始めます"_jp);
+    updateMetronomeStart();
+}
+
+void SessionScreen::clearMetronomeStart()
+{
+    session.metronomeStartMs = 0;
+    setStatus ("メトロノームの開始位置を解除しました"_jp);
+    updateMetronomeStart();
+}
+
+void SessionScreen::updateMetronomeStart()
+{
+    // エンジンへ (変わったときだけ)。タブ譜の読み込みや動画との入れ替えで、モードが変わることもある
+    const auto offset = getMetronomeOffsetSeconds();
+    if (! juce::approximatelyEqual (offset, sentMetronomeOffset))
+    {
+        sentMetronomeOffset = offset;
+        engine.setSyncOffsetSeconds (offset);
+    }
+
+    const bool videoMode = ! isBarMode();
+    metronomeStartButton.setEnabled (videoMode && sourceReady);
+    metronomeStartButton.setButtonText (session.metronomeStartMs > 0 ? "開始 "_jp + formatTime (session.metronomeStartMs / 1000.0)
+                                                                     : "ここから開始"_jp);
+    metronomeStartButton.setTooltip (videoMode
+        ? "今の位置から、メトロノームを始めます (それより前は鳴りません)。右クリックで解除"_jp
+        : "動画モード (タブ譜がないとき・動画と入れ替えたとき) で使えます。タブ譜モードでは、タブ譜の小節に合わせて鳴ります"_jp);
+
+    timeline.setMarker (isMetronomeStartActive() ? session.metronomeStartMs / 1000.0 : -1.0);
 }
 
 void SessionScreen::setScoreOffset (int ms)
@@ -1521,11 +1596,28 @@ void SessionScreen::applySourceGain()
     sourceGainSlider.setAlpha (sourceMuted ? 0.5f : 1.0f);
 }
 
+// 動作ログに、メトロノームの今の状態を書く (鳴らないときに、どこで止まっているかを見分けるため)
+void SessionScreen::logMetronomeState (const juce::String& event)
+{
+    AppLog::write ("メトロノーム: "_jp + event
+                   + " / 曲に合わせる="_jp + (metronomeOn ? "オン"_jp : "オフ"_jp)
+                   + " (エンジン="_jp + (engine.isMetronomeEnabled() ? "オン"_jp : "オフ"_jp) + ")"
+                   + " 単体="_jp + (engine.isMetronomeSolo() ? "オン"_jp : "オフ"_jp)
+                   + " モード="_jp + (isBarMode() ? "タブ譜"_jp : "動画"_jp)
+                   + " 位置="_jp + juce::String (getPosition(), 2)
+                   + " 拍の起点="_jp + juce::String (engine.getSyncOffsetSeconds(), 3)
+                   + " (開始位置="_jp + juce::String (session.metronomeStartMs) + "ms)"
+                   + " BPM=" + juce::String (engine.getBpm(), 1)
+                   + " 音量="_jp + juce::String (session.mixMetronome, 2)
+                   + " クリック="_jp + juce::String (engine.getClickCount()) + "回"_jp);
+}
+
 void SessionScreen::toggleMetronome()
 {
     metronomeOn = ! metronomeOn;
     engine.setMetronomeEnabled (metronomeOn);
     metronomeButton.setToggleState (metronomeOn, juce::dontSendNotification);
+    logMetronomeState (metronomeOn ? "曲に合わせるをオン"_jp : "曲に合わせるをオフ"_jp);
 
     if (! metronomeOn && engine.isMetronomeSolo())
         toggleMetronomeSolo();   // オフにしたら、単体で鳴らすのも止める
@@ -1544,6 +1636,7 @@ void SessionScreen::toggleMetronomeSolo()
 
     engine.setMetronomeSolo (solo);
     metronomeSoloButton.setToggleState (solo, juce::dontSendNotification);
+    logMetronomeState (solo ? "単体をオン"_jp : "単体をオフ"_jp);
     setStatus (solo ? "メトロノームだけを鳴らしています。再生すると曲に合わせます"_jp : juce::String());
 }
 
@@ -1846,6 +1939,10 @@ void SessionScreen::timerCallback()
     if (playing && ! wasPlaying && engine.isMetronomeSolo())
         toggleMetronomeSolo();
 
+    // 再生の開始・停止を、メトロノームの状態と一緒に記録する (停止のときのクリックの回数で、鳴っていたかが分かる)
+    if (playing != wasPlaying)
+        logMetronomeState (playing ? "再生を開始"_jp : "再生を停止"_jp);
+
     checkSongEnd (playing, position, length);
     wasPlaying = playing;
 
@@ -1858,8 +1955,10 @@ void SessionScreen::timerCallback()
         setlistBar.setNotice (session.loopEnabled ? "ループ中のため自動で次に進みません"_jp : juce::String());
     }
 
-    // 小節・拍 (一定テンポ + ずらし。設計書 3.1)
-    const auto beats = (position - session.syncOffsetMs / 1000.0) * session.bpm / 60.0;
+    updateMetronomeStart();
+
+    // 小節・拍 (一定テンポ + ずらし。設計書 3.1)。動画モードでメトロノームの開始位置があれば、そこが 1小節目
+    const auto beats = (position - getMetronomeOffsetSeconds()) * session.bpm / 60.0;
     const auto bar = beats >= 0.0 ? (int) std::floor (beats / 4.0) + 1 : 0;
     const auto beat = beats >= 0.0 ? (int) std::floor (beats) % 4 + 1 : 0;
     positionLabel.setText ("小節 "_jp + juce::String (bar) + "   拍 "_jp + juce::String (beat), juce::dontSendNotification);
@@ -2054,6 +2153,13 @@ void SessionScreen::resized()
     speedSlider.setBounds (speed);
 
     auto metronome = group (metronomeHeading, metronomeWidth, true);
+
+    // 「ここから開始」は、見出しの行の右に小さく置く (下の帯の幅を広げないため)
+    {
+        auto headingRow = metronomeHeading.getBounds();
+        metronomeStartButton.setBounds (headingRow.removeFromRight (116).withTrimmedBottom (1));
+        metronomeHeading.setBounds (headingRow);
+    }
     place (metronome, metronomeButton, 104);
     place (metronome, metronomeSoloButton, 104);
     place (metronome, metronomeDots, dotsWidth);

@@ -254,6 +254,16 @@ private:
     juce::TextButton metronomeSoloButton;
     MetronomeDots metronomeDots;   // 拍子の数だけのドットで、今の拍を見せる
     std::unique_ptr<MetronomeBigWindow> bigMetronome;   // ドットをクリックすると、画面の真ん中に大きく出す
+
+    // メトロノームの開始位置 (動画モード)。「ここから開始」で今の位置にする。右クリックで解除
+    RightClickableButton metronomeStartButton;
+    bool isMetronomeStartActive() const;          // 開始位置を使うか (指定があり、動画モード)
+    double getMetronomeOffsetSeconds() const;     // メトロノームの拍の起点 = 拍の位置 (+ 開始位置)
+    void setMetronomeStartHere();
+    void clearMetronomeStart();
+    void updateMetronomeStart();                  // エンジンへの起点・ボタン・再生バーの目印を合わせる (タイマーから)
+    double sentMetronomeOffset = -1.0e9;
+    void logMetronomeState (const juce::String& event);   // 動作ログに、メトロノームの状態を書く
     void toggleBigMetronome();
     void placeBigMetronome();
     juce::TextButton loopStartButton, loopEndButton;

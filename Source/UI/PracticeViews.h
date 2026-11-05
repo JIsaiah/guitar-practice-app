@@ -72,12 +72,32 @@ private:
 // - クリックでその位置へ移動する。ドラッグ中は表示だけを動かし、離したときに1回だけ移動する
 //   (ドラッグ中に何度も移動させると、YouTube では位置の報告が追いつかず、つまみが前後に飛ぶため)
 // - 現在位置は「針」で示す。マウスを乗せるとバーと針が太く長くなり (操作できることを伝える)、針の近くではさらに太くなる
-class TimelineView final : public juce::Component
+//
+// 細かい調整 (拡大モード): バーをダブルクリックして、2回目を押したままにする (0.35 秒) と、
+// 針のまわり (前後 2 秒) を拡大する。そのまま左右に動かすと、ミリ秒単位で位置を決められ、離すとそこへ移動する。
+// メトロノームの開始位置などを、正確に決めるため (作者の指示)
+class TimelineView final : public juce::Component,
+                           private juce::Timer
 {
 public:
     std::function<void (double seconds)> onSeek;
 
     TimelineView() { setMouseCursor (juce::MouseCursor::PointingHandCursor); }
+
+    // 目印 (メトロノームの開始位置)。マイナスなら出さない
+    void setMarker (double seconds)
+    {
+        if (! juce::approximatelyEqual (seconds, markerSeconds))
+        {
+            markerSeconds = seconds;
+            repaint();
+        }
+    }
+
+    bool isZoomed() const noexcept { return zoomed; }
+
+    static constexpr double zoomSpanSeconds = 4.0;   // 拡大したときに見せる範囲 (針の前後 2 秒)
+    static constexpr double holdMs = 350.0;          // ダブルクリックの2回目を、これだけ押し続けると拡大
 
     void setState (double positionSeconds, double lengthSeconds, double loopStart, double loopEnd, bool loopOn)
     {
@@ -91,6 +111,12 @@ public:
 
     void paint (juce::Graphics& g) override
     {
+        if (zoomed)
+        {
+            paintZoomed (g);
+            return;
+        }
+
         const auto shown = dragging ? dragSeconds : position;
 
         // 右端に「経過 / 長さ」
@@ -119,6 +145,9 @@ public:
 
         g.setColour (findColour (ThemeColourIds::timelineProgress));
         g.fillRoundedRectangle (bar.withRight (xFor (shown)), thickness * 0.5f);
+
+        if (markerSeconds >= 0.0)
+            drawMarker (g, xFor (markerSeconds), bar.getY());
 
         // 現在位置の針。形は変えずに、太さ・長さ・色だけを変える
         //   ふだん: 細い針 (2px)  /  バーの上: 太い針 (4px, アクセント色)  /  針の近く・ドラッグ中: さらに太く長い針 (6px)
@@ -158,6 +187,15 @@ public:
         if (length <= 0.0 || e.x > getBarArea().getRight())
             return;
 
+        // ダブルクリックの2回目: 押し続けたら拡大する (すぐに離したら何もしない。1回目で、もうそこへ移動している)
+        if (e.getNumberOfClicks() >= 2)
+        {
+            waitingForHold = true;
+            holdStartX = e.x;
+            startTimer ((int) holdMs);
+            return;
+        }
+
         dragging = true;
         dragSeconds = secondsAt (e.x);
         repaint();
@@ -165,6 +203,44 @@ public:
 
     void mouseDrag (const juce::MouseEvent& e) override
     {
+        if (zoomed)
+        {
+            // ふだん: 針はカーソルの真下 (拡大した範囲の中で、カーソルの位置の時刻)。1px はおよそ 8ms。
+            // Shift を押している間: 動かした量の 1/10 だけ動かす (およそ 0.8ms/px)。このときはカーソルと針がずれるので、
+            // Shift を離したら、針がまたカーソルの真下に来るように、拡大の範囲をずらす (針は飛ばない)
+            const bool fine = e.mods.isShiftDown();
+
+            if (fine)
+            {
+                if (! fineDrag)
+                {
+                    fineDrag = true;
+                    zoomAnchorSeconds = dragSeconds;
+                    holdStartX = e.x;
+                }
+
+                const auto perPixel = zoomSpanSeconds / juce::jmax (1, getBarArea().getWidth()) * 0.1;
+                dragSeconds = juce::jlimit (0.0, length, zoomAnchorSeconds + (e.x - holdStartX) * perPixel);
+
+                // 細かく動かして範囲の外に出たら、範囲をずらす
+                if (dragSeconds < zoomStart || dragSeconds > zoomStart + zoomSpanSeconds)
+                    zoomStart = dragSeconds - zoomSpanSeconds * 0.5;
+            }
+            else
+            {
+                if (fineDrag)
+                {
+                    fineDrag = false;
+                    alignZoomTo (dragSeconds, e.x);   // 今の針がカーソルの真下に来るように
+                }
+
+                dragSeconds = juce::jlimit (0.0, length, zoomStart + zoomFractionAt (e.x) * zoomSpanSeconds);
+            }
+
+            repaint();
+            return;
+        }
+
         if (! dragging)
             return;
 
@@ -174,17 +250,138 @@ public:
 
     void mouseUp (const juce::MouseEvent& e) override
     {
-        if (! dragging)
+        if (waitingForHold)   // 押し続けずに離した
+        {
+            waitingForHold = false;
+            stopTimer();
+            return;
+        }
+
+        if (! dragging && ! zoomed)
             return;
 
-        dragging = false;
+        dragging = zoomed = false;
         position = dragSeconds;   // 次の位置の報告が届くまで、離した位置を表示しておく
         if (onSeek != nullptr)
             onSeek (dragSeconds);
         mouseMove (e);
     }
 
+   #if JUCE_DEBUG
+    // 開発用 (DevSnapshots): 拡大モードの見た目を再現する
+    void setTestZoom (double seconds)
+    {
+        zoomed = true;
+        dragSeconds = zoomAnchorSeconds = seconds;
+        zoomStart = juce::jlimit (0.0, juce::jmax (0.0, length - zoomSpanSeconds), seconds - zoomSpanSeconds * 0.5);
+        repaint();
+    }
+   #endif
+
 private:
+    // ダブルクリックの2回目を押し続けた: 針のまわりを拡大する
+    void timerCallback() override
+    {
+        stopTimer();
+        if (! waitingForHold)
+            return;
+
+        waitingForHold = false;
+        zoomed = true;
+        fineDrag = false;
+
+        // 針は、マウスのところ (作者の指示)。拡大しても針がカーソルの真下に来るように、拡大の範囲を決める
+        const auto mouseX = getMouseXYRelative().x;
+        dragSeconds = secondsAt (mouseX);
+        alignZoomTo (dragSeconds, mouseX);
+        repaint();
+    }
+
+    // 拡大した範囲の中での、x の位置の割合 (0〜1)
+    double zoomFractionAt (int x) const
+    {
+        const auto bar = getBarArea();
+        return juce::jlimit (0.0, 1.0, (x - bar.getX()) / (double) juce::jmax (1, bar.getWidth()));
+    }
+
+    // seconds の位置が、x の真下に来るように、拡大の範囲をずらす。
+    // 曲の頭・終わりの近くでも合わせられるよう、範囲が曲の外にはみ出してもよい (その部分は目盛りを描かない)
+    void alignZoomTo (double seconds, int x)
+    {
+        zoomStart = seconds - zoomFractionAt (x) * zoomSpanSeconds;
+    }
+
+    // 拡大モードの絵: 前後 2 秒を、100ms ごとの目盛りで。時刻はミリ秒まで
+    void paintZoomed (juce::Graphics& g)
+    {
+        const auto area = getBarArea().toFloat();
+        const auto text = findColour (juce::Label::textColourId);
+        const auto accent = findColour (ThemeColourIds::accent);
+
+        g.setColour (findColour (ThemeColourIds::panel));
+        g.fillRoundedRectangle (area.expanded (6.0f, 0.0f), 6.0f);
+        g.setColour (accent.withAlpha (0.6f));
+        g.drawRoundedRectangle (area.expanded (6.0f, 0.0f).reduced (0.5f), 6.0f, 1.0f);
+
+        const auto xAt = [&] (double seconds)
+        {
+            return area.getX() + area.getWidth() * (float) ((seconds - zoomStart) / zoomSpanSeconds);
+        };
+
+        // 目盛り: 100ms ごと。1秒ごとは長く、時刻を添える
+        const auto firstTick = std::ceil (juce::jmax (0.0, zoomStart) * 10.0);
+        for (auto tick = firstTick; tick / 10.0 <= juce::jmin (length, zoomStart + zoomSpanSeconds); tick += 1.0)
+        {
+            const auto seconds = tick / 10.0;
+            const auto x = xAt (seconds);
+            const bool whole = std::fmod (tick, 10.0) == 0.0;
+            const auto h = whole ? area.getHeight() * 0.55f : (std::fmod (tick, 5.0) == 0.0 ? area.getHeight() * 0.35f : area.getHeight() * 0.2f);
+
+            g.setColour (text.withAlpha (whole ? 0.7f : 0.35f));
+            g.fillRect (juce::Rectangle<float> (1.0f, h).withCentre ({ x, area.getCentreY() }));
+
+            if (whole)
+            {
+                g.setFont (AppLookAndFeel::scaled (juce::FontOptions (11.0f)));
+                g.drawText (formatTime (seconds), juce::Rectangle<float> (x + 3.0f, area.getY(), 60.0f, 14.0f),
+                            juce::Justification::topLeft);
+            }
+        }
+
+        if (markerSeconds >= zoomStart && markerSeconds <= zoomStart + zoomSpanSeconds)
+            drawMarker (g, xAt (markerSeconds), area.getCentreY() - 6.0f);
+
+        // 針
+        const auto needle = juce::Rectangle<float> (3.0f, area.getHeight()).withCentre ({ xAt (dragSeconds), area.getCentreY() });
+        g.setColour (accent);
+        g.fillRoundedRectangle (needle, 1.5f);
+
+        // 右端: ミリ秒までの時刻と、操作の案内
+        auto timeArea = getTimeArea();
+        g.setColour (text);
+        g.setFont (AppLookAndFeel::scaled (juce::FontOptions (22.0f, juce::Font::bold)));
+        g.drawFittedText (formatTimeMs (dragSeconds), timeArea.removeFromTop (getHeight() * 2 / 3), juce::Justification::centredRight, 1);
+        g.setColour (text.withAlpha (0.6f));
+        g.setFont (AppLookAndFeel::scaled (juce::FontOptions (11.0f)));
+        g.drawFittedText ("左右で調整 (Shift で細かく)・離すと移動"_jp, timeArea, juce::Justification::centredRight, 1);
+    }
+
+    // 目印 (小さな下向きの三角): メトロノームの開始位置
+    void drawMarker (juce::Graphics& g, float x, float barTop) const
+    {
+        juce::Path triangle;
+        triangle.addTriangle (x - 5.0f, barTop - 9.0f, x + 5.0f, barTop - 9.0f, x, barTop - 1.0f);
+        g.setColour (findColour (ThemeColourIds::good));
+        g.fillPath (triangle);
+    }
+
+    static juce::String formatTimeMs (double seconds)
+    {
+        const auto totalMs = juce::roundToInt (juce::jmax (0.0, seconds) * 1000.0);
+        return juce::String (totalMs / 60000).paddedLeft ('0', 2) + ":" + juce::String ((totalMs / 1000) % 60).paddedLeft ('0', 2)
+               + "." + juce::String (totalMs % 1000).paddedLeft ('0', 3);
+    }
+
     // 時間の表示の幅は、文字の幅に合わせる (バーを時間の表示のすぐ手前まで伸ばす。作者の指示)。
     // 数字が変わるたびにバーの長さが変わらないよう、決まった見本の文字列で測る
     int getTimeWidth() const
@@ -212,6 +409,12 @@ private:
     bool loopEnabled = false;
     bool hovering = false, nearKnob = false, dragging = false;
     double dragSeconds = 0.0;
+    double markerSeconds = -1.0;
+
+    // 拡大モード
+    bool waitingForHold = false, zoomed = false, fineDrag = false;
+    int holdStartX = 0;
+    double zoomStart = 0.0, zoomAnchorSeconds = 0.0;
 };
 
 // ずらしの操作: 「◀ -10 ms」[値]「+10 ms ▶」
@@ -594,4 +797,22 @@ public:
 
 private:
     MetronomeDots dots;
+};
+
+// 右クリックにも反応するボタン (「ここから開始」: 左クリックで決める、右クリックで解除のメニュー)
+class RightClickableButton final : public juce::TextButton
+{
+public:
+    std::function<void()> onRightClick;
+
+    void mouseDown (const juce::MouseEvent& e) override
+    {
+        if (e.mods.isPopupMenu())
+        {
+            if (onRightClick != nullptr)
+                onRightClick();
+            return;
+        }
+        TextButton::mouseDown (e);
+    }
 };

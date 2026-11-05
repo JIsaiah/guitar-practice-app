@@ -23,6 +23,11 @@ namespace DevAudioCheck
     // 練習画面と同じ部品 (PluginToneCard と、エンジンの非同期の読み込み) を使う。
     // 結果は <出力フォルダ>/plugin-window.txt。終わったら onFinished を呼ぶ (アプリを終える)
     constexpr const char* pluginWindowTestFlag = "--plugin-window-test";
+
+    // メトロノームのクリックが、いつ鳴るかを数える (エンジンの処理を直接動かす。音は出さない)
+    //   "Guitar Practice.exe" --metronome-check <出力フォルダ>   → metronome-check.txt
+    constexpr const char* metronomeCheckFlag = "--metronome-check";
+    juce::String runMetronomeCheck (const juce::String& commandLine);
     std::unique_ptr<juce::Timer> startPluginWindowTest (const juce::String& commandLine, std::function<void()> onFinished);
 }
 #endif

@@ -708,6 +708,7 @@ void AudioEngine::pushTunerInput (const float* data, int numSamples) noexcept
 
 void AudioEngine::triggerClick (bool accent, double sampleRate) noexcept
 {
+    clickCount.fetch_add (1, std::memory_order_relaxed);
     const double frequency = accent ? 1500.0 : 1000.0;
     clickSamplesRemaining = (int) (0.03 * sampleRate);
     clickPhase = 0.0;
