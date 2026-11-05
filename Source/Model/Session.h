@@ -32,6 +32,7 @@ struct Session
     juce::String tuning;     // 例: "E Standard"、"Drop D"、"D A D G A D"。タブ譜から自動で入ることがある
     int difficulty = 0;      // 難易度 (星の数 0〜5。0 = 未設定)。一覧の星をクリックして決める
     static constexpr int maxDifficulty = 5;
+    juce::String folder;     // 一覧のフォルダの名前 (1段だけ)。空ならフォルダなし
 
     SourceType sourceType = SourceType::none;
     juce::String sourcePath;  // local のとき

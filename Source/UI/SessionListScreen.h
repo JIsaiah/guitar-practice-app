@@ -5,6 +5,8 @@
 #include "../Library/SessionLibrary.h"
 #include "../Library/SetlistStore.h"
 #include "../Theme/MetalLogo/FixedTextButton.h"
+#include "../Library/SessionFolders.h"
+#include "SessionFolderList.h"
 #include "SessionPickerPanel.h"
 #include "SetlistPanel.h"
 
@@ -52,6 +54,17 @@ private:
     void showRowMenu (int row);
     void editDetails (int row);
 
+    // フォルダ分け (左の列)
+    void applyFolderFilter (bool keepSelection);   // entries を、選んでいるフォルダのものだけにする
+    void updateFolderList();
+    juce::StringArray getFolderNames() const;
+    void askFolderName (const juce::String& title, const juce::String& initial, std::function<void (juce::String)> onOk);
+    void createFolder (std::function<void (juce::String)> then = nullptr);
+    void renameFolder (const juce::String& oldName);
+    void deleteFolder (const juce::String& name);
+    void moveToFolder (const juce::String& sessionFileId, const juce::String& folder);
+    void updateEntry (const Session& updated);   // 保存したセッションの内容を、一覧の行 (allEntries・entries) に反映する
+
     void changeListenerCallback (juce::ChangeBroadcaster*) override;   // テーマが変わったとき
     void refresh();
     void updateButtons();
@@ -66,12 +79,15 @@ private:
     SetlistStore& setlistStore;
     ThemeManager& theme;
     AppSettings& settings;
-    std::vector<SessionStore::Entry> entries;
+    std::vector<SessionStore::Entry> allEntries;   // すべてのセッション
+    std::vector<SessionStore::Entry> entries;      // 一覧に出しているもの (選んでいるフォルダのもの)
+    juce::String folderFilter = SessionFolders::allKey;
     Tab currentTab = Tab::sessions;
 
     MetalLogoLabel appTitle;
     FixedTextButton sessionsTab, setlistsTab;
     juce::ListBox listBox { {}, this };
+    SessionFolderList folderList;
     FixedTextButton newButton, openButton, deleteButton, settingsButton;
     FixedTextToggle deathMetalToggle;
     juce::ComboBox themeBox;   // テーマ (Windows に合わせる／ライト／ダーク)
@@ -82,4 +98,5 @@ private:
 
     juce::Rectangle<int> headerArea;   // 一覧の列の見出し (曲名・アーティスト…)
     std::unique_ptr<juce::AlertWindow> detailsWindow;   // 「詳細を編集…」のダイアログ
+    std::unique_ptr<juce::AlertWindow> folderNameWindow;   // フォルダの名前を入れるダイアログ
 };

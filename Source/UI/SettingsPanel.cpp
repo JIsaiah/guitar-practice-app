@@ -113,13 +113,19 @@ SettingsPanel::SettingsPanel (AppSettings& s, ThemeManager& t, juce::AudioDevice
     goodRow.getCurrent = [this] { return theme.getPalette().good; };
     goodRow.setCustom  = [this] (std::optional<juce::Colour> c) { theme.setCustomGood (c); };
 
+    //==== 詳細設定: デバッグ ====
+    debugLogButton.setButtonText ("動作ログ・クラッシュの記録を見る…"_jp);
+    debugLogButton.setTooltip ("アプリの動きの記録と、落ちたときの記録を表示します"_jp);
+    debugLogButton.onClick = [this] { if (onOpenDebugLog != nullptr) onOpenDebugLog(); };
+    addAndMakeVisible (debugLogButton);
+
     addAndMakeVisible (audioSelector);
 
     updateFromSettings();
     theme.addChangeListener (this);
     settings.addChangeListener (this);
 
-    setSize (600, 1156);
+    setSize (600, 1194);
 }
 
 SettingsPanel::~SettingsPanel()
@@ -325,6 +331,9 @@ void SettingsPanel::resized()
         area.removeFromTop (6);
     }
     colourError.setBounds (area.removeFromTop (22));
+
+    area.removeFromTop (6);
+    debugLogButton.setBounds (area.removeFromTop (32).removeFromLeft (300));
 
     area.removeFromTop (10);
     audioHeading.setBounds (area.removeFromTop (24));

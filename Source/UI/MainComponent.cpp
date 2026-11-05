@@ -5,6 +5,7 @@
 #include "SessionScreen.h"
 #include "SessionSetupScreen.h"
 #include "SettingsPanel.h"
+#include "DebugLogPanel.h"
 #include "../Theme/Dev/MetalLogoTuner.h"
 #include "../TimingLog.h"
 #include "../AppLog.h"
@@ -253,6 +254,10 @@ void MainComponent::showSetup()
     {
         navigate ([session] (MainComponent& m) mutable
         {
+            // 一覧でフォルダを選んでいたら、そのフォルダに入れる (戻ったときに、作ったセッションが見えるように)
+            if (const auto filter = m.settings.getSessionFolderFilter(); filter.startsWith ("folder:"))
+                session.folder = filter.fromFirstOccurrenceOf ("folder:", false, false);
+
             // 作った時点で保存し、一覧に出るようにする
             if (! m.store.save (session))
                 juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon,
@@ -312,6 +317,7 @@ void MainComponent::openSettings()
     // 設定画面は縦に長いので、スクロールできる枠に入れる
     auto* panel = new SettingsPanel (settings, theme, engine.getDeviceManager());
     panel->onOpenLogoTuner = [this] { openLogoTuner(); };
+    panel->onOpenDebugLog = [this] { openDebugLog(); };
 
     auto* viewport = new juce::Viewport();
     viewport->setViewedComponent (panel, true);
@@ -322,6 +328,19 @@ void MainComponent::openSettings()
     options.dialogBackgroundColour = getLookAndFeel().findColour (juce::ResizableWindow::backgroundColourId);
     options.useNativeTitleBar = true;
     options.resizable = false;
+    options.componentToCentreAround = this;
+    options.launchAsync();
+}
+
+void MainComponent::openDebugLog()
+{
+    // 設定画面と同じく、別のウィンドウ (閉じると消える)
+    juce::DialogWindow::LaunchOptions options;
+    options.content.setOwned (new DebugLogPanel());
+    options.dialogTitle = "動作ログ・クラッシュの記録"_jp;
+    options.dialogBackgroundColour = getLookAndFeel().findColour (juce::ResizableWindow::backgroundColourId);
+    options.useNativeTitleBar = true;
+    options.resizable = true;
     options.componentToCentreAround = this;
     options.launchAsync();
 }

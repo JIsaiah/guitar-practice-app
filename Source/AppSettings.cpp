@@ -14,6 +14,8 @@ namespace
     constexpr const char* scoreEqualBarsKey = "scoreEqualBars";
     constexpr const char* libraryTabKey = "libraryTab";
     constexpr const char* guitarMasterKey = "guitarMasterPercent";
+    constexpr const char* sessionFoldersKey = "sessionFolders";
+    constexpr const char* sessionFolderFilterKey = "sessionFolderFilter";
 }
 
 AppSettings::AppSettings (juce::PropertiesFile& f)
@@ -84,6 +86,29 @@ void AppSettings::setGuitarMasterPercent (int percent)
         guitarMasterPercent = percent;
         save();
     }
+}
+
+juce::StringArray AppSettings::getSessionFolders() const
+{
+    // フォルダ名には「,」も使えるよう、改行で区切って保存する
+    auto names = juce::StringArray::fromLines (file.getValue (sessionFoldersKey));
+    names.removeEmptyStrings();
+    return names;
+}
+
+void AppSettings::setSessionFolders (const juce::StringArray& names)
+{
+    file.setValue (sessionFoldersKey, names.joinIntoString ("\n"));
+}
+
+juce::String AppSettings::getSessionFolderFilter() const
+{
+    return file.getValue (sessionFolderFilterKey, "all");
+}
+
+void AppSettings::setSessionFolderFilter (const juce::String& filter)
+{
+    file.setValue (sessionFolderFilterKey, filter);
 }
 
 juce::StringArray AppSettings::getExpandedSetlists() const

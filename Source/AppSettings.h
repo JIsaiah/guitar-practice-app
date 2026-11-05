@@ -32,6 +32,15 @@ public:
     void setGuitarMasterPercent (int percent);
     static constexpr int maxGuitarMasterPercent = 150;
 
+    // 一覧のフォルダ。セッションが1つも入っていないフォルダも残すため、名前の一覧をここに保存する
+    // (どのセッションがどのフォルダかは、セッションのファイルの "folder" に書く)
+    juce::StringArray getSessionFolders() const;
+    void setSessionFolders (const juce::StringArray& names);
+
+    // 一覧で選んでいるフォルダ: "all" (すべて)、"none" (フォルダなし)、"folder:名前"
+    juce::String getSessionFolderFilter() const;
+    void setSessionFolderFilter (const juce::String& filter);
+
     // 一覧で開いていたセットリスト (練習画面から戻ったときと、次の起動のときに開いたままにする)
     juce::StringArray getExpandedSetlists() const;
     void setExpandedSetlists (const juce::StringArray& setlistIds);

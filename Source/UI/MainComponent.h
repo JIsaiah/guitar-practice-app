@@ -38,6 +38,7 @@ private:
     void openSessionLater (std::function<std::optional<Session> (MainComponent&)> load);
     void openSettings();
     void openLogoTuner();
+    void openDebugLog();   // 動作ログ・クラッシュの記録 (設定画面のボタンから)
 
     // 画面のボタン処理の途中でその画面を破棄しないよう、切り替えは次のメッセージで行う
     void navigate (std::function<void (MainComponent&)> action);

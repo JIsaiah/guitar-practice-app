@@ -93,6 +93,9 @@ target_sources(GuitarPractice PRIVATE
     Source/Audio/PluginTone.cpp
     Source/UI/PluginToneCard.cpp
     Source/Platform/WindowOwner.cpp
+    Source/Platform/CrashLog.cpp
+    Source/UI/DebugLogPanel.cpp
+    Source/UI/SessionFolderList.cpp
     Source/DevAudioCheck.cpp
     Source/UI/ToneDetailPanel.cpp
     Source/Model/Session.cpp
@@ -181,6 +184,7 @@ target_sources(GuitarPracticeTests PRIVATE
     Tests/SetlistPlayerTests.cpp
     Tests/MusicInfoTests.cpp
     Tests/PitchDetectorTests.cpp
+    Tests/SessionFolderTests.cpp
     Source/Model/Session.cpp
     Source/Model/SessionStore.cpp
     Source/Library/SessionLibrary.cpp

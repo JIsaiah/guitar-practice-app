@@ -176,7 +176,7 @@ bool PluginToneCard::createEditorWindow()
 void PluginToneCard::closeWindow()
 {
     // ウィンドウの閉じるボタンの処理の途中で、そのウィンドウを消さないよう、次のメッセージで消す
-    AppLog::write ("プラグインのウィンドウを閉じる");
+    AppLog::write ("プラグインのウィンドウを閉じる"_jp);
 
     juce::MessageManager::callAsync ([safe = juce::Component::SafePointer (this)]
     {
@@ -190,7 +190,7 @@ void PluginToneCard::closeWindow()
         if (auto* top = safe->getTopLevelComponent(); top != nullptr && top->isOnDesktop())
             top->toFront (true);
 
-        AppLog::write ("プラグインのウィンドウを閉じた");
+        AppLog::write ("プラグインのウィンドウを閉じた"_jp);
     });
 }
 

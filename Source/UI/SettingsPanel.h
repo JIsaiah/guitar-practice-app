@@ -17,6 +17,7 @@ public:
     ~SettingsPanel() override;
 
     std::function<void()> onOpenLogoTuner;
+    std::function<void()> onOpenDebugLog;   // 「動作ログ・クラッシュの記録を見る…」
 
     void paint (juce::Graphics& g) override;
     void resized() override;
@@ -68,6 +69,7 @@ private:
 
     juce::ToggleButton deathMetalToggle;
     juce::TextButton logoTunerButton;
+    juce::TextButton debugLogButton;
 
     ColourRow accentRow, goodRow;
 

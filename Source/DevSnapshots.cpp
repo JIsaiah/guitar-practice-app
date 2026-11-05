@@ -10,6 +10,8 @@
 #include "UI/SessionListScreen.h"
 #include "UI/SessionScreen.h"
 #include "UI/SettingsPanel.h"
+#include "UI/DebugLogPanel.h"
+#include "AppLog.h"
 #include "UI/TunerPanel.h"
 #include "AppSettings.h"
 
@@ -92,6 +94,8 @@ juce::String DevSnapshots::renderAll (const juce::File& folder)
             const char* const tunings[] { "E Standard", "E Standard", "", "Eb Standard" };
             const double bpms[] { 74.0, 138.0, 212.0, 125.0 };
             const int stars[] { 4, 3, 0, 5 };
+            const char* const folders[] { "ライブ", "ライブ", "練習中", "" };   // フォルダ分けの見本
+            listSettings.setSessionFolders ({ "あとで"_jp });                  // 中身のないフォルダ
 
             std::vector<Session> saved;
             int index = 0;
@@ -103,6 +107,7 @@ juce::String DevSnapshots::renderAll (const juce::File& folder)
                 s.tuning = tunings[index];
                 s.bpm = bpms[index];
                 s.difficulty = stars[index];
+                s.folder = juce::String::fromUTF8 (folders[index]);
                 ++index;
                 s.sourceType = SourceType::local;
                 s.lengthSeconds = length;
@@ -292,6 +297,21 @@ juce::String DevSnapshots::renderAll (const juce::File& folder)
 
                 SettingsPanel panel (appSettings, theme, engine.getDeviceManager());
                 snap (panel, panel.getWidth(), panel.getHeight(), "settings_custom.png");
+
+                // 動作ログの画面: 見本のログ (作者のログは読まない)
+                {
+                    const auto sampleLog = sampleFolder.getChildFile ("app.log");
+                    sampleLog.replaceWithText ("2026-11-05 09:32:51 起動 (0.1.0)\n2026-11-05 09:33:37 画面: 練習画面\n"
+                                               "2026-11-05 09:33:40 プラグインを読み込んだ\n"
+                                               "2026-11-05 09:40:02 !! 落ちました: 例外 0xc0000005 場所 Archetype Misha Mansoor X.vst3 + 0x5c26ce\n"
+                                               "2026-11-05 09:40:02 呼び出しの流れ:\n0: Guitar Practice: juce::SystemStats::getStackBacktrace + 0x86\n"
+                                               "2026-11-05 09:41:10 !! 前回は正しく終了していません (落ちたか、強制終了された)。最後の記録: !! 落ちました: …\n"
+                                               "2026-11-05 09:41:10 起動 (0.1.0)\n"_jp);
+                    AppLog::fileOverride() = sampleLog;
+                    DebugLogPanel debugPanel;
+                    snap (debugPanel, DebugLogPanel::preferredWidth, DebugLogPanel::preferredHeight, "debug_log.png");
+                    AppLog::fileOverride() = juce::File();
+                }
 
                 theme.setTextScale (1.0f);
                 theme.setCustomAccent (std::nullopt);

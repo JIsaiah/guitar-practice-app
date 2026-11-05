@@ -17,6 +17,7 @@ public:
         juce::Time modified;
         double lengthSeconds = 0.0;   // 0 = 不明
         juce::String artist, tuning;
+        juce::String folder;   // 空ならフォルダなし
         double bpm = 0.0;
         int difficulty = 0;
     };

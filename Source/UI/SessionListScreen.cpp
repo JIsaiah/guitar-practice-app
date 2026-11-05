@@ -31,8 +31,21 @@ SessionListScreen::SessionListScreen (SessionLibrary& l, SetlistStore& sl, Theme
     setlistsTab.onClick = [this] { if (setlistsTab.getToggleState()) showTab (Tab::setlists); };
 
     listBox.setRowHeight (48);
-    listBox.setTooltip ("星をクリックで難易度。右クリックで詳細の編集"_jp);
+    listBox.setTooltip ("星をクリックで難易度。右クリックで詳細の編集・フォルダに移動"_jp);
     addAndMakeVisible (listBox);
+
+    // フォルダ (左の列)。最後に選んでいたフォルダを覚えておく
+    folderFilter = settings.getSessionFolderFilter();
+    folderList.onSelect = [this] (const juce::String& key)
+    {
+        folderFilter = key;
+        settings.setSessionFolderFilter (key);
+        applyFolderFilter (false);
+    };
+    folderList.onNewFolder = [this] { createFolder(); };
+    folderList.onRename = [this] (const juce::String& name) { renameFolder (name); };
+    folderList.onDelete = [this] (const juce::String& name) { deleteFolder (name); };
+    addAndMakeVisible (folderList);
 
     newButton.setFixedText (FixedTextId::NewSession, "+ 新しいセッション"_jp);
     openButton.setFixedText (FixedTextId::Open, "開く"_jp);
@@ -112,7 +125,7 @@ void SessionListScreen::showTab (Tab tab)
     sessionsTab.setToggleState (sessions, juce::dontSendNotification);
     setlistsTab.setToggleState (! sessions, juce::dontSendNotification);
 
-    for (auto* c : std::initializer_list<juce::Component*> { &listBox, &newButton, &openButton, &deleteButton })
+    for (auto* c : std::initializer_list<juce::Component*> { &listBox, &folderList, &newButton, &openButton, &deleteButton })
         c->setVisible (sessions);
 
     setlistPanel.setVisible (! sessions);
@@ -137,15 +150,201 @@ void SessionListScreen::refresh()
     // ファイル名の変更・古いファイルへの ID の付与・曲名の変更を、セットリストの表示にも反映する
     library.rescan();
 
-    entries = store.list();
+    allEntries = store.list();
+    picker.setSessions (allEntries);
+    applyFolderFilter (false);
+}
+
+//==============================================================================
+// フォルダ分け
+juce::StringArray SessionListScreen::getFolderNames() const
+{
+    return SessionFolders::collectNames (allEntries, settings.getSessionFolders());
+}
+
+void SessionListScreen::updateFolderList()
+{
+    const auto names = getFolderNames();
+    settings.setSessionFolders (names);   // セッションが使っている名前も、設定の一覧に入れておく
+
+    // 選んでいたフォルダが無くなっていたら (アプリの外でファイルを消したなど)、「すべて」に戻す
+    const auto items = SessionFolders::buildItems (allEntries, names);
+    if (std::none_of (items.begin(), items.end(), [this] (const SessionFolders::Item& i) { return i.getKey() == folderFilter; }))
+    {
+        folderFilter = SessionFolders::allKey;
+        settings.setSessionFolderFilter (folderFilter);
+    }
+
+    folderList.setItems (items, folderFilter);
+}
+
+void SessionListScreen::applyFolderFilter (bool keepSelection)
+{
+    updateFolderList();
+
+    const auto row = listBox.getSelectedRow();
+    const auto selectedId = keepSelection && juce::isPositiveAndBelow (row, (int) entries.size()) ? entries[(size_t) row].id
+                                                                                                   : juce::String();
+
+    entries = SessionFolders::filter (allEntries, folderFilter);
     listBox.updateContent();
     listBox.deselectAllRows();
-    if (! entries.empty())
-        listBox.selectRow (0);
 
-    picker.setSessions (entries);
+    int toSelect = entries.empty() ? -1 : 0;
+    for (int i = 0; i < (int) entries.size(); ++i)
+        if (entries[(size_t) i].id == selectedId)
+            toSelect = i;
+    if (toSelect >= 0)
+        listBox.selectRow (toSelect);
+
     updateButtons();
     repaint();
+}
+
+void SessionListScreen::updateEntry (const Session& updated)
+{
+    for (auto* list : { &allEntries, &entries })
+        for (auto& e : *list)
+            if (e.id == updated.id)
+            {
+                e.title = updated.title;
+                e.artist = updated.artist;
+                e.tuning = updated.tuning;
+                e.bpm = updated.bpm;
+                e.difficulty = updated.difficulty;
+                e.folder = updated.folder;
+            }
+}
+
+void SessionListScreen::askFolderName (const juce::String& title, const juce::String& initial,
+                                       std::function<void (juce::String)> onOk)
+{
+    folderNameWindow = std::make_unique<juce::AlertWindow> (title, juce::String(), juce::MessageBoxIconType::NoIcon, this);
+    folderNameWindow->addTextEditor ("name", initial, "フォルダの名前"_jp);
+    folderNameWindow->addButton ("OK", 1, juce::KeyPress (juce::KeyPress::returnKey));
+    folderNameWindow->addButton ("キャンセル"_jp, 0, juce::KeyPress (juce::KeyPress::escapeKey));
+
+    folderNameWindow->enterModalState (true, juce::ModalCallbackFunction::create (
+        [safe = juce::Component::SafePointer (this), onOk = std::move (onOk)] (int result)
+    {
+        if (safe == nullptr || safe->folderNameWindow == nullptr)
+            return;
+
+        const auto name = safe->folderNameWindow->getTextEditorContents ("name").trim();
+        safe->folderNameWindow.reset();
+
+        if (result == 1)
+            onOk (name);
+    }), false);
+}
+
+void SessionListScreen::createFolder (std::function<void (juce::String)> then)
+{
+    askFolderName ("新しいフォルダ"_jp, {}, [this, then] (juce::String name)
+    {
+        auto names = getFolderNames();
+        if (const auto problem = SessionFolders::checkName (name, names); problem.isNotEmpty())
+        {
+            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "フォルダを作れませんでした"_jp, problem);
+            return;
+        }
+
+        names.add (name);
+        settings.setSessionFolders (names);
+
+        if (then != nullptr)
+        {
+            then (name);   // 「新しいフォルダを作って移動」: 作ったフォルダにセッションを入れる
+            return;
+        }
+
+        // 作ったフォルダを開く (空なので、右クリックの「フォルダに移動」で入れてもらう)
+        folderFilter = SessionFolders::keyFor (name);
+        settings.setSessionFolderFilter (folderFilter);
+        applyFolderFilter (false);
+    });
+}
+
+void SessionListScreen::renameFolder (const juce::String& oldName)
+{
+    askFolderName ("フォルダの名前の変更"_jp, oldName, [this, oldName] (juce::String newName)
+    {
+        if (newName == oldName)
+            return;
+
+        auto names = getFolderNames();
+        names.removeString (oldName);
+        if (const auto problem = SessionFolders::checkName (newName, names); problem.isNotEmpty())
+        {
+            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "名前を変えられませんでした"_jp, problem);
+            return;
+        }
+
+        // 中のセッションのファイルを書き直す (一覧の並びは変えない)
+        for (const auto& e : allEntries)
+            if (e.folder == oldName)
+                if (auto updated = store.update (e.id, [&newName] (Session& s) { s.folder = newName; }))
+                    updateEntry (*updated);
+
+        names.add (newName);
+        settings.setSessionFolders (names);
+
+        if (folderFilter == SessionFolders::keyFor (oldName))
+        {
+            folderFilter = SessionFolders::keyFor (newName);
+            settings.setSessionFolderFilter (folderFilter);
+        }
+        applyFolderFilter (true);
+    });
+}
+
+void SessionListScreen::deleteFolder (const juce::String& name)
+{
+    int count = 0;
+    for (const auto& e : allEntries)
+        if (e.folder == name)
+            ++count;
+
+    auto options = juce::MessageBoxOptions()
+                       .withIconType (juce::MessageBoxIconType::QuestionIcon)
+                       .withTitle ("フォルダの削除"_jp)
+                       .withMessage ("フォルダ「"_jp + name + "」を削除しますか？"_jp
+                                     + (count > 0 ? "\n中の "_jp + juce::String (count) + " 件のセッションは消さずに、「フォルダなし」に移します。"_jp
+                                                  : juce::String()))
+                       .withButton ("削除"_jp)
+                       .withButton ("キャンセル"_jp)
+                       .withAssociatedComponent (this);
+
+    juce::AlertWindow::showAsync (options, [safe = juce::Component::SafePointer (this), name] (int result)
+    {
+        if (safe == nullptr || result != 1)
+            return;
+
+        for (const auto& e : safe->allEntries)
+            if (e.folder == name)
+                if (auto updated = safe->store.update (e.id, [] (Session& s) { s.folder = {}; }))
+                    safe->updateEntry (*updated);
+
+        auto names = safe->settings.getSessionFolders();
+        names.removeString (name);
+        safe->settings.setSessionFolders (names);
+
+        if (safe->folderFilter == SessionFolders::keyFor (name))
+        {
+            safe->folderFilter = SessionFolders::allKey;
+            safe->settings.setSessionFolderFilter (safe->folderFilter);
+        }
+        safe->applyFolderFilter (false);
+    });
+}
+
+void SessionListScreen::moveToFolder (const juce::String& sessionFileId, const juce::String& folder)
+{
+    if (auto updated = store.update (sessionFileId, [&folder] (Session& s) { s.folder = folder; }))
+    {
+        updateEntry (*updated);
+        applyFolderFilter (true);   // 今のフォルダから出たなら、一覧から消える
+    }
 }
 
 void SessionListScreen::showPicker (SetlistCard* card)
@@ -364,33 +563,62 @@ void SessionListScreen::listBoxItemDoubleClicked (int row, const juce::MouseEven
 
 void SessionListScreen::setDifficulty (int row, int stars)
 {
-    auto& entry = entries[(size_t) row];
-    if (store.update (entry.id, [stars] (Session& s) { s.difficulty = stars; }).has_value())
+    if (auto updated = store.update (entries[(size_t) row].id, [stars] (Session& s) { s.difficulty = stars; }))
     {
-        entry.difficulty = stars;
+        updateEntry (*updated);
         listBox.repaintRow (row);
     }
 }
 
 void SessionListScreen::showRowMenu (int row)
 {
+    // フォルダに移動: 各フォルダ (今のフォルダには印)、フォルダなし、新しいフォルダを作って移動
+    constexpr int folderBase = 100, noFolderId = 99, newFolderId = 98;
+    const auto names = getFolderNames();
+    const auto current = entries[(size_t) row].folder;
+
+    juce::PopupMenu folders;
+    for (int i = 0; i < names.size(); ++i)
+        folders.addItem (folderBase + i, names[i], names[i] != current, names[i] == current);
+    if (! names.isEmpty())
+        folders.addSeparator();
+    folders.addItem (noFolderId, "フォルダなし"_jp, current.isNotEmpty(), current.isEmpty());
+    folders.addItem (newFolderId, "新しいフォルダを作って移動…"_jp);
+
     juce::PopupMenu menu;
     menu.addItem (1, "詳細を編集…"_jp);
     menu.addItem (2, "開く"_jp);
+    menu.addSubMenu ("フォルダに移動"_jp, folders);
     menu.addSeparator();
     menu.addItem (3, "削除"_jp);
 
     menu.showMenuAsync (juce::PopupMenu::Options().withMousePosition(),
-                        [safe = juce::Component::SafePointer (this), row] (int result)
+                        [safe = juce::Component::SafePointer (this), row, names] (int result)
     {
         if (safe == nullptr || ! juce::isPositiveAndBelow (row, (int) safe->entries.size()))
             return;
+
+        const auto fileId = safe->entries[(size_t) row].id;
+
+        if (result >= folderBase && result - folderBase < names.size())
+        {
+            safe->moveToFolder (fileId, names[result - folderBase]);
+            return;
+        }
 
         switch (result)
         {
             case 1: safe->editDetails (row); break;
             case 2: safe->openSelected(); break;
             case 3: safe->deleteSelected(); break;
+            case noFolderId: safe->moveToFolder (fileId, {}); break;
+            case newFolderId:
+                safe->createFolder ([safe, fileId] (juce::String name)
+                {
+                    if (safe != nullptr)
+                        safe->moveToFolder (fileId, name);
+                });
+                break;
             default: break;
         }
     });
@@ -459,19 +687,9 @@ void SessionListScreen::editDetails (int row)
 
         // 選んでいる行はそのまま、表示だけ直す。曲名はセットリストにも出るので、そちらも直す
         safe->library.noteSaved (*updated);
-        for (size_t i = 0; i < safe->entries.size(); ++i)
-        {
-            auto& e = safe->entries[i];
-            if (e.id != id)
-                continue;
-
-            e.title = updated->title;
-            e.artist = updated->artist;
-            e.tuning = updated->tuning;
-            e.bpm = updated->bpm;
-            safe->listBox.repaintRow ((int) i);
-        }
-        safe->picker.setSessions (safe->entries);
+        safe->updateEntry (*updated);
+        safe->listBox.repaint();
+        safe->picker.setSessions (safe->allEntries);
         safe->setlistPanel.refresh();
     }), false);
 }
@@ -510,7 +728,9 @@ void SessionListScreen::paintOverChildren (juce::Graphics& g)
 
     g.setColour (listBox.findColour (juce::ListBox::textColourId).withAlpha (0.6f));
     g.setFont (AppLookAndFeel::scaled (juce::FontOptions (16.0f)));
-    g.drawFittedText ("セッションがありません。\n「+ 新しいセッション」から作成してください。"_jp,
+    g.drawFittedText (allEntries.empty()
+                          ? "セッションがありません。\n「+ 新しいセッション」から作成してください。"_jp
+                          : "このフォルダにはセッションがありません。\n「すべて」を選び、セッションの右クリック「フォルダに移動」で入れられます。"_jp,
                       listBox.getBounds(), juce::Justification::centred, 2);
 }
 
@@ -550,6 +770,11 @@ void SessionListScreen::resized()
     deleteButton.setBounds (buttons.removeFromRight (100));
 
     area.removeFromBottom (12);
+
+    // 左にフォルダの列
+    folderList.setBounds (area.removeFromLeft (210));
+    area.removeFromLeft (14);
+
     headerArea = area.removeFromTop (headerHeight);
     listBox.setBounds (area);
 }

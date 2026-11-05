@@ -1,6 +1,7 @@
 #include <juce_gui_extra/juce_gui_extra.h>
 #include "Audio/AudioEngine.h"
 #include "AppLog.h"
+#include "Platform/CrashLog.h"
 #include "AppSettings.h"
 #include "DevAudioCheck.h"
 #include "DevSnapshots.h"
@@ -19,6 +20,28 @@ public:
     void initialise (const juce::String& commandLine) override
     {
        #if JUCE_DEBUG
+        // 開発用の起動では、作者の動作ログに書かない
+        if (commandLine.contains (DevSnapshots::commandLineFlag) || commandLine.contains (DevAudioCheck::pluginWindowTestFlag)
+            || commandLine.contains (DevAudioCheck::commandLineFlag))
+            AppLog::setEnabled (false);
+
+        // 開発用: わざと落ちて、落ちた場所が動作ログに書かれるかを確かめる。ログは指定のフォルダに書く
+        if (commandLine.contains ("--crash-test"))
+        {
+            AppLog::fileOverride() = juce::File (commandLine.fromFirstOccurrenceOf ("--crash-test", false, false).trim().unquoted())
+                                         .getChildFile ("app.log");
+            AppLog::setEnabled (true);
+            AppLog::noteStart (getApplicationVersion());
+            CrashLog::install();
+            juce::MessageManager::callAsync ([]
+            {
+                AppLog::write ("わざと落ちます"_jp);
+                volatile int* nowhere = nullptr;
+                *nowhere = 1;
+            });
+            return;
+        }
+
         // 開発用: 画面とロゴを PNG に書き出して終わる (DevSnapshots.h)
         if (commandLine.contains (DevSnapshots::commandLineFlag))
         {
@@ -46,6 +69,10 @@ public:
         juce::ignoreUnused (commandLine);
        #endif
 
+        // 動作ログ: 前回が正しく終わったかを記録し、落ちたときに場所を書くようにする
+        AppLog::noteStart (getApplicationVersion());
+        CrashLog::install();
+
         juce::PropertiesFile::Options options;
         options.applicationName = "GuitarPractice";
         options.folderName = "GuitarPractice";
@@ -65,7 +92,6 @@ public:
         setlistStore = std::make_unique<SetlistStore>();
         mainWindow = std::make_unique<MainWindow> (getApplicationName(), *audioEngine, *sessionLibrary, *setlistStore,
                                                    *themeManager, *appSettings);
-        AppLog::write ("起動 (" + getApplicationVersion() + ")");
     }
 
     void shutdown() override
@@ -76,24 +102,24 @@ public:
         if (audioEngine == nullptr)   // --render-logos で起動したとき
             return;
 
-        AppLog::write ("終了");
-
         if (auto state = audioEngine->createDeviceState())
             properties.getUserSettings()->setValue (audioDeviceKey, state.get());
 
         properties.saveIfNeeded();
-        audioEngine = nullptr;
+        audioEngine = nullptr;   // プラグインもここで消える (落ちるならここ。だから「終了」はこの後に書く)
         setlistStore = nullptr;
         sessionLibrary = nullptr;
         sessionStore = nullptr;
         appSettings = nullptr;
         themeManager = nullptr;   // 画面がすべて消えてから、LookAndFeel を消す
+
+        AppLog::write (AppLog::endMarker());   // 最後まで来た印。次の起動で「正しく終了したか」を見る
     }
 
     void systemRequestedQuit() override
     {
         if (audioEngine != nullptr)
-            AppLog::write ("終了の要求");
+            AppLog::write ("終了の要求"_jp);
         quit();
     }
     void anotherInstanceStarted (const juce::String&) override {}
@@ -119,7 +145,7 @@ private:
 
         void closeButtonPressed() override
         {
-            AppLog::write ("アプリのウィンドウの × が押された");
+            AppLog::write ("アプリのウィンドウの × が押された"_jp);
             JUCEApplication::getInstance()->systemRequestedQuit();
         }
 

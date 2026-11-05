@@ -186,7 +186,7 @@ void AudioEngine::startPendingPluginLoad()
     const auto generation = load.generation;
     auto onDone = std::move (load.onDone);
     juce::WeakReference<AudioEngine> weakThis (this);
-    AppLog::write ("プラグインを読み込む: " + load.file.getFileName());
+    AppLog::write ("プラグインを読み込む: "_jp + load.file.getFileName());
 
     PluginTone::createAsync (pluginFormats, load.file, load.state,
                              deviceSampleRate.load(), deviceBufferSize.load(),
@@ -196,7 +196,7 @@ void AudioEngine::startPendingPluginLoad()
         if (self == nullptr || generation != self->pluginToneGeneration)
             return;   // 破棄済み、または後から別のプラグインが選ばれた (できたものはここで消える: メッセージスレッド)
 
-        AppLog::write (tone != nullptr ? juce::String ("プラグインを読み込んだ") : "プラグインを読み込めなかった: " + error);
+        AppLog::write (tone != nullptr ? "プラグインを読み込んだ"_jp : "プラグインを読み込めなかった: "_jp + error);
         self->pluginToneLoading = false;
 
         if (tone != nullptr)
