@@ -39,7 +39,7 @@ private:
     juce::Label sourceValue, scoreValue, bpmNote;
     juce::TextEditor titleEditor, artistEditor, tuningEditor;
     juce::TextButton sourceFileButton, youtubeButton, scoreFileButton, scoreClearButton;
-    std::array<juce::TextButton, 3> toneButtons;
+    std::array<juce::TextButton, 2> toneButtons;   // 簡易な音色 (getTonePresets の数)
     juce::Slider bpmSlider;
     juce::TextButton tapButton;
     juce::TextButton cancelButton, startButton;

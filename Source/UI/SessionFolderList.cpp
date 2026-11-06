@@ -7,7 +7,7 @@ SessionFolderList::SessionFolderList()
     list.setTooltip ("クリックで、そのフォルダのセッションだけを出します。フォルダの右クリックで名前の変更・削除"_jp);
     addAndMakeVisible (list);
 
-    newButton.setButtonText ("＋ 新しいフォルダ"_jp);
+    newButton.setTooltip ("新しいフォルダ"_jp);
     newButton.onClick = [this] { if (onNewFolder != nullptr) onNewFolder(); };
     addAndMakeVisible (newButton);
 }
@@ -102,14 +102,29 @@ void SessionFolderList::listBoxItemClicked (int row, const juce::MouseEvent& e)
 
 void SessionFolderList::paint (juce::Graphics& g)
 {
+    // 枠 (一覧の枠と同じ見た目)
+    const auto bounds = getLocalBounds().toFloat();
+    g.setColour (findColour (ThemeColourIds::panel));
+    g.fillRoundedRectangle (bounds, 8.0f);
     g.setColour (findColour (ThemeColourIds::border));
-    g.drawRoundedRectangle (list.getBounds().toFloat().expanded (0.5f), 4.0f, 1.0f);
+    g.drawRoundedRectangle (bounds.reduced (0.5f), 8.0f, 1.0f);
+
+    // 見出し (一覧の列の見出しと同じ高さ・文字)
+    g.setColour (findColour (ThemeColourIds::textMuted));
+    g.setFont (AppLookAndFeel::scaled (juce::FontOptions (12.5f, juce::Font::bold)));
+    g.drawText ("フォルダー"_jp, getHeadingArea().withTrimmedLeft (10), juce::Justification::centredLeft);
+}
+
+juce::Rectangle<int> SessionFolderList::getHeadingArea() const
+{
+    return getLocalBounds().reduced (8).removeFromTop (headingHeight).withTrimmedTop (4);
 }
 
 void SessionFolderList::resized()
 {
-    auto area = getLocalBounds();
-    newButton.setBounds (area.removeFromBottom (36));
-    area.removeFromBottom (8);
+    auto area = getLocalBounds().reduced (8);
+    area.removeFromTop (headingHeight);
+    auto bottom = area.removeFromBottom (52);
+    newButton.setBounds (bottom.removeFromRight (44).withSizeKeepingCentre (44, 44));
     list.setBounds (area);
 }

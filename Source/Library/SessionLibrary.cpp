@@ -71,6 +71,14 @@ std::optional<Session> SessionLibrary::load (const juce::String& sessionId)
     return session;
 }
 
+std::optional<Session> SessionLibrary::openForPractice (const juce::String& sessionId)
+{
+    if (! load (sessionId).has_value())   // 見つからない・中身が別のセッション
+        return std::nullopt;
+
+    return store.openForPractice (findFileId (sessionId));
+}
+
 juce::String SessionLibrary::getTitle (const juce::String& sessionId)
 {
     if (const auto* item = find (sessionId))

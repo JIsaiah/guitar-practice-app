@@ -41,6 +41,11 @@ public:
     juce::String getSessionFolderFilter() const;
     void setSessionFolderFilter (const juce::String& filter);
 
+    // 一覧の並び替え (列の見出しの ↓↑)。key は SessionSort::toString の名前。既定は「最後の練習日」の新しい順
+    juce::String getSessionSortKey() const;
+    bool getSessionSortAscending() const;
+    void setSessionSort (const juce::String& key, bool ascending);
+
     // 一覧で開いていたセットリスト (練習画面から戻ったときと、次の起動のときに開いたままにする)
     juce::StringArray getExpandedSetlists() const;
     void setExpandedSetlists (const juce::StringArray& setlistIds);

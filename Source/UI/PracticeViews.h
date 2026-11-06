@@ -3,6 +3,7 @@
 #include <juce_gui_basics/juce_gui_basics.h>
 #include "../Text.h"
 #include "../Theme/DeathMetalLookAndFeel.h"
+#include "Icons.h"
 
 // 未実装の領域を示す枠 (タブ譜、動画など)
 class PlaceholderView final : public juce::Component
@@ -60,7 +61,7 @@ public:
 
         g.setColour (findColour (ThemeColourIds::textMuted));
         g.setFont (AppLookAndFeel::scaled (juce::FontOptions (14.0f)));
-        g.drawText ("タブ譜がありません。上の「タブ譜を選ぶ…」から選べます (Guitar Pro、MusicXML)"_jp,
+        g.drawText ("タブ譜がありません。上の「タブ譜を選択」から選べます (Guitar Pro、MusicXML)"_jp,
                     bounds.withSizeKeepingCentre (bounds.getWidth(), 30).translated (0, 70), juce::Justification::centred);
     }
 
@@ -602,20 +603,13 @@ public:
 
     void paintButton (juce::Graphics& g, bool highlighted, bool down) override
     {
-        auto r = getLocalBounds().toFloat().withSizeKeepingCentre (14.0f, 16.0f);
         auto colour = findColour (ThemeColourIds::textMuted);
         if (highlighted) colour = findColour (ThemeColourIds::accent);
         if (down)        colour = colour.darker (0.2f);
         if (! isEnabled()) colour = colour.withMultipliedAlpha (0.4f);
 
-        juce::Path p;
-        p.addRoundedRectangle (r.getX() + 1.5f, r.getY() + 4.0f, r.getWidth() - 3.0f, r.getHeight() - 4.0f, 1.5f);   // 本体
-        g.setColour (colour);
-        g.strokePath (p, juce::PathStrokeType (1.4f));
-        g.drawLine (r.getX(), r.getY() + 2.5f, r.getRight(), r.getY() + 2.5f, 1.4f);                                  // ふた
-        g.drawLine (r.getCentreX() - 2.5f, r.getY() + 0.5f, r.getCentreX() + 2.5f, r.getY() + 0.5f, 1.4f);            // 取っ手
-        for (float dx : { -2.5f, 0.0f, 2.5f })                                                                        // 縦の線
-            g.drawLine (r.getCentreX() + dx, r.getY() + 7.0f, r.getCentreX() + dx, r.getBottom() - 3.0f, 1.0f);
+        // 作者が置いたアイコン (`svg icons/trash`)
+        Icons::draw (g, Icons::trash, getLocalBounds().toFloat().withSizeKeepingCentre (24.0f, 24.0f), colour);
     }
 };
 

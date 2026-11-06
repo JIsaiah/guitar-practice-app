@@ -22,12 +22,12 @@ struct TonePreset
     ToneType type;
 };
 
-// 簡易な音色 (ファイルなしで使える3つ)
-inline const std::array<TonePreset, 3>& getTonePresets()
+// 簡易な音色 (ファイルなしで使える2つ)。「クランチ」は作者の指示で外した
+// (前に「クランチ」を選んで保存したセッションは、見つからない ID として「クリーン」で開く。findTonePresetIndex)
+inline const std::array<TonePreset, 2>& getTonePresets()
 {
-    static const std::array<TonePreset, 3> presets {{
+    static const std::array<TonePreset, 2> presets {{
         { "clean-01",  "クリーン", ToneType::clean },
-        { "crunch-01", "クランチ", ToneType::crunch },
         { "drive-01",  "歪み",     ToneType::drive },
     }};
     return presets;

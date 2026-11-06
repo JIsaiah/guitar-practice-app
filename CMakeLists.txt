@@ -115,6 +115,7 @@ target_sources(GuitarPractice PRIVATE
     Source/UI/SessionSetupScreen.cpp
     Source/UI/SessionScreen.cpp
     Source/UI/CountdownOverlay.cpp
+    Source/UI/Icons.cpp
     Source/UI/SetlistBar.cpp
     Source/UI/TunerPanel.cpp
     Source/Theme/ThemeManager.cpp
@@ -138,7 +139,20 @@ juce_add_binary_data(GuitarPracticeData
         Resources/Web/alphatab/alphaTab.min.js
         Resources/Web/alphatab/Bravura.woff2
         Resources/Web/alphatab/Bravura.woff
-        design/generated/tokens.css)
+        design/generated/tokens.css
+        # アイコン (作者が置いた SVG。Source/UI/Icons で描く)
+        "svg icons/help-circle-svgrepo-com.svg"
+        "svg icons/media-backward-end-svgrepo-com.svg"
+        "svg icons/media-backward-svgrepo-com.svg"
+        "svg icons/media-forward-svgrepo-com.svg"
+        "svg icons/media-play-svgrepo-com.svg"
+        "svg icons/media-pause-svgrepo-com.svg"
+        "svg icons/plus-svgrepo-com.svg"
+        "svg icons/setting-2-svgrepo-com.svg"
+        "svg icons/trash-svgrepo-com.svg"
+        "svg icons/sort-sortable-anchor-table-order-desc-asc-svgrepo-com.svg"
+        "svg icons/sort-asc-sortable-anchor-table-order-desc-asc-svgrepo-com.svg"
+        "svg icons/sort-desc-sortable-anchor-table-order-desc-asc-svgrepo-com.svg")
 
 target_compile_definitions(GuitarPractice PRIVATE
     JUCE_WEB_BROWSER=1
@@ -185,6 +199,7 @@ target_sources(GuitarPracticeTests PRIVATE
     Tests/MusicInfoTests.cpp
     Tests/PitchDetectorTests.cpp
     Tests/SessionFolderTests.cpp
+    Tests/SessionSortTests.cpp
     Source/Model/Session.cpp
     Source/Model/SessionStore.cpp
     Source/Library/SessionLibrary.cpp

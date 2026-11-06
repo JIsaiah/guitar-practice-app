@@ -13,6 +13,7 @@
 #include "../Web/YouTubePlayer.h"
 #include "Commands.h"
 #include "CountdownOverlay.h"
+#include "Icons.h"
 #include "SetlistBar.h"
 #include "PracticeViews.h"
 #include "TunerPanel.h"
@@ -152,6 +153,9 @@ private:
     void renameSession (const juce::String& newTitle);
     void toggleSourceMute();
     void applySourceGain();   // ミキサーの「音源」の値とミュートを、エンジン (と YouTube) に送る
+    void toggleGuitarMute();
+    void applyGuitarGain();   // ミキサーの「ギター」の値とミュートを、エンジンに送る
+    void showComingSoon (const juce::String& what);   // まだ作っていない機能のボタン (リード・バッキング・プリセット・説明)
 
     AudioEngine& engine;
     SessionStore& store;
@@ -175,6 +179,7 @@ private:
     bool songEndNotified = false;
     SetlistBar setlistBar;
     juce::Rectangle<int> bottomBarArea;
+    juce::Rectangle<int> timelinePanel;   // 再生バーの面 (作者のレイアウト: タブ譜の下の帯)
     juce::String savedSnapshot;
 
     TapTempo tapTempo;
@@ -182,6 +187,7 @@ private:
     double requestedRate = 1.0, rateRequestedAtMs = 0.0;   // YouTube に頼んだ速度 (YouTube 側での変更を見分けるため)
     bool metronomeOn = false, wasPlaying = false;
     bool sourceMuted = false;   // 音源だけを消す (タブ譜だけを流したいとき)。セッションには保存しない
+    bool guitarMuted = false;   // ギターの音を消す (作者の指示)。セッションには保存しない
     bool sidePanelVisible = true;
     int sidePanelWidthAtDragStart = 0;
     std::unique_ptr<juce::FileChooser> fileChooser;
@@ -193,6 +199,7 @@ private:
     // 上部
     FixedTextButton backButton, saveButton, settingsButton;
     juce::Label titleLabel, statusLabel;
+    juce::Label artistLabel;   // 曲名の右に「—  アーティスト名」(作者のレイアウト)
 
     // 左: タブ譜と再生位置
     juce::Label scoreNameLabel, positionLabel;
@@ -207,16 +214,20 @@ private:
     juce::TextButton sidePanelButton;   // 右のパネルを隠す・出すタブ
     std::vector<juce::Rectangle<int>> sideCards;   // 右のパネルの区切り (paint で面を描く)
 
-    SectionHeading sourceHeading { "音源"_jp }, toneHeading { "音色"_jp }, mixerHeading { "ミキサー (音量)"_jp },
-                   offsetHeading { "テンポとずらし (タブ譜・メトロノームの位置合わせ)"_jp };
+    SectionHeading sourceHeading { "音源"_jp }, toneHeading { "音色"_jp }, mixerHeading { "ミキサー"_jp },
+                   offsetHeading { "テンポとずらし"_jp };
     PlaceholderView videoView;
     juce::Label sourceInfoLabel;        // 動画の真下: YouTube の URL (ダブルクリックで変更) か、音源のファイル名
     TrashButton sourceRemoveButton;     // 音源を外す
     juce::TextButton chooseFileButton, pasteUrlButton;   // 音源がないとき
-    std::array<juce::TextButton, 5> toneButtons;   // クリーン・クランチ・歪み・TONE3000・NAM
+    std::array<juce::TextButton, 4> toneButtons;   // クリーン・歪み・TONE3000 (VST)・NAM (クランチは作者の指示で外した)
     juce::Label toneSummaryLabel;                  // NAM のモデルと IR の名前
-    juce::TextButton toneDetailButton;             // 音色の設定 (NAM) を開く
-    static constexpr int pluginToneIndex = 3, namToneIndex = 4;
+    IconButton toneDetailButton { Icons::settings };   // 音色の設定 (NAM) を開く。音色の見出しの右の歯車
+    static constexpr int pluginToneIndex = 2, namToneIndex = 3;
+
+    // プリセット 1・2・3 (作者のレイアウト。機能はまだ。押すと「準備中」)
+    juce::Label presetLabel;
+    std::array<juce::TextButton, 3> presetButtons;
 
     // TONE3000 (VST3 プラグイン) のカード。TONE3000 を選んでいるときだけ、音色とミキサーの間に出す
     PluginToneCard pluginCard { engine };
@@ -233,6 +244,7 @@ private:
     juce::Label sourceGainLabel, guitarGainLabel, metronomeGainLabel;
     WheelSlider sourceGainSlider, guitarGainSlider, metronomeGainSlider;
     juce::TextButton sourceMuteButton;   // 音源だけのミュート
+    juce::TextButton guitarMuteButton;   // ギターのミュート (メトロノームには付けない。作者の指示)
     juce::Label bpmLabel, scoreOffsetLabel, offsetLabel;
     WheelSlider bpmSlider;
     FixedTextButton tapButton;
@@ -240,15 +252,18 @@ private:
 
     // 上部: チューナー
     FixedTextButton tunerButton;
+    IconButton helpButton { Icons::help };   // 「?」(画面の説明。機能はまだ)
+
+    // タブ譜の上の左: リード・バッキングの切り替え (作者のレイアウト。機能はまだ)
+    juce::TextButton leadButton, backingButton;
 
     // 下部: 再生操作。「再生／速度／メトロノーム／ループ」のグループに分け、それぞれに見出しを付ける
-    SectionHeading playHeading { "再生"_jp }, speedHeading { "速度 (%)"_jp },
-                   metronomeHeading { "メトロノーム"_jp }, loopHeading { "ループ (A〜B をくり返す)"_jp };
+    SectionHeading playHeading { "再生"_jp }, speedHeading { "速度"_jp },
+                   metronomeHeading { "メトロノーム"_jp }, loopHeading { "ループ"_jp };
     std::vector<int> bottomDividers;   // グループの区切り線の x 座標 (paint で描く)
     static constexpr int bottomBarHeight = 84;
-    juce::TextButton toStartButton, rewindButton;
-    FixedTextButton playButton;
-    juce::TextButton forwardButton;
+    // 再生の操作は、作者が置いたアイコンで描く (Icons)
+    IconButton toStartButton { Icons::toStart }, rewindButton { Icons::backward }, playButton { Icons::play }, forwardButton { Icons::forward };
     WheelSlider speedSlider;
     FixedTextButton metronomeButton;
     juce::TextButton metronomeSoloButton;

@@ -153,6 +153,7 @@ juce::String DevSnapshots::renderAll (const juce::File& folder)
 
             Session session;
             session.title = "Hotel California (ソロ)"_jp;
+            session.artist = "Eagles";
             session.sourceType = SourceType::local;
             session.sourcePath = "C:/Music/hotel-california.mp3";
             session.bpm = 74.0;

@@ -23,6 +23,7 @@ public:
     juce::String findFileId (const juce::String& sessionId);
     bool contains (const juce::String& sessionId) { return findFileId (sessionId).isNotEmpty(); }
     std::optional<Session> load (const juce::String& sessionId);
+    std::optional<Session> openForPractice (const juce::String& sessionId);   // load + 最後に開いた日時を記録 (SessionStore::openForPractice)
     juce::String getTitle (const juce::String& sessionId);   // 見つからなければ空
     double getLengthSeconds (const juce::String& sessionId);   // 不明・見つからなければ 0
 

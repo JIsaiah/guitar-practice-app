@@ -33,6 +33,7 @@ struct Session
     int difficulty = 0;      // 難易度 (星の数 0〜5。0 = 未設定)。一覧の星をクリックして決める
     static constexpr int maxDifficulty = 5;
     juce::String folder;     // 一覧のフォルダの名前 (1段だけ)。空ならフォルダなし
+    juce::Time lastOpened;   // 最後に練習画面で開いた日時 (一覧の「最後の練習日」)。開いたことが無ければ 0
 
     SourceType sourceType = SourceType::none;
     juce::String sourcePath;  // local のとき

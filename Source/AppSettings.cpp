@@ -16,6 +16,8 @@ namespace
     constexpr const char* guitarMasterKey = "guitarMasterPercent";
     constexpr const char* sessionFoldersKey = "sessionFolders";
     constexpr const char* sessionFolderFilterKey = "sessionFolderFilter";
+    constexpr const char* sessionSortKeyKey = "sessionSortKey";
+    constexpr const char* sessionSortAscendingKey = "sessionSortAscending";
 }
 
 AppSettings::AppSettings (juce::PropertiesFile& f)
@@ -109,6 +111,23 @@ juce::String AppSettings::getSessionFolderFilter() const
 void AppSettings::setSessionFolderFilter (const juce::String& filter)
 {
     file.setValue (sessionFolderFilterKey, filter);
+}
+
+juce::String AppSettings::getSessionSortKey() const
+{
+    return file.getValue (sessionSortKeyKey, "lastPracticed");
+}
+
+bool AppSettings::getSessionSortAscending() const
+{
+    return file.getBoolValue (sessionSortAscendingKey, false);
+}
+
+void AppSettings::setSessionSort (const juce::String& key, bool ascending)
+{
+    // 見出しをクリックしたときだけ変わるので、知らせは出さずに保存する
+    file.setValue (sessionSortKeyKey, key);
+    file.setValue (sessionSortAscendingKey, ascending);
 }
 
 juce::StringArray AppSettings::getExpandedSetlists() const

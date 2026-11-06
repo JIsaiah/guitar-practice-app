@@ -2,9 +2,11 @@
 
 #include <juce_gui_basics/juce_gui_basics.h>
 #include "../Library/SessionFolders.h"
+#include "Icons.h"
 
 // 一覧画面の左の列: フォルダ (すべて／各フォルダ／フォルダなし) と件数。
-// クリックで絞り込み、フォルダの右クリックで「名前の変更」「削除」。下に「＋ 新しいフォルダ」
+// クリックで絞り込み、フォルダの右クリックで「名前の変更」「削除」。
+// 枠の中の上に見出し「フォルダー」、右下に「＋」(新しいフォルダ)
 class SessionFolderList final : public juce::Component,
                                 private juce::ListBoxModel
 {
@@ -27,8 +29,11 @@ private:
     void listBoxItemClicked (int row, const juce::MouseEvent& e) override;
     void selectedRowsChanged (int row) override;
 
+    juce::Rectangle<int> getHeadingArea() const;
+    static constexpr int headingHeight = 32;   // 一覧の列の見出しと同じ高さ (SessionListScreen)
+
     std::vector<SessionFolders::Item> items;
     juce::ListBox list { {}, this };
-    juce::TextButton newButton;
+    IconButton newButton { Icons::plus };   // 「＋」(新しいフォルダ)
     bool updating = false;
 };

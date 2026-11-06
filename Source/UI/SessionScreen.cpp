@@ -17,6 +17,15 @@ namespace
         slider.setScrollWheelEnabled (true);  // ホイールで値を増減 (設計書 4.3)
     }
 
+    // 値を「100%」の形で出す (作者のレイアウト)。scale: 値に掛けて % にする数 (ミキサーは 1.0 = 100%)
+    void showAsPercent (juce::Slider& slider, double scale)
+    {
+        slider.textFromValueFunction = [scale] (double value) { return juce::String (juce::roundToInt (value * scale)) + "%"; };
+        slider.valueFromTextFunction = [scale] (const juce::String& text) { return text.retainCharacters ("0123456789.").getDoubleValue() / scale; };
+        slider.setTextBoxStyle (juce::Slider::TextBoxRight, false, 50, 24);
+        slider.updateText();
+    }
+
     const char* const scoreFilePatterns = "*.gp;*.gpx;*.gp5;*.gp4;*.gp3;*.musicxml;*.xml";
     const char* const audioFilePatterns = "*.mp3;*.wav;*.flac;*.ogg;*.aif;*.aiff";
 }
@@ -27,16 +36,17 @@ SessionScreen::SessionScreen (AudioEngine& e, SessionStore& s, ThemeManager& t, 
     : engine (e), store (s), theme (t), youtube (yt), scoreViewer (sv), settings (appSettings),
       session (std::move (sessionToOpen)), openContext (std::move (context)), settingsResolver (std::move (resolver)),
       backButton (t), saveButton (t), settingsButton (t),
-      tapButton (t), tunerButton (t), playButton (t), metronomeButton (t), loopButton (t)
+      tapButton (t), tunerButton (t), metronomeButton (t), loopButton (t)
 {
     savedSnapshot = juce::JSON::toString (session.toVar());
     savedBpm = session.bpm;
     savedTempoOrigin = session.tempoOrigin;
 
     //==== 上部 ====
-    backButton.setFixedText (FixedTextId::BackToList, "◀ 一覧"_jp);
+    backButton.setFixedText (FixedTextId::BackToList, "<");
+    backButton.setTooltip ("一覧に戻る"_jp);
     saveButton.setFixedText (FixedTextId::Save, "保存"_jp);
-    settingsButton.setFixedText (FixedTextId::Details, "⚙ 詳細"_jp);
+    settingsButton.setFixedText (FixedTextId::Settings, "設定"_jp);
     backButton.onClick = [this] { perform (Command::backToList); };
     saveButton.onClick = [this] { perform (Command::save); };
     settingsButton.onClick = [this] { if (onOpenSettings != nullptr) onOpenSettings(); };
@@ -50,15 +60,44 @@ SessionScreen::SessionScreen (AudioEngine& e, SessionStore& s, ThemeManager& t, 
     titleLabel.onEditorHide = [this] { grabKeyboardFocus(); };
     statusLabel.setJustificationType (juce::Justification::centredRight);
 
+    // 「?」(画面の説明)。機能はまだなので、押すと「準備中」
+    helpButton.setTooltip ("画面の説明 (準備中)"_jp);
+    helpButton.setIconScale (0.6f);
+    helpButton.onClick = [this] { showComingSoon ("画面の説明"_jp); };
+
+    // タブ譜の上の左: リード・バッキング (機能はまだ)
+    leadButton.setButtonText ("リード"_jp);
+    backingButton.setButtonText ("バッキング"_jp);
+    leadButton.setTooltip ("リードのタブ譜に切り替えます (準備中)"_jp);
+    backingButton.setTooltip ("バッキングのタブ譜に切り替えます (準備中)"_jp);
+    leadButton.onClick = [this] { showComingSoon ("リード・バッキングの切り替え"_jp); };
+    backingButton.onClick = [this] { showComingSoon ("リード・バッキングの切り替え"_jp); };
+
+    // プリセット 1・2・3 (機能はまだ)
+    presetLabel.setText ("プリセット"_jp, juce::dontSendNotification);
+    presetLabel.setFont (juce::FontOptions (12.0f));
+    presetLabel.setJustificationType (juce::Justification::centredRight);
+    for (size_t i = 0; i < presetButtons.size(); ++i)
+    {
+        presetButtons[i].setButtonText (juce::String ((int) i + 1));
+        presetButtons[i].setTooltip ("音色のプリセット "_jp + juce::String ((int) i + 1) + " (準備中)"_jp);
+        presetButtons[i].onClick = [this] { showComingSoon ("音色のプリセット"_jp); };
+    }
+
+    // 曲名の右に「—  アーティスト名」(アーティストが空なら出さない)
+    artistLabel.setText (session.artist.isEmpty() ? juce::String() : "—  "_jp + session.artist, juce::dontSendNotification);
+    artistLabel.setFont (juce::FontOptions (20.0f));
+    artistLabel.setInterceptsMouseClicks (false, false);
+
     //==== 左: タブ譜 ====
     scoreNameLabel.setFont (juce::FontOptions (14.0f));
     positionLabel.setFont (juce::FontOptions (15.0f, juce::Font::bold));
     positionLabel.setJustificationType (juce::Justification::centredRight);
-    scoreChooseButton.setButtonText ("タブ譜を選ぶ…"_jp);
-    scoreRemoveButton.setButtonText ("外す"_jp);
+    scoreChooseButton.setButtonText ("タブ譜を選択"_jp);
+    scoreRemoveButton.setButtonText ("タブ譜を外す"_jp);
     scoreChooseButton.onClick = [this] { chooseScoreFile(); };
     scoreRemoveButton.onClick = [this] { removeScore(); };
-    swapButton.setButtonText (juce::String::fromUTF8 ("⇄ ") + "動画と入れ替え"_jp);
+    swapButton.setButtonText ("動画と入れ替え"_jp);
     swapButton.setTooltip ("タブ譜と動画の場所を入れ替えます (タブ譜つきの動画で練習するとき)"_jp);
     swapButton.onClick = [this] { toggleSwap(); };
 
@@ -176,8 +215,8 @@ SessionScreen::SessionScreen (AudioEngine& e, SessionStore& s, ThemeManager& t, 
     });
 
     toneSummaryLabel.setFont (juce::FontOptions (12.0f));
-    toneDetailButton.setButtonText ("音色の設定…"_jp);
-    toneDetailButton.setTooltip ("NAM のモデル・IR・入力の大きさ・メーター・オーディオデバイスの状態"_jp);
+    toneDetailButton.setIconScale (0.65f);   // 音色の見出しの右の歯車 (作者のレイアウト・作者のアイコン)
+    toneDetailButton.setTooltip ("音色の設定: NAM のモデル・IR・入力の大きさ・メーター・オーディオデバイスの状態"_jp);
     toneDetailButton.onClick = [this] { toggleTonePanel(); };
 
     //==== 右: ミキサー ====
@@ -188,6 +227,8 @@ SessionScreen::SessionScreen (AudioEngine& e, SessionStore& s, ThemeManager& t, 
     setUpSlider (sourceGainSlider, 0.0, 1.5, 0.01, session.mixSource);
     setUpSlider (guitarGainSlider, 0.0, 1.5, 0.01, session.mixGuitar);
     setUpSlider (metronomeGainSlider, 0.0, 1.5, 0.01, session.mixMetronome);
+    for (auto* slider : { &sourceGainSlider, &guitarGainSlider, &metronomeGainSlider })
+        showAsPercent (*slider, 100.0);
 
     sourceGainSlider.onValueChange = [this]
     {
@@ -200,10 +241,16 @@ SessionScreen::SessionScreen (AudioEngine& e, SessionStore& s, ThemeManager& t, 
     sourceMuteButton.setClickingTogglesState (false);
     sourceMuteButton.setTooltip ("音源の音だけを消します (タブ譜とメトロノームはそのまま動きます)"_jp);
     sourceMuteButton.onClick = [this] { toggleSourceMute(); };
+
+    // ギターのミュート (作者の指示。メトロノームには付けない)
+    guitarMuteButton.setButtonText ("ミュート"_jp);
+    guitarMuteButton.setClickingTogglesState (false);
+    guitarMuteButton.setTooltip ("ギターの音を消します"_jp);
+    guitarMuteButton.onClick = [this] { toggleGuitarMute(); };
     guitarGainSlider.onValueChange = [this]
     {
         session.mixGuitar = guitarGainSlider.getValue();
-        engine.setGuitarGain ((float) session.mixGuitar);
+        applyGuitarGain();
     };
     metronomeGainSlider.onValueChange = [this]
     {
@@ -236,19 +283,21 @@ SessionScreen::SessionScreen (AudioEngine& e, SessionStore& s, ThemeManager& t, 
         control->onEditFinished = [this] { grabKeyboardFocus(); };
 
     //==== 下部 ====
-    playButton.setFixedText (FixedTextId::Play, "▶ 再生"_jp);
+    playButton.setIconScale (0.5f);
+    playButton.setTooltip ("再生・停止 (Space キー)。続けて2回押すと、待たずにすぐ始めます"_jp);
     metronomeButton.setFixedText (FixedTextId::Metronome, "曲に合わせる"_jp);
     metronomeButton.setTooltip ("オンにすると、再生中に曲の拍に合わせて鳴ります"_jp);
-    metronomeSoloButton.setButtonText ("単体で鳴らす"_jp);
+    metronomeSoloButton.setButtonText ("単体"_jp);
     metronomeSoloButton.setTooltip ("曲を再生せずに、メトロノームだけを鳴らします。「曲に合わせる」とは別のボタンです。再生を始めると止まります"_jp);
     loopStartButton.setButtonText ("A");
     loopEndButton.setButtonText ("B");
     loopStartButton.setTooltip ("今の位置にいちばん近い小節の頭を、くり返しの始まり (A) にします"_jp);
     loopEndButton.setTooltip ("今弾いている小節を、くり返しの最後 (B) にします。その小節の終わりまで弾いてから A に戻ります"_jp);
-    loopButton.setFixedText (FixedTextId::Loop, "くり返す"_jp);
+    loopButton.setFixedText (FixedTextId::Loop, "繰り返す"_jp);
     tunerButton.setFixedText (FixedTextId::Tuner, "チューナー"_jp);
 
-    toStartButton.setButtonText (juce::String::fromUTF8 ("|◀ ") + "最初へ"_jp);
+    toStartButton.setIconScale (0.45f);
+    forwardButton.setIconAfterText (true);   // 「1小節 ▶▶」(作者のレイアウト)
     toStartButton.setTooltip ("曲の頭に戻る (Home キー)"_jp);
     toStartButton.onClick = [this] { perform (Command::goToStart); };
     rewindButton.onClick = [this] { perform (Command::rewind); };
@@ -287,7 +336,7 @@ SessionScreen::SessionScreen (AudioEngine& e, SessionStore& s, ThemeManager& t, 
 
     setUpSlider (speedSlider, 50.0, 200.0, 1.0, session.speedPercent);
     setUpSlider (bpmSlider, 40.0, 300.0, 1.0, session.bpm);
-    speedSlider.setTextBoxStyle (juce::Slider::TextBoxRight, false, 44, 24);
+    showAsPercent (speedSlider, 1.0);   // 「100%」の形で出す (作者のレイアウト)
     bpmSlider.setTextBoxStyle (juce::Slider::TextBoxRight, false, 44, 24);
 
     // 速度をダブルクリックすると、原速 (100%) に戻す
@@ -318,15 +367,16 @@ SessionScreen::SessionScreen (AudioEngine& e, SessionStore& s, ThemeManager& t, 
     };
 
     for (auto* c : std::initializer_list<juce::Component*> {
-             &backButton, &saveButton, &settingsButton, &titleLabel, &statusLabel,
+             &backButton, &saveButton, &settingsButton, &titleLabel, &artistLabel, &statusLabel, &helpButton,
+             &leadButton, &backingButton,
              &scoreNameLabel, &positionLabel, &scoreChooseButton, &scoreRemoveButton, &swapButton, &scoreView, &timeline,
              &splitter, &sidePanelButton,
              &sourceHeading, &toneHeading, &mixerHeading, &offsetHeading,
              &videoView, &sourceInfoLabel, &sourceRemoveButton, &chooseFileButton, &pasteUrlButton,
-             &toneButtons[0], &toneButtons[1], &toneButtons[2], &toneButtons[3], &toneButtons[4],
-             &toneSummaryLabel, &toneDetailButton,
+             &toneButtons[0], &toneButtons[1], &toneButtons[2], &toneButtons[3],
+             &toneSummaryLabel, &toneDetailButton, &presetLabel, &presetButtons[0], &presetButtons[1], &presetButtons[2],
              &sourceGainLabel, &guitarGainLabel, &metronomeGainLabel,
-             &sourceGainSlider, &guitarGainSlider, &metronomeGainSlider, &sourceMuteButton,
+             &sourceGainSlider, &guitarGainSlider, &metronomeGainSlider, &sourceMuteButton, &guitarMuteButton,
              &bpmLabel, &bpmSlider, &tapButton, &scoreOffsetLabel, &scoreOffsetControl, &offsetLabel, &offsetControl,
              &sideScroll, &tunerButton,
              &playHeading, &speedHeading, &metronomeHeading, &loopHeading,
@@ -346,10 +396,10 @@ SessionScreen::SessionScreen (AudioEngine& e, SessionStore& s, ThemeManager& t, 
     // 右のパネルの、音源のカードより下の部品は、スクロールする入れ物 (sideContent) に移す。
     // 音色のボタンは、同じ入れ物の中にそろって入るので、ラジオボタン (1つだけ選ぶ) はそのまま働く
     for (auto* c : std::initializer_list<juce::Component*> {
-             &toneHeading, &toneButtons[0], &toneButtons[1], &toneButtons[2], &toneButtons[3], &toneButtons[4],
-             &toneSummaryLabel, &toneDetailButton,
+             &toneHeading, &toneButtons[0], &toneButtons[1], &toneButtons[2], &toneButtons[3],
+             &toneSummaryLabel, &toneDetailButton, &presetLabel, &presetButtons[0], &presetButtons[1], &presetButtons[2],
              &mixerHeading, &sourceGainLabel, &guitarGainLabel, &metronomeGainLabel,
-             &sourceGainSlider, &guitarGainSlider, &metronomeGainSlider, &sourceMuteButton,
+             &sourceGainSlider, &guitarGainSlider, &metronomeGainSlider, &sourceMuteButton, &guitarMuteButton,
              &offsetHeading, &bpmLabel, &bpmSlider, &tapButton, &scoreOffsetLabel, &scoreOffsetControl, &offsetLabel, &offsetControl })
         sideContent.addAndMakeVisible (c);
 
@@ -372,8 +422,9 @@ SessionScreen::SessionScreen (AudioEngine& e, SessionStore& s, ThemeManager& t, 
     // セットリストから開いたときは、速度とループはこの曲順の中だけの設定 (setlist-mode.md 3.6)
     if (settingsResolver.usesOverrides())
     {
-        speedHeading.setText ("速度 (%)・セトリ専用"_jp, juce::dontSendNotification);
-        loopHeading.setText ("ループ・セトリ専用 (単体のセッションとは別)"_jp, juce::dontSendNotification);
+        speedHeading.setText ("速度・セトリ専用"_jp, juce::dontSendNotification);
+        loopHeading.setText ("ループ・セトリ専用"_jp, juce::dontSendNotification);
+        loopHeading.setTooltip ("このループは、このセットリストの中だけで使います (単体のセッションとは別)"_jp);
         speedSlider.setTooltip ("この速度は、このセットリストの中だけで使います。ダブルクリックで 100% に戻す"_jp);
     }
 
@@ -449,7 +500,7 @@ void SessionScreen::applySessionToEngine()
     if (session.tonePresetId == pluginTonePresetId || session.pluginPath.isNotEmpty())
         loadPluginTone();
     applySourceGain();
-    engine.setGuitarGain ((float) session.mixGuitar);
+    applyGuitarGain();
     engine.setMetronomeGain ((float) session.mixMetronome);
     engine.setSpeed (session.speedPercent / 100.0);
     engine.setBpm (session.bpm);
@@ -1148,12 +1199,15 @@ void SessionScreen::updatePlayButton()
 {
     // カウントダウン中は残りの秒数を出す (押すと中止)
     if (countdown.isCountingDown())
-        playButton.setFixedText (FixedTextId::Stop,
-                                 "■ "_jp + juce::String (countdown.getDisplayNumber (juce::Time::getMillisecondCounterHiRes())) + "…"_jp);
-    else if (isTransportPlaying())
-        playButton.setFixedText (FixedTextId::Stop, "■ 停止"_jp);
+    {
+        playButton.setIcon (nullptr);
+        playButton.setButtonText (juce::String (countdown.getDisplayNumber (juce::Time::getMillisecondCounterHiRes())) + "…"_jp);
+    }
     else
-        playButton.setFixedText (FixedTextId::Play, "▶ 再生"_jp);
+    {
+        playButton.setIcon (isTransportPlaying() ? Icons::pause : Icons::play);
+        playButton.setButtonText ({});
+    }
 }
 
 void SessionScreen::skip (double seconds)
@@ -1190,20 +1244,20 @@ void SessionScreen::updateSkipButtons()
 {
     if (isBarMode())
     {
-        rewindButton.setButtonText (juce::String::fromUTF8 ("◀◀ ") + "1小節"_jp);
-        forwardButton.setButtonText ("1小節 "_jp + juce::String::fromUTF8 ("▶▶"));
+        rewindButton.setButtonText ("1小節"_jp);
+        forwardButton.setButtonText ("1小節"_jp);
         rewindButton.setTooltip ("前の小節の頭へ (←キー)。小節の途中なら、その小節の頭へ"_jp);
         forwardButton.setTooltip ("次の小節の頭へ (→キー)"_jp);
-        playHeading.setText ("再生 (タブ譜モード: 小節単位)"_jp, juce::dontSendNotification);
+        playHeading.setText ("再生"_jp, juce::dontSendNotification);
     }
     else
     {
         const auto seconds = juce::String (settings.getSkipSeconds());
-        rewindButton.setButtonText (juce::String::fromUTF8 ("◀◀ ") + seconds + "秒"_jp);
-        forwardButton.setButtonText (seconds + "秒 "_jp + juce::String::fromUTF8 ("▶▶"));
+        rewindButton.setButtonText (seconds + "秒"_jp);
+        forwardButton.setButtonText (seconds + "秒"_jp);
         rewindButton.setTooltip (seconds + " 秒戻る (←キー)。秒数は設定で変えられます"_jp);
         forwardButton.setTooltip (seconds + " 秒進む (→キー)。秒数は設定で変えられます"_jp);
-        playHeading.setText (isSwapped() ? "再生 (動画モード: 秒単位)"_jp : "再生"_jp, juce::dontSendNotification);
+        playHeading.setText ("再生"_jp, juce::dontSendNotification);
     }
 }
 
@@ -1416,8 +1470,8 @@ void SessionScreen::updateLoop()
     if (isSwapped())
     {
         const auto a = formatTime (session.loopStartMs / 1000.0), b = formatTime (session.loopEndMs / 1000.0);
-        loopStartButton.setButtonText (unset ? juce::String ("A") : "A " + a);
-        loopEndButton.setButtonText (unset ? juce::String ("B") : "B " + b);
+        loopStartButton.setButtonText (unset ? juce::String ("A") : "A:" + a);
+        loopEndButton.setButtonText (unset ? juce::String ("B") : "B:" + b);
         if (! unset && session.loopEndMs > session.loopStartMs)
             loopButton.setTooltip (a + "〜"_jp + b + " をくり返します"_jp);
         return;
@@ -1426,8 +1480,8 @@ void SessionScreen::updateLoop()
     const auto firstBar = barIndexNear (session.loopStartMs / 1000.0) + 1;
     const auto lastBar = juce::jmax (1, barIndexNear (session.loopEndMs / 1000.0));
 
-    loopStartButton.setButtonText (unset ? juce::String ("A") : "A " + juce::String (firstBar) + "小節"_jp);
-    loopEndButton.setButtonText (unset ? juce::String ("B") : "B " + juce::String (lastBar) + "小節"_jp);
+    loopStartButton.setButtonText (unset ? juce::String ("A") : "A:" + juce::String (firstBar) + "小節"_jp);
+    loopEndButton.setButtonText (unset ? juce::String ("B") : "B:" + juce::String (lastBar) + "小節"_jp);
 
     if (! unset && session.loopEndMs > session.loopStartMs)
         loopButton.setTooltip (juce::String (firstBar) + "〜"_jp + juce::String (lastBar) + " 小節目をくり返します"_jp);
@@ -1574,6 +1628,7 @@ void SessionScreen::renameSession (const juce::String& newTitle)
 
     session.title = title;   // 保存するまでは「未保存の変更」
     titleLabel.setText (title, juce::dontSendNotification);
+    resized();   // 曲名の幅が変わるので、アーティスト名の位置を合わせる
 }
 
 void SessionScreen::toggleSourceMute()
@@ -1582,6 +1637,26 @@ void SessionScreen::toggleSourceMute()
     sourceMuteButton.setToggleState (sourceMuted, juce::dontSendNotification);
     applySourceGain();
     setStatus (sourceMuted ? "音源をミュートしました (タブ譜とメトロノームはそのまま動きます)"_jp : juce::String());
+}
+
+void SessionScreen::toggleGuitarMute()
+{
+    guitarMuted = ! guitarMuted;
+    guitarMuteButton.setToggleState (guitarMuted, juce::dontSendNotification);
+    applyGuitarGain();
+    setStatus (guitarMuted ? "ギターをミュートしました"_jp : juce::String());
+}
+
+void SessionScreen::applyGuitarGain()
+{
+    // 音源のミュートと同じく、スライダーの値 (session.mixGuitar) は変えない。解除すると元の音量に戻る
+    engine.setGuitarGain (guitarMuted ? 0.0f : (float) session.mixGuitar);
+    guitarGainSlider.setAlpha (guitarMuted ? 0.5f : 1.0f);
+}
+
+void SessionScreen::showComingSoon (const juce::String& what)
+{
+    setStatus (what + "は準備中です"_jp);
 }
 
 void SessionScreen::applySourceGain()
@@ -2013,13 +2088,13 @@ void SessionScreen::applyAppSettings()
     offsetControl.setStep (steps.offsetMs);
     scoreOffsetControl.setStep (steps.offsetMs);
 
-    sidePanelButton.setButtonText (juce::String::fromUTF8 (sidePanelVisible ? "»" : "«"));
+    sidePanelButton.setButtonText (sidePanelVisible ? ">" : "<");
 }
 
 void SessionScreen::lookAndFeelChanged()
 {
     // テーマが変わったら、補助の文字の色を取り直し、タブ譜の色も合わせる
-    for (auto* label : { &statusLabel, &sourceInfoLabel, &scoreNameLabel })
+    for (auto* label : { &statusLabel, &sourceInfoLabel, &scoreNameLabel, &artistLabel })
         label->setColour (juce::Label::textColourId, findColour (ThemeColourIds::textMuted));
 
     scoreViewer.setColours (theme.getPalette());
@@ -2029,7 +2104,7 @@ void SessionScreen::lookAndFeelChanged()
 void SessionScreen::toggleSidePanel()
 {
     sidePanelVisible = ! sidePanelVisible;
-    sidePanelButton.setButtonText (juce::String::fromUTF8 (sidePanelVisible ? "»" : "«"));
+    sidePanelButton.setButtonText (sidePanelVisible ? ">" : "<");
     resized();
 }
 
@@ -2046,6 +2121,12 @@ void SessionScreen::paint (juce::Graphics& g)
         g.setColour (findColour (ThemeColourIds::border));
         g.drawRoundedRectangle (card.toFloat().reduced (0.5f), 8.0f, 1.0f);
     }
+
+    // 再生バーの面 (タブ譜の下の帯)
+    g.setColour (findColour (ThemeColourIds::panel));
+    g.fillRoundedRectangle (timelinePanel.toFloat(), 8.0f);
+    g.setColour (findColour (ThemeColourIds::border));
+    g.drawRoundedRectangle (timelinePanel.toFloat().reduced (0.5f), 8.0f, 1.0f);
 
     // 下の再生操作の帯と、グループの区切り線
     const auto bottom = bottomBarArea.toFloat();
@@ -2089,18 +2170,34 @@ void SessionScreen::resized()
 {
     auto area = getLocalBounds().reduced (12);
 
-    //==== 上部: 戻る、曲名、状態、チューナー、保存、詳細 ====
-    auto top = area.removeFromTop (40);
-    backButton.setBounds (top.removeFromLeft (100));
-    top.removeFromLeft (12);
+    //==== 上部 (作者のレイアウト): 「<」、曲名 — アーティスト名、(状態)、チューナー、保存、設定 ====
+    auto top = area.removeFromTop (44);
+    backButton.setBounds (top.removeFromLeft (48));
+    top.removeFromLeft (16);
     settingsButton.setBounds (top.removeFromRight (100));
     top.removeFromRight (8);
-    saveButton.setBounds (top.removeFromRight (90));
+    saveButton.setBounds (top.removeFromRight (100));
     top.removeFromRight (8);
-    tunerButton.setBounds (top.removeFromRight (120));
+    tunerButton.setBounds (top.removeFromRight (110));
     top.removeFromRight (12);
-    statusLabel.setBounds (top.removeFromRight (top.getWidth() / 2));
-    titleLabel.setBounds (top);
+    helpButton.setBounds (top.removeFromRight (40).withSizeKeepingCentre (40, 40));
+    top.removeFromRight (12);
+
+    // 曲名は文字の幅だけ取り、その右にアーティスト名。残りに状態 (「保存しました」など) を右寄せで出す
+    {
+        const auto textWidth = [] (const juce::Label& label)
+        {
+            juce::GlyphArrangement glyphs;
+            glyphs.addLineOfText (label.getFont(), label.getText(), 0.0f, 0.0f);
+            return (int) std::ceil (glyphs.getBoundingBox (0, -1, true).getWidth()) + 12;   // ラベルの左右の余白
+        };
+        const auto half = top.getWidth() / 2;
+        titleLabel.setBounds (top.removeFromLeft (juce::jmin (half, textWidth (titleLabel))));
+        top.removeFromLeft (8);
+        artistLabel.setBounds (top.removeFromLeft (artistLabel.getText().isEmpty() ? 0 : juce::jmin (top.getWidth() / 2, textWidth (artistLabel))));
+        top.removeFromLeft (12);
+        statusLabel.setBounds (top);
+    }
 
     area.removeFromTop (12);
 
@@ -2110,10 +2207,11 @@ void SessionScreen::resized()
     area.removeFromBottom (12);
     bottomDividers.clear();
 
+    // 作者のレイアウト: 左から「速度 | ループ | メトロノーム | 再生」
     constexpr int gap = 6, groupGap = 28;
-    constexpr int playWidth = 84 + 84 + 100 + 84 + gap * 3;
+    constexpr int playWidth = 84 * 4 + gap * 3;
     constexpr int dotsWidth = 116;   // 拍子 ("4/4") とドット。拍子の数が多いときは、ドットを小さくして収める
-    constexpr int metronomeWidth = 104 + 104 + dotsWidth + gap * 2;
+    constexpr int metronomeWidth = 120 + 84 + dotsWidth + gap * 2;
     constexpr int loopWidth = 96 + 96 + 96 + gap * 2;
     const auto speedWidth = juce::jlimit (130, 360, bottom.getWidth() - playWidth - metronomeWidth - loopWidth - groupGap * 3);
 
@@ -2138,31 +2236,32 @@ void SessionScreen::resized()
         row.removeFromLeft (gap);
     };
 
-    auto play = group (playHeading, playWidth, true);
-    place (play, toStartButton, 84);
-    place (play, rewindButton, 84);
-    place (play, playButton, 100);
-    place (play, forwardButton, 84);
-
     auto speed = group (speedHeading, speedWidth, true);
     speedSlider.setBounds (speed);
 
-    auto metronome = group (metronomeHeading, metronomeWidth, true);
-
-    // 「ここから開始」は、見出しの行の右に小さく置く (下の帯の幅を広げないため)
-    {
-        auto headingRow = metronomeHeading.getBounds();
-        metronomeStartButton.setBounds (headingRow.removeFromRight (116).withTrimmedBottom (1));
-        metronomeHeading.setBounds (headingRow);
-    }
-    place (metronome, metronomeButton, 104);
-    place (metronome, metronomeSoloButton, 104);
-    place (metronome, metronomeDots, dotsWidth);
-
-    auto loop = group (loopHeading, loopWidth, false);
+    auto loop = group (loopHeading, loopWidth, true);
     place (loop, loopStartButton, 96);
     place (loop, loopEndButton, 96);
     place (loop, loopButton, 96);
+
+    auto metronome = group (metronomeHeading, metronomeWidth, true);
+    place (metronome, metronomeButton, 120);
+    place (metronome, metronomeSoloButton, 84);
+    place (metronome, metronomeDots, dotsWidth);
+
+    // 「ここから開始」は、見出しの行の「単体」の真上に小さく置く (下の帯の高さを増やさないため)
+    {
+        auto headingRow = metronomeHeading.getBounds();
+        const auto solo = metronomeSoloButton.getBounds();
+        metronomeStartButton.setBounds (solo.getX(), headingRow.getY(), solo.getWidth(), headingRow.getHeight() - 1);
+        metronomeHeading.setBounds (headingRow.withRight (solo.getX() - 4));
+    }
+
+    auto play = group (playHeading, playWidth, false);
+    place (play, toStartButton, 84);
+    place (play, rewindButton, 84);
+    place (play, playButton, 84);
+    place (play, forwardButton, 84);
 
     //==== 右のパネルと境目 ====
     sideCards.clear();
@@ -2187,9 +2286,9 @@ void SessionScreen::resized()
     if (sidePanelVisible)
     {
         auto right = area.removeFromRight (panelWidth);
-        auto bar = area.removeFromRight (16);
+        auto bar = area.removeFromRight (24);   // 「>」が読める幅 (ボタンの左右の余白を引いても文字が入る)
         splitter.setBounds (bar);
-        sidePanelButton.setBounds (bar.withSizeKeepingCentre (16, 64));
+        sidePanelButton.setBounds (bar.withSizeKeepingCentre (24, 64));
 
         // height は中身の高さ。カードの内側の余白 (上下 8 ずつ) を足して切り取る
         const auto card = [this, &right] (int height)
@@ -2202,7 +2301,7 @@ void SessionScreen::resized()
 
         // 中身の高さ (動画以外)
         constexpr int headingHeight = 24, rowHeight = 32;
-        constexpr int toneHeight = headingHeight + 36 + 4 + 28;   // 音色のボタンと、NAM のモデル名・設定ボタン
+        constexpr int toneHeight = headingHeight + 36 + 4 + 28 + 30;   // 音色のボタン、NAM のモデル名・プラグインの名前、プリセット
         constexpr int mixerHeight = headingHeight + 3 * rowHeight;
         constexpr int tempoHeight = headingHeight + 3 * rowHeight + 2 * 4;
         const int sourceExtra = headingHeight + 30 + (hasSource() ? 0 : 40);
@@ -2275,28 +2374,39 @@ void SessionScreen::resized()
                 return c.reduced (12, 8);
             };
 
-            // 音色
-            auto tone = contentCard (toneHeight);
-            toneHeading.setBounds (tone.removeFromTop (20));
+            // 音色 (作者のレイアウト: 見出しの右に歯車、ボタン、その下に NAM のモデル名・プラグインの名前。
+            // VST を選んでいるときは、プラグインのカードもこの枠の中に続けて置く)
+            const auto pluginHeight = showPlugin ? pluginCard.getPreferredHeight() + 4 : 0;
+            auto tone = contentCard (toneHeight + pluginHeight);
+            auto toneHeadingRow = tone.removeFromTop (20);
+            toneDetailButton.setBounds (toneHeadingRow.removeFromRight (40).withSizeKeepingCentre (40, 26));   // 歯車が「…」にならない幅
+            toneHeading.setBounds (toneHeadingRow);
             tone.removeFromTop (4);
             auto toneRow = tone.removeFromTop (36);
             const auto toneWidth = (toneRow.getWidth() - 4 * (int) (toneButtons.size() - 1)) / (int) toneButtons.size();
-            for (auto& button : toneButtons)
+            for (auto index : { 0, 1, namToneIndex, pluginToneIndex })   // 作者のレイアウトの順: クリーン・歪み・NAM・VST
             {
-                button.setBounds (toneRow.removeFromLeft (toneWidth));
+                toneButtons[(size_t) index].setBounds (toneRow.removeFromLeft (toneWidth));
                 toneRow.removeFromLeft (4);
             }
 
-            // NAM のモデル名と、音色の設定を開くボタン
             tone.removeFromTop (4);
-            auto summaryRow = tone.removeFromTop (28);
-            toneDetailButton.setBounds (summaryRow.removeFromRight (110).reduced (0, 1));
-            summaryRow.removeFromRight (6);
-            toneSummaryLabel.setBounds (summaryRow);
+            toneSummaryLabel.setBounds (tone.removeFromTop (28));
 
-            // TONE3000 (音色とミキサーの間)
+            // プリセット 1・2・3 (右寄せ)
+            auto presetRow = tone.removeFromTop (30).withTrimmedTop (2);
+            for (int i = (int) presetButtons.size() - 1; i >= 0; --i)
+            {
+                presetButtons[(size_t) i].setBounds (presetRow.removeFromRight (30));
+                presetRow.removeFromRight (4);
+            }
+            presetLabel.setBounds (presetRow.removeFromRight (80));
+
             if (showPlugin)
-                pluginCard.setBounds (contentCard (pluginCard.getPreferredHeight()));
+            {
+                tone.removeFromTop (4);
+                pluginCard.setBounds (tone.removeFromTop (pluginCard.getPreferredHeight()));
+            }
 
             // ミキサー。「音源」の行の右端にミュート (ほかの行も同じ幅を空けて、スライダーの長さを揃える)
             auto mixer = contentCard (mixerHeight);
@@ -2311,6 +2421,8 @@ void SessionScreen::resized()
                 auto muteArea = row.removeFromRight (64);
                 if (slider == &sourceGainSlider)
                     sourceMuteButton.setBounds (muteArea.reduced (0, 3).withTrimmedLeft (6));
+                if (slider == &guitarGainSlider)
+                    guitarMuteButton.setBounds (muteArea.reduced (0, 3).withTrimmedLeft (6));
                 slider->setBounds (row);
             }
 
@@ -2360,21 +2472,27 @@ void SessionScreen::resized()
     }
     else
     {
-        sidePanelButton.setBounds (area.removeFromRight (16).withSizeKeepingCentre (16, 64));
+        sidePanelButton.setBounds (area.removeFromRight (24).withSizeKeepingCentre (24, 64));
         area.removeFromRight (6);
     }
 
     //==== 左: タブ譜の見出し、タブ譜、再生位置バー ====
+    // 右寄せで「小節を同じ幅に・動画と入れ替え・タブ譜を選択・タブ譜を外す」。左はタブ譜の名前
+    // (作者のレイアウトの左の「リード」「バッキング」は、タブ譜の切り替えを作るときに置く)
     auto scoreHeader = area.removeFromTop (34);
-    scoreRemoveButton.setBounds (scoreHeader.removeFromRight (60).reduced (0, 2));
+    leadButton.setBounds (scoreHeader.removeFromLeft (90).reduced (0, 2));
+    scoreHeader.removeFromLeft (6);
+    backingButton.setBounds (scoreHeader.removeFromLeft (90).reduced (0, 2));
+    scoreHeader.removeFromLeft (12);
+    scoreRemoveButton.setBounds (scoreHeader.removeFromRight (110).reduced (0, 2));
     scoreHeader.removeFromRight (6);
-    scoreChooseButton.setBounds (scoreHeader.removeFromRight (130).reduced (0, 2));
+    scoreChooseButton.setBounds (scoreHeader.removeFromRight (110).reduced (0, 2));
     scoreHeader.removeFromRight (6);
-    swapButton.setBounds (scoreHeader.removeFromRight (150).reduced (0, 2));
+    swapButton.setBounds (scoreHeader.removeFromRight (120).reduced (0, 2));
     scoreHeader.removeFromRight (6);
-    equalBarsButton.setBounds (scoreHeader.removeFromRight (124).reduced (0, 2));
+    equalBarsButton.setBounds (scoreHeader.removeFromRight (120).reduced (0, 2));
     scoreHeader.removeFromRight (12);
-    positionLabel.setBounds (scoreHeader.removeFromRight (160));
+    positionLabel.setVisible (false);   // 「小節 ○ 拍 ○」は、作者のレイアウトに無いので出さない (タブ譜のカーソルと再生バーで分かる)
     scoreNameLabel.setBounds (scoreHeader);
     area.removeFromTop (6);
 
@@ -2385,7 +2503,9 @@ void SessionScreen::resized()
         area.removeFromBottom (8);
     }
 
-    timeline.setBounds (area.removeFromBottom (44));
+    // 再生バーは面 (帯) の中に置く
+    timelinePanel = area.removeFromBottom (56);
+    timeline.setBounds (timelinePanel.reduced (10, 6));
     area.removeFromBottom (8);
     scoreView.setBounds (area);
 

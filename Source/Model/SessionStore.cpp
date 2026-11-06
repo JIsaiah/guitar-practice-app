@@ -34,6 +34,8 @@ std::vector<SessionStore::Entry> SessionStore::list() const
         entry.folder = parsed["folder"].toString();
         entry.bpm = (double) parsed["tempo"]["bpm"];
         entry.difficulty = juce::jlimit (0, Session::maxDifficulty, (int) parsed["difficulty"]);
+        if (const auto opened = parsed["last_opened"].toString(); opened.isNotEmpty())
+            entry.lastOpened = juce::Time::fromISO8601 (opened);
         entries.push_back (entry);
     }
 
@@ -93,6 +95,14 @@ std::optional<Session> SessionStore::update (const juce::String& id, const std::
 
     file.setLastModificationTime (modified);   // 並び順を変えない
     return session;
+}
+
+std::optional<Session> SessionStore::openForPractice (const juce::String& id)
+{
+    if (auto opened = update (id, [] (Session& s) { s.lastOpened = juce::Time::getCurrentTime(); }))
+        return opened;
+
+    return load (id);
 }
 
 void SessionStore::assignMissingSessionIds()

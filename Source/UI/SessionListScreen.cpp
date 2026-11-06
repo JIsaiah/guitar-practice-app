@@ -9,14 +9,10 @@ namespace
 
 SessionListScreen::SessionListScreen (SessionLibrary& l, SetlistStore& sl, ThemeManager& t, AppSettings& a)
     : library (l), store (l.getStore()), setlistStore (sl), theme (t), settings (a),
-      appTitle (t, FixedTextId::AppTitle),
       sessionsTab (t), setlistsTab (t),
-      newButton (t), settingsButton (t),
+      settingsButton (t),
       setlistPanel (l, sl, t, a)
 {
-    appTitle.setFont (juce::FontOptions (24.0f, juce::Font::bold));
-    addAndMakeVisible (appTitle);
-
     // タブ (setlist-mode.md 4.1)。最後に開いていたタブを覚えておく
     sessionsTab.setFixedText (FixedTextId::Sessions, "セッション"_jp);
     setlistsTab.setFixedText (FixedTextId::Setlists, "セットリスト"_jp);
@@ -28,6 +24,10 @@ SessionListScreen::SessionListScreen (SessionLibrary& l, SetlistStore& sl, Theme
     }
     sessionsTab.onClick = [this] { if (sessionsTab.getToggleState()) showTab (Tab::sessions); };
     setlistsTab.onClick = [this] { if (setlistsTab.getToggleState()) showTab (Tab::setlists); };
+
+    // 並び替え (最後に選んだものを覚えておく)
+    sortKey = SessionSort::fromString (settings.getSessionSortKey());
+    sortAscending = settings.getSessionSortAscending();
 
     listBox.setRowHeight (48);
     listBox.setTooltip ("星をクリックで難易度。右クリックで詳細の編集・フォルダに移動"_jp);
@@ -46,24 +46,15 @@ SessionListScreen::SessionListScreen (SessionLibrary& l, SetlistStore& sl, Theme
     folderList.onDelete = [this] (const juce::String& name) { deleteFolder (name); };
     addAndMakeVisible (folderList);
 
-    newButton.setFixedText (FixedTextId::NewSession, "+ 新しいセッション"_jp);
-    settingsButton.setFixedText (FixedTextId::Settings, "⚙ 設定"_jp);
+    newButton.setTooltip ("新しいセッション"_jp);   // 「＋」のアイコン (作者のアイコン)
+    settingsButton.setFixedText (FixedTextId::Settings, "設定"_jp);
 
     newButton.onClick = [this] { if (onNewSession != nullptr) onNewSession(); };
     settingsButton.onClick = [this] { if (onOpenSettings != nullptr) onOpenSettings(); };
 
-    for (auto* button : { &newButton, &settingsButton })
+    for (auto* button : std::initializer_list<juce::Button*> { &newButton, &settingsButton })
         addAndMakeVisible (button);
 
-    // デスメタルモードの切り替え (death-metal-mode.md 4.7)。状態はアプリの設定に保存される
-
-    // テーマの切り替え (設計書 v0.7 4.7)。設定画面でも変えられる
-    for (auto mode : { ColourTheme::System, ColourTheme::Light, ColourTheme::Dark })
-        themeBox.addItem ("テーマ: "_jp + ThemeManager::getColourThemeName (mode), (int) mode + 1);
-    themeBox.setSelectedId ((int) theme.getColourTheme() + 1, juce::dontSendNotification);
-    themeBox.onChange = [this] { theme.setColourTheme ((ColourTheme) (themeBox.getSelectedId() - 1)); };
-    themeBox.setTooltip ("テーマ"_jp);
-    addAndMakeVisible (themeBox);
     theme.addChangeListener (this);
 
     // セットリストのタブ
@@ -99,9 +90,8 @@ SessionListScreen::~SessionListScreen()
 
 void SessionListScreen::changeListenerCallback (juce::ChangeBroadcaster*)
 {
-    // 設定画面でテーマを変えたときに、表示を合わせる
-    themeBox.setSelectedId ((int) theme.getColourTheme() + 1, juce::dontSendNotification);
-    themeBox.setEnabled (! theme.isDeathMetal());   // デスメタルモード中は、配色はデスメタルのまま
+    // 設定画面でテーマを変えたときに、見出しや枠の色を描き直す
+    repaint();
 }
 
 void SessionListScreen::showTab (Tab tab)
@@ -175,6 +165,7 @@ void SessionListScreen::applyFolderFilter (bool keepSelection)
                                                                                                    : juce::String();
 
     entries = SessionFolders::filter (allEntries, folderFilter);
+    SessionSort::sort (entries, sortKey, sortAscending);
     listBox.updateContent();
     listBox.deselectAllRows();
 
@@ -455,8 +446,8 @@ SessionListScreen::Columns SessionListScreen::layoutColumns (int width, int heig
         return r;
     };
 
-    c.modified = take (128);
-    c.length = take (56);
+    c.lastPracticed = take (128);
+    c.length = take (72);
     c.tuning = take (130);
     c.difficulty = take (starSize * Session::maxDifficulty);
     c.bpm = take (48);
@@ -515,7 +506,7 @@ void SessionListScreen::paintListBoxItem (int row, juce::Graphics& g, int width,
 
     g.setColour (textColour.withAlpha (0.5f));
     g.setFont (AppLookAndFeel::scaled (juce::FontOptions (13.0f)));
-    g.drawText (entry.modified.formatted ("%Y/%m/%d %H:%M"), columns.modified, juce::Justification::centredRight);
+    g.drawText (SessionSort::lastPracticed (entry).formatted ("%Y/%m/%d"), columns.lastPracticed, juce::Justification::centredRight);
 }
 
 void SessionListScreen::listBoxItemClicked (int row, const juce::MouseEvent& e)
@@ -687,31 +678,99 @@ void SessionListScreen::paint (juce::Graphics& g)
     if (currentTab != Tab::sessions)
         return;
 
-    g.setColour (findColour (ThemeColourIds::textMuted));
-    g.setFont (AppLookAndFeel::scaled (juce::FontOptions (12.5f, juce::Font::bold)));
-    g.drawText ("フォルダ"_jp, folderHeadingArea.withTrimmedLeft (10), juce::Justification::centredLeft);
+    // 一覧の枠 (見出し・一覧・「＋」を囲む面)。フォルダの枠 (SessionFolderList) と同じ見た目
+    const auto panel = listPanel.toFloat();
+    g.setColour (findColour (ThemeColourIds::panel));
+    g.fillRoundedRectangle (panel, 8.0f);
+    g.setColour (findColour (ThemeColourIds::border));
+    g.drawRoundedRectangle (panel.reduced (0.5f), 8.0f, 1.0f);
 
-    if (entries.empty())
-        return;
-
-    // 列の見出し (行と同じ位置に)
+    // 列の見出し (行と同じ位置に)。並び替えられる列は「↓↑」、今の並びの列は向き (↓ 新しい・大きい順、↑ 古い・A から) を色で
     const auto columns = layoutColumns (listBox.getVisibleRowWidth(), headerArea.getHeight());
     const auto origin = headerArea.getPosition();
+    const auto font = AppLookAndFeel::scaled (juce::FontOptions (12.5f, juce::Font::bold));
+    const auto muted = findColour (ThemeColourIds::textMuted);
+    const auto text = findColour (juce::Label::textColourId);
+    g.setFont (font);
 
-    g.setColour (findColour (ThemeColourIds::textMuted));
-    g.setFont (AppLookAndFeel::scaled (juce::FontOptions (12.5f, juce::Font::bold)));
-
-    const auto heading = [&] (juce::Rectangle<int> column, const juce::String& text, juce::Justification j)
+    const auto heading = [&] (juce::Rectangle<int> column, const juce::String& title, std::optional<SessionSort::Key> key,
+                              bool alignRight)
     {
-        g.drawText (text, column + origin, j);
+        column = column + origin;
+
+        // 並び替えのアイコン (作者のアイコン): 選んでいない列は両向き、今の並びの列は向き (昇順・降順) を色付きで
+        const char* icon = nullptr;
+        if (key.has_value())
+            icon = *key != sortKey ? Icons::sort : (sortAscending ? Icons::sortAscending : Icons::sortDescending);
+        constexpr int iconSize = 14;
+
+        // 幅は、描くのと同じフォント (g の今のフォント) で測る
+        const auto measure = [&g] (const juce::String& t)
+        {
+            juce::GlyphArrangement glyphs;
+            glyphs.addLineOfText (g.getCurrentFont(), t, 0.0f, 0.0f);
+            return (int) std::ceil (glyphs.getBoundingBox (0, -1, true).getWidth()) + 2;
+        };
+        const auto titleWidth = measure (title);
+        const auto iconWidth = icon == nullptr ? 0 : iconSize + 3;
+        auto area = alignRight ? column.removeFromRight (titleWidth + iconWidth) : column.removeFromLeft (titleWidth + iconWidth);
+
+        g.setColour (key.has_value() && *key == sortKey ? text : muted);
+        g.drawText (title, area.removeFromLeft (titleWidth), juce::Justification::centredLeft, false);
+
+        if (icon != nullptr)
+            Icons::draw (g, icon, area.withTrimmedLeft (3).toFloat().withSizeKeepingCentre ((float) iconSize, (float) iconSize),
+                         key.has_value() && *key == sortKey ? findColour (ThemeColourIds::accent) : muted);
     };
-    heading (columns.title, "曲名"_jp, juce::Justification::centredLeft);
-    heading (columns.artist, "アーティスト"_jp, juce::Justification::centredLeft);
-    heading (columns.bpm, "BPM", juce::Justification::centredRight);
-    heading (columns.difficulty, "難易度"_jp, juce::Justification::centredLeft);
-    heading (columns.tuning, "チューニング"_jp, juce::Justification::centredLeft);
-    heading (columns.length, "長さ"_jp, juce::Justification::centredRight);
-    heading (columns.modified, "更新"_jp, juce::Justification::centredRight);
+    heading (columns.title, "曲名"_jp, SessionSort::Key::title, false);
+    heading (columns.artist, "アーティスト"_jp, SessionSort::Key::artist, false);
+    heading (columns.bpm, "BPM", std::nullopt, true);
+    heading (columns.difficulty, "難易度"_jp, SessionSort::Key::difficulty, false);
+    heading (columns.tuning, "チューニング"_jp, SessionSort::Key::tuning, false);
+    heading (columns.length, "長さ"_jp, SessionSort::Key::length, true);
+    heading (columns.lastPracticed, "最後の練習日"_jp, SessionSort::Key::lastPracticed, true);
+}
+
+std::optional<SessionSort::Key> SessionListScreen::sortKeyAt (juce::Point<int> position) const
+{
+    if (currentTab != Tab::sessions || ! headerArea.contains (position))
+        return std::nullopt;
+
+    const auto columns = layoutColumns (listBox.getVisibleRowWidth(), headerArea.getHeight());
+    const auto x = position.x - headerArea.getX();
+    const auto inside = [x] (juce::Rectangle<int> column) { return x >= column.getX() && x < column.getRight(); };
+
+    if (inside (columns.title))         return SessionSort::Key::title;
+    if (inside (columns.artist))        return SessionSort::Key::artist;
+    if (inside (columns.difficulty))    return SessionSort::Key::difficulty;
+    if (inside (columns.tuning))        return SessionSort::Key::tuning;
+    if (inside (columns.length))        return SessionSort::Key::length;
+    if (inside (columns.lastPracticed)) return SessionSort::Key::lastPracticed;
+    return std::nullopt;   // BPM は並び替えない (作者のレイアウトに矢印が無い)
+}
+
+void SessionListScreen::sortBy (SessionSort::Key key)
+{
+    // 同じ列をもう一度押すと逆の向き。ほかの列は、その列の決まった向きから
+    sortAscending = key == sortKey ? ! sortAscending : SessionSort::defaultAscending (key);
+    sortKey = key;
+    settings.setSessionSort (SessionSort::toString (sortKey), sortAscending);
+    applyFolderFilter (true);
+}
+
+void SessionListScreen::mouseUp (const juce::MouseEvent& e)
+{
+    if (e.mods.isPopupMenu() || e.mouseWasDraggedSinceMouseDown())
+        return;
+
+    if (const auto key = sortKeyAt (e.getPosition()))
+        sortBy (*key);
+}
+
+void SessionListScreen::mouseMove (const juce::MouseEvent& e)
+{
+    setMouseCursor (sortKeyAt (e.getPosition()).has_value() ? juce::MouseCursor::PointingHandCursor
+                                                            : juce::MouseCursor::NormalCursor);
 }
 
 void SessionListScreen::paintOverChildren (juce::Graphics& g)
@@ -722,24 +781,25 @@ void SessionListScreen::paintOverChildren (juce::Graphics& g)
     g.setColour (listBox.findColour (juce::ListBox::textColourId).withAlpha (0.6f));
     g.setFont (AppLookAndFeel::scaled (juce::FontOptions (16.0f)));
     g.drawFittedText (allEntries.empty()
-                          ? "セッションがありません。\n「+ 新しいセッション」から作成してください。"_jp
+                          ? "セッションがありません。\n右下の「＋」から作成してください。"_jp
                           : "このフォルダにはセッションがありません。\n「すべて」を選び、セッションの右クリック「フォルダに移動」で入れられます。"_jp,
                       listBox.getBounds(), juce::Justification::centred, 2);
 }
 
 void SessionListScreen::resized()
 {
-    auto area = getLocalBounds().reduced (24);
+    // 作者のレイアウト: 右上に「設定」、その下に「セッション」「セットリスト」のタブを半分ずつ、
+    // その下に左「フォルダー」の枠、右に一覧の枠 (どちらも見出しは枠の中の上、「＋」は枠の中の右下)
+    auto area = getLocalBounds().reduced (36, 20);
 
-    auto top = area.removeFromTop (44);
-    settingsButton.setBounds (top.removeFromRight (140).reduced (0, 6));
-    top.removeFromRight (12);   // デスメタルモードの切り替えは設定画面だけにした (作者の指示)
-    themeBox.setBounds (top.removeFromRight (230).reduced (0, 7));
-    appTitle.setBounds (top.removeFromLeft (220));
-    top.removeFromLeft (16);
-    sessionsTab.setBounds (top.removeFromLeft (150).reduced (0, 2));
-    top.removeFromLeft (8);
-    setlistsTab.setBounds (top.removeFromLeft (150).reduced (0, 2));
+    auto top = area.removeFromTop (40);
+    settingsButton.setBounds (top.removeFromRight (120));
+
+    area.removeFromTop (12);
+    auto tabs = area.removeFromTop (56);
+    const auto tabWidth = (tabs.getWidth() - 12) / 2;
+    sessionsTab.setBounds (tabs.removeFromLeft (tabWidth));
+    setlistsTab.setBounds (tabs.removeFromRight (tabWidth));
 
     area.removeFromTop (12);
 
@@ -754,21 +814,15 @@ void SessionListScreen::resized()
         return;
     }
 
-    // 下: 「+ 新しいセッション」は右下 (前の「削除」の位置。作者の指示)
-    auto buttons = area.removeFromBottom (48);
-    newButton.setBounds (buttons.removeFromRight (220));
+    // 左: フォルダーの枠 (幅は全体の 4 分の 1 ほど)
+    folderList.setBounds (area.removeFromLeft (juce::jlimit (200, 320, area.getWidth() * 23 / 100)));
+    area.removeFromLeft (16);
 
-    area.removeFromBottom (12);
-
-    // 見出しの行 (左: 「フォルダ」、右: 列の見出し)。フォルダの枠と一覧の枠の上を揃えるため、両方の上に同じ高さで取る
-    auto headings = area.removeFromTop (headerHeight);
-    folderHeadingArea = headings.removeFromLeft (210);
-    headings.removeFromLeft (14);
-
-    // 左にフォルダの列
-    folderList.setBounds (area.removeFromLeft (210));
-    area.removeFromLeft (14);
-
-    headerArea = headings;
-    listBox.setBounds (area);
+    // 右: 一覧の枠。上に列の見出し、下の帯の右に「＋」
+    listPanel = area;
+    auto inner = area.reduced (8);
+    headerArea = inner.removeFromTop (headerHeight + 8).withTrimmedTop (4);
+    auto bottom = inner.removeFromBottom (52);
+    newButton.setBounds (bottom.removeFromRight (44).withSizeKeepingCentre (44, 44));
+    listBox.setBounds (inner);
 }

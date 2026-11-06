@@ -73,11 +73,11 @@ void MainComponent::showList()
     screen->onOpenSettings = [this] { openSettings(); };
     screen->onOpenSession = [this] (const juce::String& id)
     {
-        openSessionLater ([id] (MainComponent& m) { return m.store.load (id); });
+        openSessionLater ([id] (MainComponent& m) { return m.store.openForPractice (id); });   // 最後に開いた日時も記録する
     };
     screen->onOpenSessionById = [this] (const juce::String& sessionId)
     {
-        openSessionLater ([sessionId] (MainComponent& m) { return m.library.load (sessionId); });
+        openSessionLater ([sessionId] (MainComponent& m) { return m.library.openForPractice (sessionId); });
     };
     screen->onPlaySetlist = [this] (const juce::String& setlistId, int entryIndex)
     {
@@ -124,7 +124,7 @@ void MainComponent::openSetlistEntryLater (const juce::String& setlistId, int en
         if (setlist.has_value() && juce::isPositiveAndBelow (entryIndex, (int) setlist->entries.size()))
         {
             const auto& entry = setlist->entries[(size_t) entryIndex];
-            if (auto session = m.library.load (entry.sessionId))
+            if (auto session = m.library.openForPractice (entry.sessionId))
             {
                 // 通し再生なので、ループ (くり返し) は外して開く (作者の指示)
                 PlaybackSettingsResolver resolver (entry.overrides);
@@ -258,7 +258,8 @@ void MainComponent::showSetup()
             if (const auto filter = m.settings.getSessionFolderFilter(); filter.startsWith ("folder:"))
                 session.folder = filter.fromFirstOccurrenceOf ("folder:", false, false);
 
-            // 作った時点で保存し、一覧に出るようにする
+            // 作った時点で保存し、一覧に出るようにする (作ってそのまま練習画面を開くので、最後に開いた日時も今)
+            session.lastOpened = juce::Time::getCurrentTime();
             if (! m.store.save (session))
                 juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon,
                                                         "保存できませんでした"_jp,
