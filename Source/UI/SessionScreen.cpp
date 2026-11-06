@@ -240,7 +240,7 @@ SessionScreen::SessionScreen (AudioEngine& e, SessionStore& s, ThemeManager& t, 
     metronomeButton.setFixedText (FixedTextId::Metronome, "曲に合わせる"_jp);
     metronomeButton.setTooltip ("オンにすると、再生中に曲の拍に合わせて鳴ります"_jp);
     metronomeSoloButton.setButtonText ("単体で鳴らす"_jp);
-    metronomeSoloButton.setTooltip ("曲を再生せずに、メトロノームだけを鳴らします。再生を始めると、曲に合わせる方に切り替わります"_jp);
+    metronomeSoloButton.setTooltip ("曲を再生せずに、メトロノームだけを鳴らします。「曲に合わせる」とは別のボタンです。再生を始めると止まります"_jp);
     loopStartButton.setButtonText ("A");
     loopEndButton.setButtonText ("B");
     loopStartButton.setTooltip ("今の位置にいちばん近い小節の頭を、くり返しの始まり (A) にします"_jp);
@@ -1495,7 +1495,7 @@ void SessionScreen::updateMetronomeStart()
         ? "今の位置から、メトロノームを始めます (それより前は鳴りません)。右クリックで解除"_jp
         : "動画モード (タブ譜がないとき・動画と入れ替えたとき) で使えます。タブ譜モードでは、タブ譜の小節に合わせて鳴ります"_jp);
 
-    timeline.setMarker (isMetronomeStartActive() ? session.metronomeStartMs / 1000.0 : -1.0);
+    // 再生バーには開始位置の印を出さない (作者の指示)。位置はボタンの「開始 01:23.4」で分かる
 }
 
 void SessionScreen::setScoreOffset (int ms)
@@ -1619,9 +1619,6 @@ void SessionScreen::toggleMetronome()
     metronomeButton.setToggleState (metronomeOn, juce::dontSendNotification);
     logMetronomeState (metronomeOn ? "曲に合わせるをオン"_jp : "曲に合わせるをオフ"_jp);
 
-    if (! metronomeOn && engine.isMetronomeSolo())
-        toggleMetronomeSolo();   // オフにしたら、単体で鳴らすのも止める
-
     // 基本は、再生中に曲の拍に合わせて鳴る。止まっているときは「単体」で鳴らせる
     if (metronomeOn && ! isTransportPlaying())
         setStatus ("メトロノーム: 再生すると曲に合わせて鳴ります。「単体」でメトロノームだけ鳴らせます"_jp);
@@ -1629,15 +1626,13 @@ void SessionScreen::toggleMetronome()
 
 void SessionScreen::toggleMetronomeSolo()
 {
+    // 「曲に合わせる」とは独立 (作者の指示)。単体で鳴らしても「曲に合わせる」はオンにしない
     const auto solo = ! engine.isMetronomeSolo();
-
-    if (solo && ! metronomeOn)
-        toggleMetronome();   // 単体で鳴らすときは、メトロノーム自体もオンにする
 
     engine.setMetronomeSolo (solo);
     metronomeSoloButton.setToggleState (solo, juce::dontSendNotification);
     logMetronomeState (solo ? "単体をオン"_jp : "単体をオフ"_jp);
-    setStatus (solo ? "メトロノームだけを鳴らしています。再生すると曲に合わせます"_jp : juce::String());
+    setStatus (solo ? "メトロノームだけを鳴らしています。再生を始めると止まります"_jp : juce::String());
 }
 
 void SessionScreen::toggleTuner()
@@ -1935,7 +1930,7 @@ void SessionScreen::timerCallback()
     updatePlayButton();
     updateCountdownDisplay();
 
-    // 再生を始めたら、メトロノームは「単体」から曲に合わせる方へ切り替える (基本は音源に同期)
+    // 再生を始めたら「単体」は止める (曲に合わせて鳴らすかは「曲に合わせる」で決める)
     if (playing && ! wasPlaying && engine.isMetronomeSolo())
         toggleMetronomeSolo();
 

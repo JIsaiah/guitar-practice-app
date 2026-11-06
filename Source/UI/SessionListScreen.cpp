@@ -11,8 +11,7 @@ SessionListScreen::SessionListScreen (SessionLibrary& l, SetlistStore& sl, Theme
     : library (l), store (l.getStore()), setlistStore (sl), theme (t), settings (a),
       appTitle (t, FixedTextId::AppTitle),
       sessionsTab (t), setlistsTab (t),
-      newButton (t), openButton (t), deleteButton (t), settingsButton (t),
-      deathMetalToggle (t, FixedTextId::DeathMetalMode),
+      newButton (t), settingsButton (t),
       setlistPanel (l, sl, t, a)
 {
     appTitle.setFont (juce::FontOptions (24.0f, juce::Font::bold));
@@ -48,25 +47,15 @@ SessionListScreen::SessionListScreen (SessionLibrary& l, SetlistStore& sl, Theme
     addAndMakeVisible (folderList);
 
     newButton.setFixedText (FixedTextId::NewSession, "+ 新しいセッション"_jp);
-    openButton.setFixedText (FixedTextId::Open, "開く"_jp);
-    deleteButton.setFixedText (FixedTextId::Delete, "削除"_jp);
     settingsButton.setFixedText (FixedTextId::Settings, "⚙ 設定"_jp);
 
     newButton.onClick = [this] { if (onNewSession != nullptr) onNewSession(); };
-    openButton.onClick = [this] { openSelected(); };
-    deleteButton.onClick = [this] { deleteSelected(); };
     settingsButton.onClick = [this] { if (onOpenSettings != nullptr) onOpenSettings(); };
 
-    for (auto* button : { &newButton, &openButton, &deleteButton, &settingsButton })
+    for (auto* button : { &newButton, &settingsButton })
         addAndMakeVisible (button);
 
     // デスメタルモードの切り替え (death-metal-mode.md 4.7)。状態はアプリの設定に保存される
-    deathMetalToggle.setToggleState (theme.isDeathMetal(), juce::dontSendNotification);
-    deathMetalToggle.onClick = [this]
-    {
-        theme.setMode (deathMetalToggle.getToggleState() ? ThemeMode::DeathMetal : ThemeMode::Normal);
-    };
-    addAndMakeVisible (deathMetalToggle);
 
     // テーマの切り替え (設計書 v0.7 4.7)。設定画面でも変えられる
     for (auto mode : { ColourTheme::System, ColourTheme::Light, ColourTheme::Dark })
@@ -112,7 +101,6 @@ void SessionListScreen::changeListenerCallback (juce::ChangeBroadcaster*)
 {
     // 設定画面でテーマを変えたときに、表示を合わせる
     themeBox.setSelectedId ((int) theme.getColourTheme() + 1, juce::dontSendNotification);
-    deathMetalToggle.setToggleState (theme.isDeathMetal(), juce::dontSendNotification);
     themeBox.setEnabled (! theme.isDeathMetal());   // デスメタルモード中は、配色はデスメタルのまま
 }
 
@@ -125,7 +113,7 @@ void SessionListScreen::showTab (Tab tab)
     sessionsTab.setToggleState (sessions, juce::dontSendNotification);
     setlistsTab.setToggleState (! sessions, juce::dontSendNotification);
 
-    for (auto* c : std::initializer_list<juce::Component*> { &listBox, &folderList, &newButton, &openButton, &deleteButton })
+    for (auto* c : std::initializer_list<juce::Component*> { &listBox, &folderList, &newButton })
         c->setVisible (sessions);
 
     setlistPanel.setVisible (! sessions);
@@ -370,9 +358,7 @@ void SessionListScreen::showPicker (SetlistCard* card)
 
 void SessionListScreen::updateButtons()
 {
-    const bool hasSelection = listBox.getSelectedRow() >= 0;
-    openButton.setEnabled (hasSelection);
-    deleteButton.setEnabled (hasSelection);
+    // 開く・削除のボタンは無くした (行のダブルクリックと右クリックのメニューで行う)。今は変えるものが無い
 }
 
 void SessionListScreen::openSelected()
@@ -698,7 +684,14 @@ void SessionListScreen::paint (juce::Graphics& g)
 {
     g.fillAll (getLookAndFeel().findColour (juce::ResizableWindow::backgroundColourId));
 
-    if (currentTab != Tab::sessions || entries.empty())
+    if (currentTab != Tab::sessions)
+        return;
+
+    g.setColour (findColour (ThemeColourIds::textMuted));
+    g.setFont (AppLookAndFeel::scaled (juce::FontOptions (12.5f, juce::Font::bold)));
+    g.drawText ("フォルダ"_jp, folderHeadingArea.withTrimmedLeft (10), juce::Justification::centredLeft);
+
+    if (entries.empty())
         return;
 
     // 列の見出し (行と同じ位置に)
@@ -740,9 +733,7 @@ void SessionListScreen::resized()
 
     auto top = area.removeFromTop (44);
     settingsButton.setBounds (top.removeFromRight (140).reduced (0, 6));
-    top.removeFromRight (12);
-    deathMetalToggle.setBounds (top.removeFromRight (190).reduced (0, 6));
-    top.removeFromRight (8);
+    top.removeFromRight (12);   // デスメタルモードの切り替えは設定画面だけにした (作者の指示)
     themeBox.setBounds (top.removeFromRight (230).reduced (0, 7));
     appTitle.setBounds (top.removeFromLeft (220));
     top.removeFromLeft (16);
@@ -763,18 +754,21 @@ void SessionListScreen::resized()
         return;
     }
 
+    // 下: 「+ 新しいセッション」は右下 (前の「削除」の位置。作者の指示)
     auto buttons = area.removeFromBottom (48);
-    newButton.setBounds (buttons.removeFromLeft (220));
-    buttons.removeFromLeft (12);
-    openButton.setBounds (buttons.removeFromLeft (140));
-    deleteButton.setBounds (buttons.removeFromRight (100));
+    newButton.setBounds (buttons.removeFromRight (220));
 
     area.removeFromBottom (12);
+
+    // 見出しの行 (左: 「フォルダ」、右: 列の見出し)。フォルダの枠と一覧の枠の上を揃えるため、両方の上に同じ高さで取る
+    auto headings = area.removeFromTop (headerHeight);
+    folderHeadingArea = headings.removeFromLeft (210);
+    headings.removeFromLeft (14);
 
     // 左にフォルダの列
     folderList.setBounds (area.removeFromLeft (210));
     area.removeFromLeft (14);
 
-    headerArea = area.removeFromTop (headerHeight);
+    headerArea = headings;
     listBox.setBounds (area);
 }

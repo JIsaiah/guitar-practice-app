@@ -88,15 +88,15 @@ private:
     FixedTextButton sessionsTab, setlistsTab;
     juce::ListBox listBox { {}, this };
     SessionFolderList folderList;
-    FixedTextButton newButton, openButton, deleteButton, settingsButton;
-    FixedTextToggle deathMetalToggle;
+    FixedTextButton newButton, settingsButton;   // 開く・削除は、行のダブルクリックと右クリックのメニューで (作者の指示)
     juce::ComboBox themeBox;   // テーマ (Windows に合わせる／ライト／ダーク)
 
     SetlistPanel setlistPanel;
     SessionPickerPanel picker;
     juce::String pickerTargetId;   // 追加先のセットリスト (カードは読み直しで作り直されるので ID で持つ)
 
-    juce::Rectangle<int> headerArea;   // 一覧の列の見出し (曲名・アーティスト…)
+    juce::Rectangle<int> headerArea;          // 一覧の列の見出し (曲名・アーティスト…)
+    juce::Rectangle<int> folderHeadingArea;   // フォルダの列の見出し (一覧の見出しと同じ高さ)
     std::unique_ptr<juce::AlertWindow> detailsWindow;   // 「詳細を編集…」のダイアログ
     std::unique_ptr<juce::AlertWindow> folderNameWindow;   // フォルダの名前を入れるダイアログ
 };

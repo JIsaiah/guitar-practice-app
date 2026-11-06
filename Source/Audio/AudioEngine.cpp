@@ -660,7 +660,8 @@ void AudioEngine::audioDeviceIOCallbackWithContext (const float* const* inputs, 
         if (blockClockRunning)
             blockBeatClock = musicTime;
 
-        if (metronomeOn && (sourcePlaying || externalRunning || soloRunning))
+        // 「曲に合わせる」(metronomeOn) は再生中だけ。「単体」は「曲に合わせる」と独立して鳴る (作者の指示)
+        if ((metronomeOn && (sourcePlaying || externalRunning)) || soloRunning)
         {
             const auto beat = (juce::int64) std::floor (musicTime * bpm / 60.0);
 
