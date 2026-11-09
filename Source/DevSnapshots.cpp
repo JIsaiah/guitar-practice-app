@@ -11,6 +11,7 @@
 #include "UI/SessionScreen.h"
 #include "UI/SessionSetupScreen.h"
 #include "UI/SettingsPanel.h"
+#include "UI/RadialMenu.h"
 #include "UI/DebugLogPanel.h"
 #include "AppLog.h"
 #include "UI/TunerPanel.h"
@@ -186,6 +187,34 @@ juce::String DevSnapshots::renderAll (const juce::File& folder)
 
                 SessionScreen practice (engine, store, theme, appSettings, youtube, scoreViewer, session);
                 snap (practice, 1280, 800, "practice" + suffix);
+
+                // ラジアルメニュー: 何も選んでいない / 「再生・停止」を選んでいる / 画面の左上の端で開いた
+                {
+                    const auto base = practice.createComponentSnapshot (practice.getLocalBounds(), true, 1.0f);
+                    const auto drawMenu = [&] (juce::Point<int> cursor, juce::Point<float> mouse, const juce::String& name)
+                    {
+                        std::vector<RadialMenu::Item> items {
+                            { "再生・停止"_jp, {} }, { "ループ解除"_jp, {} }, { "右の音色プリセット"_jp, {} },
+                            { "ギターミュート"_jp, {} }, { "メトロノームオン・オフ"_jp, {} }, { "音源ミュート"_jp, {} },
+                            { "左の音色プリセット"_jp, {} }, { "トラック切り替え"_jp, {}, false } };
+                        RadialMenu::Window menu (std::move (items));
+                        menu.setSize (1280, 800);
+                        menu.placeAround (cursor);
+                        menu.updateHover (mouse);
+                        menu.finishAnimationForTest();
+
+                        auto image = base.createCopy();
+                        {
+                            juce::Graphics g (image);
+                            g.drawImageAt (menu.createComponentSnapshot (menu.getLocalBounds(), true, 1.0f), 0, 0);
+                        }
+                        if (savePng (image, folder.getChildFile (name + suffix)))
+                            log << "wrote " << name << suffix << "\n";
+                    };
+                    drawMenu ({ 620, 400 }, { 620.0f, 400.0f }, "radial_idle");
+                    drawMenu ({ 620, 400 }, { 625.0f, 230.0f }, "radial_hover");
+                    drawMenu ({ 60, 50 }, { 60.0f, 50.0f }, "radial_edge");
+                }
 
                 // 曲名だけで作ったセッション (音源もタブ譜も無い): タブ譜の枠の真ん中で選んでもらう
                 {

@@ -162,6 +162,9 @@
     }
   });
 
+  // ラジアルメニュー (アプリ側) の操作で、右クリックのメニューが出ないようにする
+  document.addEventListener("contextmenu", function (e) { if (e.buttons & 1) e.preventDefault(); }, true);
+
   document.addEventListener("DOMContentLoaded", function () { send("pageReady"); });
 </script>
 <!-- YouTube の公式プレイヤー API。これだけはネットから読む (YouTube を使うときはネット接続が必要) -->

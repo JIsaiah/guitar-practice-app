@@ -118,6 +118,11 @@ void ScoreViewer::load (const juce::File& file, int trackIndex)
         send (makeCommand ("clear"));
 }
 
+void ScoreViewer::setFrozen (bool frozen)
+{
+    send (makeCommand ("freeze", { { "on", frozen } }));
+}
+
 void ScoreViewer::setPosition (double seconds, double bpm, double offsetSeconds, double rate, bool playing)
 {
     if (! rendered)

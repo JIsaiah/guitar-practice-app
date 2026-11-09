@@ -505,6 +505,10 @@ SessionScreen::SessionScreen (AudioEngine& e, SessionStore& s, ThemeManager& t, 
     setUpYouTube();
     loadScore();
     startTimerHz (30);
+
+    // ラジアルメニュー: マウスの左右を同時に 0.5 秒押し続けると、カーソルのところに出る
+    radialMenu = std::make_unique<RadialMenu> (*this, [this] { return makeRadialItems(); });
+    radialMenu->onOpenChanged = [this] (bool open) { scoreViewer.setFrozen (open); };   // 出している間、タブ譜を止める
 }
 
 SessionScreen::~SessionScreen()
@@ -1995,6 +1999,52 @@ void SessionScreen::pressPreset (int slot)
 
     currentPartPreset() = slot;
     updatePresetButtons();
+}
+
+void SessionScreen::stepPreset (int direction)
+{
+    // 中身のあるプリセットだけを、順に回す (1 → 2 → 3 → 1 …)
+    std::vector<int> filled;
+    for (int slot = 1; slot <= Session::numToneSlots; ++slot)
+        if (! session.toneSlots[(size_t) slot - 1].isEmpty())
+            filled.push_back (slot);
+
+    if (filled.empty())
+    {
+        setStatus ("音色のプリセットがありません。音色の欄の 1・2・3 を押すと、今の音色を保存できます"_jp);
+        return;
+    }
+
+    const auto n = (int) filled.size();
+    const auto it = std::find (filled.begin(), filled.end(), currentPartPreset());
+    const auto index = it == filled.end() ? (direction > 0 ? 0 : n - 1)
+                                          : ((int) std::distance (filled.begin(), it) + direction + n) % n;
+    pressPreset (filled[(size_t) index]);
+}
+
+//==============================================================================
+// ラジアルメニューに並べる操作 (上から時計回り。作者の画像のとおり)
+std::vector<RadialMenu::Item> SessionScreen::makeRadialItems()
+{
+    const bool hasLoop = session.loopEndMs > session.loopStartMs;
+    const bool hasTwoParts = session.leadTrack >= 0 && session.backingTrack >= 0;
+    bool hasPresets = false;
+    for (const auto& slot : session.toneSlots)
+        hasPresets = hasPresets || ! slot.isEmpty();
+
+    return {
+        { "再生・停止"_jp,               [this] { perform (Command::togglePlay); } },
+        { session.loopEnabled ? "ループ解除"_jp : "ループ"_jp,
+                                         [this] { perform (Command::toggleLoop); }, hasLoop },
+        { "右の音色プリセット"_jp,       [this] { stepPreset (1); }, hasPresets },
+        { guitarMuted ? "ギターミュート解除"_jp : "ギターミュート"_jp,
+                                         [this] { toggleGuitarMute(); } },
+        { "メトロノームオン・オフ"_jp,   [this] { perform (Command::toggleMetronome); } },
+        { sourceMuted ? "音源ミュート解除"_jp : "音源ミュート"_jp,
+                                         [this] { toggleSourceMute(); } },
+        { "左の音色プリセット"_jp,       [this] { stepPreset (-1); }, hasPresets },
+        { "トラック切り替え"_jp,         [this] { switchPart (! session.backingActive, true); }, hasTwoParts },
+    };
 }
 
 void SessionScreen::savePreset (int slot)

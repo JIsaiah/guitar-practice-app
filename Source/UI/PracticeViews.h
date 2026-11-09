@@ -228,6 +228,9 @@ public:
 
     void mouseDrag (const juce::MouseEvent& e) override
     {
+        if (! isEnabled())
+            return;
+
         if (zoomed)
         {
             // ふだん: 針はカーソルの真下 (拡大した範囲の中で、カーソルの位置の時刻)。1px はおよそ 8ms。
@@ -273,8 +276,22 @@ public:
         repaint();
     }
 
+    // ラジアルメニューを出したとき、押し始めた部品は一時的に使えなくなる。そのときは、ドラッグをやめる (離しても移動しない)
+    void enablementChanged() override
+    {
+        if (! isEnabled())
+        {
+            dragging = zoomed = waitingForHold = false;
+            stopTimer();
+            repaint();
+        }
+    }
+
     void mouseUp (const juce::MouseEvent& e) override
     {
+        if (! isEnabled())
+            return;
+
         if (waitingForHold)   // 押し続けずに離した
         {
             waitingForHold = false;

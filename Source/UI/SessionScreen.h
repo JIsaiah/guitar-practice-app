@@ -19,6 +19,7 @@
 #include "TunerPanel.h"
 #include "ToneDetailPanel.h"
 #include "PluginToneCard.h"
+#include "RadialMenu.h"
 
 // 練習画面 (設計書 4.2)
 //   左: タブ譜 (alphaTab) と再生位置バー     右: 音源 (動画)・音色・ミキサー・ずらし (隠せる・幅を変えられる)
@@ -182,6 +183,11 @@ private:
     void showPresetMenu (int slot);
     void updatePresetButtons();
     int& currentPartPreset() { return session.backingActive ? session.backingPreset : session.leadPreset; }
+
+    // ラジアルメニュー (マウスの左右を同時に押し続ける)。並べる操作は開くたびに作る (ミュート中かなどで文字が変わる)
+    std::unique_ptr<RadialMenu> radialMenu;
+    std::vector<RadialMenu::Item> makeRadialItems();
+    void stepPreset (int direction);   // 中身のある音色のプリセットを、右 (+1)・左 (-1) に1つ進める
     juce::String describeToneSlot (const ToneSlot& slot) const;
 
     AudioEngine& engine;

@@ -94,6 +94,8 @@ target_sources(GuitarPractice PRIVATE
     Source/UI/PluginToneCard.cpp
     Source/Platform/WindowOwner.cpp
     Source/Platform/CrashLog.cpp
+    Source/Platform/MouseState.cpp
+    Source/UI/RadialMenu.cpp
     Source/UI/DebugLogPanel.cpp
     Source/UI/SessionFolderList.cpp
     Source/DevAudioCheck.cpp
