@@ -2,6 +2,7 @@
 
 #include <juce_gui_extra/juce_gui_extra.h>
 #include "../Theme/Palette.h"
+#include "../Model/ScoreParts.h"
 #include "../Model/MusicInfo.h"
 
 // タブ譜の表示 (設計書 #5、PoC-3)
@@ -28,6 +29,12 @@ public:
     void setPosition (double seconds, double bpm, double offsetSeconds, double rate, bool playing);
     void setColours (const Palette& palette);
     void setEqualBarWidths (bool equal);   // 小節を同じ幅で並べる
+
+    // 表示するトラックを変える (リード・バッキングの切り替え)。ファイルは読み直さない
+    void showTrack (int trackIndex);
+
+    // 読み込んだタブ譜のトラック (名前と、ギターか)
+    const std::vector<ScoreParts::Track>& getTracks() const noexcept { return tracks; }
 
     // 再生前のカウントダウンを、タブ譜の上に大きく出す。number が 0 なら消す (setlist-mode.md 7.2)
     void showCountdown (int number, const juce::String& caption = {});
@@ -68,6 +75,7 @@ private:
     std::vector<double> barStartBeats;
     std::vector<MusicInfo::TimeSignature> barSignatures;
     juce::String scoreTitle, scoreArtist, scoreTuning;
+    std::vector<ScoreParts::Track> tracks;
     double lastSentSeconds = -1.0, lastSentBpm = 0.0, lastSentOffset = 0.0, lastSentRate = 1.0, lastSentAtMs = 0.0;
     bool lastSentPlaying = false;
 

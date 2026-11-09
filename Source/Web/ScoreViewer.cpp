@@ -173,6 +173,11 @@ void ScoreViewer::setEqualBarWidths (bool equal)
     send (makeCommand ("layout", { { "equalBars", equal } }));
 }
 
+void ScoreViewer::showTrack (int trackIndex)
+{
+    send (makeCommand ("track", { { "track", trackIndex } }));
+}
+
 void ScoreViewer::showCountdown (int number, const juce::String& caption)
 {
     send (makeCommand ("countdown", { { "number", number }, { "caption", caption } }));
@@ -210,6 +215,11 @@ void ScoreViewer::handleEvent (const juce::var& event)
         if (const auto* notes = event["tuning"].getArray())
             for (const auto& note : *notes)
                 strings.push_back ((int) note);
+
+        tracks.clear();
+        if (const auto* list = event["tracks"].getArray())
+            for (const auto& t : *list)
+                tracks.push_back ({ t["name"].toString().trim(), (bool) t["guitar"] });
 
         scoreTitle = event["title"].toString().trim();
         scoreArtist = event["artist"].toString().trim();

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <juce_core/juce_core.h>
 
 enum class SourceType
@@ -16,6 +17,16 @@ enum class TempoOrigin
     online,
     tap,
     manual
+};
+
+// 音色のプリセット (1・2・3) に保存した音色。リード・バッキングに違う音色を割り当てるのに使う (作者の指示)
+struct ToneSlot
+{
+    juce::String tonePresetId;   // 空なら、まだ保存していない
+    juce::String namModelPath, irPath, pluginPath, pluginState;
+    double inputGainDb = 0.0;
+
+    bool isEmpty() const noexcept { return tonePresetId.isEmpty(); }
 };
 
 // 1曲分の練習状態。保存・復元の単位 (設計書 6章)
@@ -41,7 +52,15 @@ struct Session
     double lengthSeconds = 0.0;  // 音源の長さ。練習画面で分かったときに記録する (0 = 不明)。セットリストの合計時間に使う
 
     juce::String scorePath;
-    int scoreTrackIndex = 0;
+    int scoreTrackIndex = 0;   // 今表示しているトラック (リード・バッキングのどちらか)
+
+    // リード・バッキング (タブ譜のトラックの番号。-1 = 決めていない・なし)
+    int leadTrack = -1, backingTrack = -1;
+    bool backingActive = false;          // バッキングを表示している
+    int leadPreset = 0, backingPreset = 0;   // それぞれが使う音色のプリセット (1〜3。0 = 割り当てなし)
+
+    static constexpr int numToneSlots = 3;
+    std::array<ToneSlot, numToneSlots> toneSlots;   // 音色のプリセット 1・2・3
 
     double bpm = 120.0;
     TempoOrigin tempoOrigin = TempoOrigin::manual;

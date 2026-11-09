@@ -93,6 +93,7 @@ private:
     void chooseScoreFile();
     void removeScore();
     void updateScoreUi();
+    void updateEmptyPrompt();   // 音源もタブ譜も無いとき、タブ譜の枠の真ん中に選ぶボタンを出す (作者の指示)
 
     //==== 保存・画面 ====
     bool isDirty() const;
@@ -155,7 +156,30 @@ private:
     void applySourceGain();   // ミキサーの「音源」の値とミュートを、エンジン (と YouTube) に送る
     void toggleGuitarMute();
     void applyGuitarGain();   // ミキサーの「ギター」の値とミュートを、エンジンに送る
-    void showComingSoon (const juce::String& what);   // まだ作っていない機能のボタン (リード・バッキング・プリセット・説明)
+    void showComingSoon (const juce::String& what);   // まだ作っていない機能のボタン (説明)
+
+    //==== リード・バッキング (1つのセッションで2つのタブ譜。作者の指示) ====
+    void setUpParts();                         // タブ譜を読み込んだあとに、リード・バッキングのトラックを決める
+    // トラックを選ぶ画面。required: 新しくタブ譜を入れたとき (キャンセルできない。どちらかを必ず選ぶ。作者の指示)。
+    // false: リード・バッキングのボタンの右クリックの「選び直す」
+    void chooseParts (bool required);
+    void switchPart (bool backing, bool fromUser);
+    void resetParts();                         // 別のタブ譜にしたとき
+    int activePartTrack() const;               // 今のパートのトラック (-1 = なし)
+    void updatePartButtons();
+    std::unique_ptr<juce::AlertWindow> partsWindow;
+    bool partsChoiceWasClean = false;   // 選ぶ画面を出したとき、ほかに未保存の変更が無かった (選んだらそのまま保存する)
+
+    //==== 音色のプリセット 1・2・3 ====
+    // 押す: 空なら今の音色を保存、保存してあればその音色にする。どちらも今のパート (リード・バッキング) に割り当てる
+    void pressPreset (int slot);               // slot: 1〜3
+    void savePreset (int slot);
+    void applyPreset (int slot);
+    void clearPreset (int slot);
+    void showPresetMenu (int slot);
+    void updatePresetButtons();
+    int& currentPartPreset() { return session.backingActive ? session.backingPreset : session.leadPreset; }
+    juce::String describeToneSlot (const ToneSlot& slot) const;
 
     AudioEngine& engine;
     SessionStore& store;
@@ -207,6 +231,7 @@ private:
     juce::TextButton swapButton;        // タブ譜と動画の入れ替え
     juce::TextButton equalBarsButton;   // 小節を同じ幅で並べる
     ScoreView scoreView;
+    juce::TextButton emptyScoreButton, emptyFileButton, emptyUrlButton;   // 音源もタブ譜も無いときの、真ん中の選ぶボタン
     TimelineView timeline;
 
     // 境目と、右のパネル
@@ -227,7 +252,7 @@ private:
 
     // プリセット 1・2・3 (作者のレイアウト。機能はまだ。押すと「準備中」)
     juce::Label presetLabel;
-    std::array<juce::TextButton, 3> presetButtons;
+    std::array<RightClickableButton, 3> presetButtons;   // 右クリックで「保存し直す」「空にする」
 
     // TONE3000 (VST3 プラグイン) のカード。TONE3000 を選んでいるときだけ、音色とミキサーの間に出す
     PluginToneCard pluginCard { engine };
@@ -255,7 +280,7 @@ private:
     IconButton helpButton { Icons::help };   // 「?」(画面の説明。機能はまだ)
 
     // タブ譜の上の左: リード・バッキングの切り替え (作者のレイアウト。機能はまだ)
-    juce::TextButton leadButton, backingButton;
+    RightClickableButton leadButton, backingButton;   // 右クリックで「トラックを選び直す」
 
     // 下部: 再生操作。「再生／速度／メトロノーム／ループ」のグループに分け、それぞれに見出しを付ける
     SectionHeading playHeading { "再生"_jp }, speedHeading { "速度"_jp },

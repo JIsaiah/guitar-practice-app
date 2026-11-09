@@ -1,6 +1,5 @@
 #include "SessionSetupScreen.h"
 #include "../Model/YouTubeUrl.h"
-#include "../Model/TonePresets.h"
 #include "../Text.h"
 
 namespace
@@ -19,19 +18,19 @@ SessionSetupScreen::SessionSetupScreen (ScoreViewer& reader)
     heading.setFont (juce::FontOptions (24.0f, juce::Font::bold));
     addAndMakeVisible (heading);
 
+    // 左の項目には番号を付けない (作者の指示)
     titleLabel.setText ("曲名"_jp, juce::dontSendNotification);
-    sourceLabel.setText ("1. 音源"_jp, juce::dontSendNotification);
-    scoreLabel.setText ("2. タブ譜 (任意)"_jp, juce::dontSendNotification);
-    toneLabel.setText ("3. 音色"_jp, juce::dontSendNotification);
-    bpmLabel.setText ("4. BPM"_jp, juce::dontSendNotification);
+    sourceLabel.setText ("音源 (任意)"_jp, juce::dontSendNotification);
+    scoreLabel.setText ("タブ譜 (任意)"_jp, juce::dontSendNotification);
+    bpmLabel.setText ("BPM", juce::dontSendNotification);
     artistLabel.setText ("アーティスト"_jp, juce::dontSendNotification);
     tuningLabel.setText ("チューニング"_jp, juce::dontSendNotification);
-    for (auto* label : { &titleLabel, &artistLabel, &sourceLabel, &scoreLabel, &toneLabel, &bpmLabel, &tuningLabel,
+    for (auto* label : { &titleLabel, &artistLabel, &sourceLabel, &scoreLabel, &bpmLabel, &tuningLabel,
                          &sourceValue, &scoreValue, &bpmNote })
         addAndMakeVisible (label);
 
-    titleEditor.setTextToShowWhenEmpty ("音源を選ぶと自動で入ります"_jp, juce::Colours::grey);
-    titleEditor.onTextChange = [this] { session.title = titleEditor.getText().trim(); };
+    titleEditor.setTextToShowWhenEmpty ("必須。音源やタブ譜を選ぶと自動で入ります"_jp, juce::Colours::grey);
+    titleEditor.onTextChange = [this] { session.title = titleEditor.getText().trim(); updateState(); };
     artistEditor.setTextToShowWhenEmpty ("任意。タブ譜に書かれていれば自動で入ります"_jp, juce::Colours::grey);
     artistEditor.onTextChange = [this] { session.artist = artistEditor.getText().trim(); };
     tuningEditor.setTextToShowWhenEmpty ("例: E Standard、Drop D。タブ譜から自動で入ります"_jp, juce::Colours::grey);
@@ -49,18 +48,6 @@ SessionSetupScreen::SessionSetupScreen (ScoreViewer& reader)
     scoreClearButton.onClick = [this] { session.scorePath = {}; bpmNote.setText ({}, juce::dontSendNotification); updateState(); };
     for (auto* button : { &sourceFileButton, &youtubeButton, &scoreFileButton, &scoreClearButton })
         addAndMakeVisible (button);
-
-    const auto& presets = getTonePresets();
-    for (size_t i = 0; i < toneButtons.size(); ++i)
-    {
-        auto& button = toneButtons[i];
-        button.setButtonText (juce::String::fromUTF8 (presets[i].name));
-        button.setClickingTogglesState (true);
-        button.setRadioGroupId (1);
-        // オンになったときだけ処理する (オフになった通知で selectTone を呼ぶと、2つ選ばれた状態になる)
-        button.onClick = [this, i] { if (toneButtons[i].getToggleState()) selectTone ((int) i); };
-        addAndMakeVisible (button);
-    }
 
     bpmSlider.setRange (40.0, 300.0, 1.0);
     bpmSlider.setSliderStyle (juce::Slider::LinearHorizontal);
@@ -85,7 +72,6 @@ SessionSetupScreen::SessionSetupScreen (ScoreViewer& reader)
     addAndMakeVisible (cancelButton);
     addAndMakeVisible (startButton);
 
-    selectTone (0);
     bpmSlider.setValue (session.bpm, juce::dontSendNotification);
     updateState();
 }
@@ -202,12 +188,6 @@ void SessionSetupScreen::readScoreDetails()
     scoreReader.load (juce::File (path), 0);
 }
 
-void SessionSetupScreen::selectTone (int index)
-{
-    toneButtons[(size_t) index].setToggleState (true, juce::dontSendNotification);
-    session.tonePresetId = getTonePresets()[(size_t) index].id;
-}
-
 void SessionSetupScreen::tap()
 {
     if (const auto bpm = tapTempo.tap (juce::Time::getMillisecondCounterHiRes()))
@@ -225,11 +205,14 @@ void SessionSetupScreen::updateState()
     {
         case SourceType::local:   sourceValue.setText (session.sourcePath, juce::dontSendNotification); break;
         case SourceType::youtube: sourceValue.setText ("YouTube: "_jp + session.youtubeUrl, juce::dontSendNotification); break;
-        case SourceType::none:    sourceValue.setText ("(未選択)"_jp, juce::dontSendNotification); break;
+        case SourceType::none:    sourceValue.setText ("(なし)"_jp, juce::dontSendNotification); break;
     }
 
     scoreValue.setText (session.scorePath.isEmpty() ? "(なし)"_jp : session.scorePath, juce::dontSendNotification);
-    startButton.setEnabled (session.sourceType != SourceType::none);
+
+    // 必須は曲名だけ (作者の指示)。音源もタブ譜も無いまま作ると、練習画面のタブ譜の枠で選んでもらう
+    startButton.setEnabled (session.title.isNotEmpty());
+    startButton.setTooltip (session.title.isEmpty() ? "曲名を入れると始められます"_jp : juce::String());
 }
 
 void SessionSetupScreen::paint (juce::Graphics& g)
@@ -271,13 +254,6 @@ void SessionSetupScreen::resized()
     scoreClearButton.setBounds (scoreRow.removeFromLeft (80));
     scoreRow.removeFromLeft (12);
     scoreValue.setBounds (scoreRow);
-
-    auto toneRow = nextRow (toneLabel);
-    for (auto& button : toneButtons)
-    {
-        button.setBounds (toneRow.removeFromLeft (120));
-        toneRow.removeFromLeft (8);
-    }
 
     auto bpmRow = nextRow (bpmLabel);
     bpmSlider.setBounds (bpmRow.removeFromLeft (360));

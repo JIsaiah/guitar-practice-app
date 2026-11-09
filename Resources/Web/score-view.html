@@ -83,7 +83,8 @@
         // 各小節の拍子 [分子, 分母] (メトロノームのビジュアライザーのドットの数)
         sigs: s.masterBars.map(function (mb) { return [mb.timeSignatureNumerator, mb.timeSignatureDenominator]; }),
         tuning: trackTuning(s, currentTrack),   // 弦の音の高さ (MIDI。1弦から)。名前はアプリが付ける
-        tracks: s.tracks.map(function (t) { return t.name || ""; })
+        // トラックの名前と、ギターか (リード・バッキングを決めるのに使う)
+        tracks: s.tracks.map(function (t) { return { name: t.name || "", guitar: isGuitar(t) }; })
       });
     });
 
@@ -145,6 +146,7 @@
     switch (cmd.type) {
       case "load": load(cmd.url, cmd.track || 0); break;
       case "clear": clearScore(); break;
+      case "track": showTrack(cmd.track); break;
       case "countdown": showCountdown(cmd.number, cmd.caption); break;
       case "position": receivePosition(cmd); break;
       case "layout":
@@ -166,6 +168,27 @@
   };
 
   let currentTrack = 0;
+
+  // ギターのトラックか: 弦が 6本以上 (7弦・8弦も)、または楽器がギター (MIDI の 24〜31)。
+  // ドラム (打楽器) とベース (MIDI の 32〜39) は除く
+  function isGuitar(t) {
+    if (!t || !t.staves) return false;
+    const program = t.playbackInfo ? t.playbackInfo.program : -1;
+    if (program >= 32 && program <= 39) return false;
+    for (const st of t.staves) {
+      if (st.isPercussion) return false;
+      const strings = st.tuning || (st.stringTuning && st.stringTuning.tunings) || [];
+      if (strings.length >= 6) return true;
+    }
+    return program >= 24 && program <= 31;
+  }
+
+  // 表示するトラックだけを変える (ファイルは読み直さない。小節の位置は同じなので、カーソルもそのまま動く)
+  function showTrack(track) {
+    if (!api || !score || track < 0 || track >= score.tracks.length || track === currentTrack) return;
+    currentTrack = track;
+    api.renderTracks([score.tracks[track]]);
+  }
 
   // 選んだトラックの、弦の音の高さ。ドラムなど弦のないトラックなら、弦のある最初のトラックを使う
   function trackTuning(s, track) {

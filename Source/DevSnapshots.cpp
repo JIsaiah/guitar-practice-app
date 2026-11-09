@@ -9,6 +9,7 @@
 #include "Theme/MetalLogo/MetalLogoGenerator.h"
 #include "UI/SessionListScreen.h"
 #include "UI/SessionScreen.h"
+#include "UI/SessionSetupScreen.h"
 #include "UI/SettingsPanel.h"
 #include "UI/DebugLogPanel.h"
 #include "AppLog.h"
@@ -185,6 +186,20 @@ juce::String DevSnapshots::renderAll (const juce::File& folder)
 
                 SessionScreen practice (engine, store, theme, appSettings, youtube, scoreViewer, session);
                 snap (practice, 1280, 800, "practice" + suffix);
+
+                // 曲名だけで作ったセッション (音源もタブ譜も無い): タブ譜の枠の真ん中で選んでもらう
+                {
+                    Session empty;
+                    empty.title = "New song";
+                    SessionScreen emptyScreen (engine, store, theme, appSettings, youtube, scoreViewer, empty);
+                    snap (emptyScreen, 1280, 800, "practice_empty" + suffix);
+                }
+
+                // 新しいセッションを作る画面
+                {
+                    SessionSetupScreen setup (scoreViewer);
+                    snap (setup, 1280, 800, "setup" + suffix);
+                }
 
                 // セットリストから開いたとき (速度・ループに「セトリ専用」)
                 {

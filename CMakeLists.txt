@@ -200,6 +200,7 @@ target_sources(GuitarPracticeTests PRIVATE
     Tests/PitchDetectorTests.cpp
     Tests/SessionFolderTests.cpp
     Tests/SessionSortTests.cpp
+    Tests/ScorePartsTests.cpp
     Source/Model/Session.cpp
     Source/Model/SessionStore.cpp
     Source/Library/SessionLibrary.cpp

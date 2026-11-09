@@ -84,7 +84,22 @@ juce::var Session::toVar() const
         { "folder",     folder },
         { "last_opened", lastOpened.toMilliseconds() > 0 ? lastOpened.toISO8601 (true) : juce::String() },
         { "source",   source },
-        { "score",    makeObject ({ { "path", scorePath }, { "track_index", scoreTrackIndex } }) },
+        { "score",    makeObject ({ { "path", scorePath }, { "track_index", scoreTrackIndex },
+                                    // リード・バッキング
+                                    { "lead_track", leadTrack }, { "backing_track", backingTrack },
+                                    { "active", backingActive ? "backing" : "lead" },
+                                    { "lead_preset", leadPreset }, { "backing_preset", backingPreset } }) },
+        { "tone_slots", [this]
+            {
+                // 音色のプリセット 1・2・3 (空きは null)
+                juce::Array<juce::var> slots;
+                for (const auto& slot : toneSlots)
+                    slots.add (slot.isEmpty() ? juce::var()
+                                              : makeObject ({ { "preset_id", slot.tonePresetId }, { "nam_model", slot.namModelPath },
+                                                              { "ir", slot.irPath }, { "input_gain_db", slot.inputGainDb },
+                                                              { "plugin_path", slot.pluginPath }, { "plugin_state", slot.pluginState } }));
+                return juce::var (slots);
+            }() },
         { "tempo",    makeObject ({ { "bpm", bpm }, { "origin", toString (tempoOrigin) } }) },
         { "playback", makeObject ({ { "speed_percent", speedPercent } }) },
         { "sync",     makeObject ({ { "offset_ms", syncOffsetMs }, { "score_offset_ms", scoreOffsetMs },
@@ -153,6 +168,30 @@ Session Session::fromVar (const juce::var& value)
     s.namModelPath = getOr<juce::String> (tone["nam_model"], {});
     s.irPath = getOr<juce::String> (tone["ir"], {});
     s.inputGainDb = getOr<double> (tone["input_gain_db"], 0.0);
+
+    // リード・バッキング (無い古いファイルは -1 = これから決める)
+    const auto& parts = value["score"];
+    s.leadTrack = getOr<int> (parts["lead_track"], -1);
+    s.backingTrack = getOr<int> (parts["backing_track"], -1);
+    s.backingActive = getOr<juce::String> (parts["active"], "lead") == "backing";
+    s.leadPreset = juce::jlimit (0, numToneSlots, getOr<int> (parts["lead_preset"], 0));
+    s.backingPreset = juce::jlimit (0, numToneSlots, getOr<int> (parts["backing_preset"], 0));
+
+    if (const auto* slots = value["tone_slots"].getArray())
+        for (int i = 0; i < juce::jmin (numToneSlots, slots->size()); ++i)
+        {
+            const auto& slot = slots->getReference (i);
+            if (! slot.isObject())
+                continue;
+
+            auto& t = s.toneSlots[(size_t) i];
+            t.tonePresetId = getOr<juce::String> (slot["preset_id"], {});
+            t.namModelPath = getOr<juce::String> (slot["nam_model"], {});
+            t.irPath = getOr<juce::String> (slot["ir"], {});
+            t.inputGainDb = getOr<double> (slot["input_gain_db"], 0.0);
+            t.pluginPath = getOr<juce::String> (slot["plugin_path"], {});
+            t.pluginState = getOr<juce::String> (slot["plugin_state"], {});
+        }
 
     if (const auto* plugins = tone["vst3"].getArray(); plugins != nullptr && ! plugins->isEmpty())
     {

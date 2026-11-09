@@ -98,7 +98,7 @@ private:
     FixedTextButton sessionsTab, setlistsTab;
     juce::ListBox listBox { {}, this };
     SessionFolderList folderList;
-    FixedTextButton settingsButton;
+    IconButton settingsButton { Icons::settings };   // 「セットリスト」のタブの右の、歯車の正方形のボタン (作者の指示)
     IconButton newButton { Icons::plus };   // 一覧の枠の右下の「＋」(新しいセッション)。開く・削除は、行のダブルクリックと右クリックのメニューで
 
     SetlistPanel setlistPanel;

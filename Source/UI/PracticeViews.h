@@ -46,6 +46,16 @@ public:
         }
     }
 
+    // 音源もタブ譜も無いとき: 小節・拍の代わりに、選ぶボタン (練習画面が上に置く) のための案内だけを描く
+    void setEmptySession (bool empty)
+    {
+        if (empty != emptySession)
+        {
+            emptySession = empty;
+            repaint();
+        }
+    }
+
     void paint (juce::Graphics& g) override
     {
         auto bounds = getLocalBounds();
@@ -53,6 +63,19 @@ public:
         g.fillRoundedRectangle (bounds.toFloat(), 8.0f);
         g.setColour (findColour (ThemeColourIds::border));
         g.drawRoundedRectangle (bounds.toFloat().reduced (0.5f), 8.0f, 1.0f);
+
+        if (emptySession)
+        {
+            g.setColour (findColour (juce::Label::textColourId));
+            g.setFont (AppLookAndFeel::scaled (juce::FontOptions (22.0f, juce::Font::bold)));
+            g.drawText ("タブ譜か音源を選んでください"_jp, bounds.withSizeKeepingCentre (bounds.getWidth(), 40).translated (0, -60),
+                        juce::Justification::centred);
+            g.setColour (findColour (ThemeColourIds::textMuted));
+            g.setFont (AppLookAndFeel::scaled (juce::FontOptions (14.0f)));
+            g.drawText ("どちらか一方だけでも練習できます。あとから両方そろえることもできます"_jp,
+                        bounds.withSizeKeepingCentre (bounds.getWidth(), 24).translated (0, -26), juce::Justification::centred);
+            return;
+        }
 
         g.setColour (findColour (juce::Label::textColourId));
         g.setFont (AppLookAndFeel::scaled (juce::FontOptions (56.0f, juce::Font::bold)));
@@ -67,6 +90,7 @@ public:
 
 private:
     int bar = 0, beat = 0;
+    bool emptySession = false;
 };
 
 // 再生位置のバー。A-B ループの範囲と、経過時間 / 長さも表示する

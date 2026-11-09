@@ -10,7 +10,6 @@ namespace
 SessionListScreen::SessionListScreen (SessionLibrary& l, SetlistStore& sl, ThemeManager& t, AppSettings& a)
     : library (l), store (l.getStore()), setlistStore (sl), theme (t), settings (a),
       sessionsTab (t), setlistsTab (t),
-      settingsButton (t),
       setlistPanel (l, sl, t, a)
 {
     // タブ (setlist-mode.md 4.1)。最後に開いていたタブを覚えておく
@@ -47,7 +46,8 @@ SessionListScreen::SessionListScreen (SessionLibrary& l, SetlistStore& sl, Theme
     addAndMakeVisible (folderList);
 
     newButton.setTooltip ("新しいセッション"_jp);   // 「＋」のアイコン (作者のアイコン)
-    settingsButton.setFixedText (FixedTextId::Settings, "設定"_jp);
+    settingsButton.setTooltip ("設定"_jp);
+    settingsButton.setIconScale (0.45f);
 
     newButton.onClick = [this] { if (onNewSession != nullptr) onNewSession(); };
     settingsButton.onClick = [this] { if (onOpenSettings != nullptr) onOpenSettings(); };
@@ -788,15 +788,13 @@ void SessionListScreen::paintOverChildren (juce::Graphics& g)
 
 void SessionListScreen::resized()
 {
-    // 作者のレイアウト: 右上に「設定」、その下に「セッション」「セットリスト」のタブを半分ずつ、
+    // 作者のレイアウト: いちばん上に「セッション」「セットリスト」のタブ、その右に設定 (歯車の正方形のボタン)。
     // その下に左「フォルダー」の枠、右に一覧の枠 (どちらも見出しは枠の中の上、「＋」は枠の中の右下)
     auto area = getLocalBounds().reduced (36, 20);
 
-    auto top = area.removeFromTop (40);
-    settingsButton.setBounds (top.removeFromRight (120));
-
-    area.removeFromTop (12);
     auto tabs = area.removeFromTop (56);
+    settingsButton.setBounds (tabs.removeFromRight (56));   // 正方形 (タブと同じ高さ)
+    tabs.removeFromRight (12);
     const auto tabWidth = (tabs.getWidth() - 12) / 2;
     sessionsTab.setBounds (tabs.removeFromLeft (tabWidth));
     setlistsTab.setBounds (tabs.removeFromRight (tabWidth));

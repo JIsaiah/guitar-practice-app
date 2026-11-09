@@ -65,23 +65,43 @@ SessionScreen::SessionScreen (AudioEngine& e, SessionStore& s, ThemeManager& t, 
     helpButton.setIconScale (0.6f);
     helpButton.onClick = [this] { showComingSoon ("画面の説明"_jp); };
 
-    // タブ譜の上の左: リード・バッキング (機能はまだ)
+    // タブ譜の上の左: リード・バッキング。タブ譜のギターのトラックを切り替える (右クリックでトラックを選び直す)
     leadButton.setButtonText ("リード"_jp);
     backingButton.setButtonText ("バッキング"_jp);
-    leadButton.setTooltip ("リードのタブ譜に切り替えます (準備中)"_jp);
-    backingButton.setTooltip ("バッキングのタブ譜に切り替えます (準備中)"_jp);
-    leadButton.onClick = [this] { showComingSoon ("リード・バッキングの切り替え"_jp); };
-    backingButton.onClick = [this] { showComingSoon ("リード・バッキングの切り替え"_jp); };
+    for (auto* b : { &leadButton, &backingButton })
+    {
+        b->setClickingTogglesState (true);
+        b->setRadioGroupId (2);
+        b->onRightClick = [this] { chooseParts (false); };
+    }
+    // ラジオボタンは「オフになった」ときにも onClick が来るので、オンになったときだけ切り替える (音色のボタンと同じ)
+    leadButton.onClick = [this] { if (leadButton.getToggleState()) switchPart (false, true); };
+    backingButton.onClick = [this] { if (backingButton.getToggleState()) switchPart (true, true); };
 
-    // プリセット 1・2・3 (機能はまだ)
+    // 音色のプリセット 1・2・3
     presetLabel.setText ("プリセット"_jp, juce::dontSendNotification);
     presetLabel.setFont (juce::FontOptions (12.0f));
     presetLabel.setJustificationType (juce::Justification::centredRight);
     for (size_t i = 0; i < presetButtons.size(); ++i)
     {
-        presetButtons[i].setButtonText (juce::String ((int) i + 1));
-        presetButtons[i].setTooltip ("音色のプリセット "_jp + juce::String ((int) i + 1) + " (準備中)"_jp);
-        presetButtons[i].onClick = [this] { showComingSoon ("音色のプリセット"_jp); };
+        const auto slot = (int) i + 1;
+        presetButtons[i].setButtonText (juce::String (slot));
+        presetButtons[i].onClick = [this, slot] { pressPreset (slot); };
+        presetButtons[i].onRightClick = [this, slot] { showPresetMenu (slot); };
+    }
+
+    // 音源もタブ譜も無いとき (新規作成で曲名だけ決めたとき) に、タブ譜の枠の真ん中に出すボタン
+    emptyScoreButton.setButtonText ("タブ譜を選択"_jp);
+    emptyFileButton.setButtonText ("音源ファイルを選ぶ"_jp);
+    emptyUrlButton.setButtonText ("YouTube の URL を貼り付け"_jp);
+    emptyScoreButton.onClick = [this] { chooseScoreFile(); };
+    emptyFileButton.onClick = [this] { chooseSourceFile(); };
+    emptyUrlButton.onClick = [this] { pasteYouTubeUrl(); };
+    for (auto* b : { &emptyScoreButton, &emptyFileButton, &emptyUrlButton })
+    {
+        b->setMouseClickGrabsKeyboardFocus (false);
+        b->setWantsKeyboardFocus (false);
+        addChildComponent (b);
     }
 
     // 曲名の右に「—  アーティスト名」(アーティストが空なら出さない)
@@ -444,6 +464,8 @@ SessionScreen::SessionScreen (AudioEngine& e, SessionStore& s, ThemeManager& t, 
     setTransportEnabled (false);  // 音源の読み込みが終わってから有効にする
 
     applySessionToEngine();
+    updatePartButtons();
+    updatePresetButtons();
     updateSourceUi();
     loadSource();
     setUpYouTube();
@@ -759,6 +781,7 @@ void SessionScreen::updateSourceUi()
     }
 
     updateSwapUi();
+    updateEmptyPrompt();
     resized();
 }
 
@@ -772,6 +795,7 @@ void SessionScreen::loadScore()
         juce::ignoreUnused (tempo);
         updateLoop();          // タブ譜の拍子が分かったので、A・B の小節の番号を出し直す
         updateSkipButtons();   // 小節が分かったので、戻る・進むを小節単位にする
+        setUpParts();          // トラックが分かったので、リード・バッキングを決める
     };
     scoreViewer.onError = [this] (const juce::String& message) { setStatus ("タブ譜: "_jp + message); };
 
@@ -792,6 +816,7 @@ void SessionScreen::chooseScoreFile()
 
         safe->session.scorePath = file.getFullPathName();
         safe->session.scoreTrackIndex = 0;
+        safe->resetParts();   // 別のタブ譜なので、リード・バッキングは決め直す
 
         // 別の曲のタブ譜なので、前のループ (A・B) は使えない。0 に戻す
         safe->session.loopStartMs = safe->session.loopEndMs = 0;
@@ -808,6 +833,7 @@ void SessionScreen::chooseScoreFile()
 
             safe->updateLoop();
             safe->updateSkipButtons();
+            safe->setUpParts();
 
             // 曲の詳細も、タブ譜に書かれていれば入れる (一覧に出る)。
             // チューニングはタブ譜ごとに違うので上書きし、アーティストは空のときだけ入れる
@@ -830,6 +856,7 @@ void SessionScreen::removeScore()
 {
     session.scorePath = {};
     session.scoreTrackIndex = 0;
+    resetParts();
     scoreViewer.load ({}, 0);
     updateScoreUi();
     updateLoop();   // 4/4 の小節に戻るので、小節の番号を出し直す
@@ -847,7 +874,33 @@ void SessionScreen::updateScoreUi()
         setStatus ("タブ譜のファイルが見つかりません: "_jp + session.scorePath);
 
     updateSwapUi();
+    updateEmptyPrompt();
     placeWebViews();
+}
+
+void SessionScreen::updateEmptyPrompt()
+{
+    const auto empty = ! hasSource() && session.scorePath.isEmpty();
+    scoreView.setEmptySession (empty);
+
+    for (auto* b : { &emptyScoreButton, &emptyFileButton, &emptyUrlButton })
+        b->setVisible (empty);
+
+    if (! empty)
+        return;
+
+    // 真ん中に横に3つ並べる (案内の文の下)
+    auto row = scoreView.getBounds().withSizeKeepingCentre (juce::jmin (scoreView.getWidth() - 40, 3 * 200 + 2 * 12), 48)
+                                    .translated (0, 30);
+    const auto width = (row.getWidth() - 2 * 12) / 3;
+    emptyScoreButton.setBounds (row.removeFromLeft (width));
+    row.removeFromLeft (12);
+    emptyFileButton.setBounds (row.removeFromLeft (width));
+    row.removeFromLeft (12);
+    emptyUrlButton.setBounds (row);
+
+    for (auto* b : { &emptyScoreButton, &emptyFileButton, &emptyUrlButton })
+        b->toFront (false);
 }
 
 //==============================================================================
@@ -1652,6 +1705,344 @@ void SessionScreen::applyGuitarGain()
     // 音源のミュートと同じく、スライダーの値 (session.mixGuitar) は変えない。解除すると元の音量に戻る
     engine.setGuitarGain (guitarMuted ? 0.0f : (float) session.mixGuitar);
     guitarGainSlider.setAlpha (guitarMuted ? 0.5f : 1.0f);
+}
+
+//==============================================================================
+// リード・バッキング (作者の指示)
+//   タブ譜のギターのトラックから、リードとバッキングを決める (ScoreParts::assign)。最大 2トラック。
+//   ギターが 3つ以上なら、選ぶ画面を出す。切り替えは表示するトラックを変えるだけ (再生・音色の設定は共通)。
+//   それぞれのパートに音色のプリセット (1・2・3) を割り当てると、切り替えたときにその音色になる
+int SessionScreen::activePartTrack() const
+{
+    // リードだけ・バッキングだけのこともある (1トラックのタブ譜をバッキングにしたとき)
+    if (session.backingTrack >= 0 && (session.backingActive || session.leadTrack < 0))
+        return session.backingTrack;
+    return session.leadTrack;
+}
+
+void SessionScreen::resetParts()
+{
+    session.leadTrack = session.backingTrack = -1;
+    session.backingActive = false;
+    updatePartButtons();
+}
+
+void SessionScreen::setUpParts()
+{
+    const auto& tracks = scoreViewer.getTracks();
+    const auto valid = [&tracks] (int track) { return juce::isPositiveAndBelow (track, (int) tracks.size()); };
+    const auto wasDirty = isDirty();
+    bool askNow = false;
+
+    if (! valid (session.leadTrack))   session.leadTrack = -1;
+    if (! valid (session.backingTrack)) session.backingTrack = -1;
+
+    // まだ決めていない (新しく入れたタブ譜・前からあるセッション) なら、ギターのトラックから仮に決め、
+    // 選ぶ画面を出す (作者の指示: タブ譜を入れたら、リードかバッキングを必ず選んでもらう)。
+    // セットリストの通し再生では、カウントダウンを止めないよう、聞かずに仮のまま使う
+    if (session.leadTrack < 0 && session.backingTrack < 0 && ! tracks.empty())
+    {
+        const auto assignment = ScoreParts::assign (tracks);
+        session.leadTrack = assignment.lead;
+        session.backingTrack = assignment.backing;
+        session.backingActive = false;
+        askNow = ! openContext.isSetlist();
+        partsChoiceWasClean = ! wasDirty;
+    }
+
+    if (session.backingTrack < 0)
+        session.backingActive = false;
+    if (session.leadTrack < 0 && session.backingTrack >= 0)
+        session.backingActive = true;   // バッキングだけ
+
+    // 表示しているトラックを、今のパートに合わせる
+    if (const auto track = activePartTrack(); track >= 0 && track != session.scoreTrackIndex)
+    {
+        session.scoreTrackIndex = track;
+        scoreViewer.showTrack (track);
+    }
+
+    // 自動で決めただけなら「未保存」にしない (次に保存したときに一緒に保存される)
+    if (! wasDirty)
+        savedSnapshot = juce::JSON::toString (session.toVar());
+
+    updatePartButtons();
+
+    if (askNow)
+        chooseParts (true);
+}
+
+void SessionScreen::chooseParts (bool required)
+{
+    const auto& tracks = scoreViewer.getTracks();
+    if (tracks.empty())
+    {
+        setStatus ("タブ譜を選ぶと、リードとバッキングのトラックを選べます"_jp);
+        return;
+    }
+
+    // 選べるのはギターのトラック。ギターと見分けられるトラックが無ければ、すべてのトラック
+    auto candidates = ScoreParts::guitarTracks (tracks);
+    if (candidates.empty())
+        for (int i = 0; i < (int) tracks.size(); ++i)
+            candidates.push_back (i);
+
+    juce::StringArray names;
+    for (auto track : candidates)
+        names.add (ScoreParts::displayName (tracks, track));
+
+    const auto message = (required ? "タブ譜を読み込みました。"_jp : juce::String())
+                       + "このタブ譜のギターのトラックを、リードとバッキングのどちらにするか選んでください (最大2つ。どちらか1つでもよい)。"_jp;
+    partsWindow = std::make_unique<juce::AlertWindow> ("リードとバッキング"_jp, message, juce::MessageBoxIconType::NoIcon, this);
+
+    // どちらも「なし」を選べる (1トラックのタブ譜をバッキングにするとき)。両方「なし」なら、最初のトラックをリードにする
+    juce::StringArray choices { "なし"_jp };
+    choices.addArray (names);
+    partsWindow->addComboBox ("lead", choices, "リード"_jp);
+    partsWindow->addComboBox ("backing", choices, "バッキング"_jp);
+
+    const auto indexOf = [&candidates] (int track)
+    {
+        const auto it = std::find (candidates.begin(), candidates.end(), track);
+        return it == candidates.end() ? -1 : (int) std::distance (candidates.begin(), it);
+    };
+    partsWindow->getComboBoxComponent ("lead")->setSelectedItemIndex (indexOf (session.leadTrack) + 1);
+    partsWindow->getComboBoxComponent ("backing")->setSelectedItemIndex (indexOf (session.backingTrack) + 1);
+
+    // タブ譜を入れたときは、必ずどちらかを選ぶ (キャンセルは無い。仮に決めた組み合わせのまま OK でもよい)
+    partsWindow->addButton ("OK", 1, juce::KeyPress (juce::KeyPress::returnKey));
+    if (! required)
+        partsWindow->addButton ("キャンセル"_jp, 0, juce::KeyPress (juce::KeyPress::escapeKey));
+
+    partsWindow->enterModalState (true, juce::ModalCallbackFunction::create (
+        [safe = juce::Component::SafePointer (this), candidates, required] (int result)
+        {
+            if (safe == nullptr || safe->partsWindow == nullptr)
+                return;
+
+            if (result == 1)
+            {
+                const auto lead = safe->partsWindow->getComboBoxComponent ("lead")->getSelectedItemIndex() - 1;
+                const auto backing = safe->partsWindow->getComboBoxComponent ("backing")->getSelectedItemIndex() - 1;
+                const auto trackAt = [&candidates] (int i) { return juce::isPositiveAndBelow (i, (int) candidates.size()) ? candidates[(size_t) i] : -1; };
+
+                safe->session.leadTrack = trackAt (lead);
+                safe->session.backingTrack = trackAt (backing);
+                if (safe->session.backingTrack == safe->session.leadTrack)
+                    safe->session.backingTrack = -1;   // 同じトラックは 2つにしない
+                if (safe->session.leadTrack < 0 && safe->session.backingTrack < 0)
+                    safe->session.leadTrack = candidates.front();   // どちらかは必ず決める
+
+                // バッキングだけなら、バッキングを出す。両方あるなら、今出しているほうのまま
+                safe->switchPart (safe->session.leadTrack < 0 || (safe->session.backingActive && safe->session.backingTrack >= 0), false);
+
+                // 開いたときに聞いたのなら、選んだ結果をそのまま保存する (保存しないと、次に開いたときにまた聞くため)。
+                // ほかに未保存の変更があるときは、いつもの保存に任せる
+                if (required && safe->partsChoiceWasClean && safe->writeToDisk())
+                    safe->savedSnapshot = juce::JSON::toString (safe->session.toVar());
+            }
+
+            safe->partsWindow = nullptr;
+            safe->grabKeyboardFocus();
+        }), false);
+}
+
+void SessionScreen::switchPart (bool backing, bool fromUser)
+{
+    // リード・バッキングの切り替え (と、それに合わせたプリセットの音色) は、セッションの変更として扱わない (作者の指示)。
+    // 切り替えるだけで「保存しますか？」と聞かれないよう、ほかに変更が無ければ「保存済み」のままにする
+    const auto wasDirty = isDirty();
+
+    if (backing && session.backingTrack < 0)
+        backing = false;
+    if (! backing && session.leadTrack < 0 && session.backingTrack >= 0)
+        backing = true;   // バッキングだけ
+
+    session.backingActive = backing;
+
+    if (const auto track = activePartTrack(); track >= 0 && track != session.scoreTrackIndex)
+    {
+        session.scoreTrackIndex = track;
+        scoreViewer.showTrack (track);
+    }
+
+    // そのパートに割り当てたプリセットの音色にする
+    if (fromUser)
+    {
+        const auto slot = currentPartPreset();
+        if (slot > 0 && ! session.toneSlots[(size_t) slot - 1].isEmpty())
+            applyPreset (slot);
+
+        setStatus ((backing ? "バッキング"_jp : "リード"_jp) + "のタブ譜にしました"_jp
+                   + (slot > 0 ? " (プリセット "_jp + juce::String (slot) + ")" : juce::String()));
+    }
+
+    if (fromUser && ! wasDirty)
+        savedSnapshot = juce::JSON::toString (session.toVar());
+
+    updatePartButtons();
+    updatePresetButtons();
+}
+
+void SessionScreen::updatePartButtons()
+{
+    const auto& tracks = scoreViewer.getTracks();
+    // タブ譜が無ければどちらも選ばない。タブ譜があれば、どちらか (今のパート) が必ず選ばれている
+    const auto hasScore = session.scorePath.isNotEmpty();
+    const auto hasLead = hasScore && session.leadTrack >= 0;
+    const auto hasBacking = hasScore && session.backingTrack >= 0;
+    const auto showingBacking = hasBacking && (session.backingActive || ! hasLead);
+
+    leadButton.setEnabled (hasLead);
+    backingButton.setEnabled (hasBacking);
+    leadButton.setToggleState (hasLead && ! showingBacking, juce::dontSendNotification);
+    backingButton.setToggleState (showingBacking, juce::dontSendNotification);
+
+    const auto tip = [&tracks] (const juce::String& part, int track)
+    {
+        const auto name = ScoreParts::displayName (tracks, track);
+        return part + (name.isNotEmpty() ? ": "_jp + name : juce::String()) + "。右クリックでトラックを選び直せます"_jp;
+    };
+    leadButton.setTooltip (hasLead ? tip ("リード"_jp, session.leadTrack)
+                                   : hasScore ? "リードのトラックがありません。右クリックでトラックを選べます"_jp : "タブ譜を選ぶと使えます"_jp);
+    backingButton.setTooltip (hasBacking ? tip ("バッキング"_jp, session.backingTrack)
+                                         : hasScore ? "バッキングのトラックがありません。右クリックでトラックを選べます"_jp : "タブ譜を選ぶと使えます"_jp);
+}
+
+//==============================================================================
+// 音色のプリセット 1・2・3
+juce::String SessionScreen::describeToneSlot (const ToneSlot& slot) const
+{
+    if (slot.tonePresetId == namTonePresetId)
+        return "NAM: "_jp + (slot.namModelPath.isEmpty() ? "なし"_jp : juce::File (slot.namModelPath).getFileNameWithoutExtension());
+    if (slot.tonePresetId == pluginTonePresetId)
+        return "VST: "_jp + (slot.pluginPath.isEmpty() ? "なし"_jp : juce::File (slot.pluginPath).getFileNameWithoutExtension());
+    return juce::String::fromUTF8 (getTonePresets()[(size_t) findTonePresetIndex (slot.tonePresetId)].name);
+}
+
+void SessionScreen::pressPreset (int slot)
+{
+    if (! juce::isPositiveAndBelow (slot - 1, Session::numToneSlots))
+        return;
+
+    const auto part = session.backingActive ? "バッキング"_jp : "リード"_jp;
+    if (session.toneSlots[(size_t) slot - 1].isEmpty())
+    {
+        savePreset (slot);
+        setStatus ("今の音色をプリセット "_jp + juce::String (slot) + " に保存し、"_jp + part + "に割り当てました"_jp);
+    }
+    else
+    {
+        applyPreset (slot);
+        setStatus ("プリセット "_jp + juce::String (slot) + " (" + describeToneSlot (session.toneSlots[(size_t) slot - 1])
+                   + ") を"_jp + part + "に割り当てました"_jp);
+    }
+
+    currentPartPreset() = slot;
+    updatePresetButtons();
+}
+
+void SessionScreen::savePreset (int slot)
+{
+    auto& s = session.toneSlots[(size_t) slot - 1];
+    s.tonePresetId = session.tonePresetId;
+    s.namModelPath = session.namModelPath;
+    s.irPath = session.irPath;
+    s.inputGainDb = session.inputGainDb;
+    s.pluginPath = session.pluginPath;
+    s.pluginState = session.pluginState;
+
+    // プラグインのつまみは、今の状態を保存する (セッションの保存を待たずに)
+    if (session.tonePresetId == pluginTonePresetId)
+        if (auto* tone = engine.getPluginTone())
+            s.pluginState = tone->getState().toBase64Encoding();
+
+    updatePresetButtons();
+}
+
+void SessionScreen::applyPreset (int slot)
+{
+    const auto& s = session.toneSlots[(size_t) slot - 1];
+    if (s.isEmpty())
+        return;
+
+    session.tonePresetId = s.tonePresetId;
+    session.namModelPath = s.namModelPath;
+    session.irPath = s.irPath;
+    session.inputGainDb = s.inputGainDb;
+
+    // 音色を開いたときと同じ順で、エンジンに渡す (applySessionToEngine)
+    selectTone (session.tonePresetId == namTonePresetId    ? namToneIndex
+              : session.tonePresetId == pluginTonePresetId ? pluginToneIndex
+                                                           : findTonePresetIndex (session.tonePresetId), false);
+    engine.setInputGainDb ((float) session.inputGainDb);
+    loadNamTone();
+
+    if (session.tonePresetId == pluginTonePresetId && s.pluginPath.isNotEmpty())
+    {
+        session.pluginPath = s.pluginPath;
+        session.pluginState = s.pluginState;
+        loadPluginTone();
+    }
+
+    updateToneSummary();
+}
+
+void SessionScreen::clearPreset (int slot)
+{
+    session.toneSlots[(size_t) slot - 1] = {};
+    if (session.leadPreset == slot)    session.leadPreset = 0;
+    if (session.backingPreset == slot) session.backingPreset = 0;
+    updatePresetButtons();
+}
+
+void SessionScreen::showPresetMenu (int slot)
+{
+    const auto empty = session.toneSlots[(size_t) slot - 1].isEmpty();
+
+    juce::PopupMenu menu;
+    menu.addItem (1, "今の音色をプリセット "_jp + juce::String (slot) + " に保存"_jp);
+    menu.addItem (2, "プリセット "_jp + juce::String (slot) + " を空にする"_jp, ! empty);
+
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&presetButtons[(size_t) slot - 1]),
+                        [safe = juce::Component::SafePointer (this), slot] (int result)
+    {
+        if (safe == nullptr)
+            return;
+
+        if (result == 1)
+        {
+            safe->savePreset (slot);
+            safe->currentPartPreset() = slot;
+            safe->updatePresetButtons();
+            safe->setStatus ("今の音色をプリセット "_jp + juce::String (slot) + " に保存しました"_jp);
+        }
+        else if (result == 2)
+        {
+            safe->clearPreset (slot);
+            safe->setStatus ("プリセット "_jp + juce::String (slot) + " を空にしました"_jp);
+        }
+    });
+}
+
+void SessionScreen::updatePresetButtons()
+{
+    const auto current = currentPartPreset();
+    const auto part = session.backingActive ? "バッキング"_jp : "リード"_jp;
+
+    for (int i = 0; i < Session::numToneSlots; ++i)
+    {
+        const auto slot = i + 1;
+        const auto& s = session.toneSlots[(size_t) i];
+        auto& button = presetButtons[(size_t) i];
+
+        button.setToggleState (slot == current, juce::dontSendNotification);
+        button.setAlpha (s.isEmpty() ? 0.6f : 1.0f);   // 空きは薄く
+        button.setTooltip (s.isEmpty()
+            ? "プリセット "_jp + juce::String (slot) + " (空き)。押すと今の音色を保存して、"_jp + part + "に割り当てます"_jp
+            : "プリセット "_jp + juce::String (slot) + ": "_jp + describeToneSlot (s) + "。押すと"_jp + part
+                  + "に割り当てます。右クリックで保存し直す・空にする"_jp);
+    }
 }
 
 void SessionScreen::showComingSoon (const juce::String& what)
@@ -2508,6 +2899,7 @@ void SessionScreen::resized()
     timeline.setBounds (timelinePanel.reduced (10, 6));
     area.removeFromBottom (8);
     scoreView.setBounds (area);
+    updateEmptyPrompt();
 
     dimOverlay.setBounds (getLocalBounds());
     if (tunerPanel != nullptr)

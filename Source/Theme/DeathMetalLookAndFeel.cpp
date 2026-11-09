@@ -28,7 +28,7 @@ void AppLookAndFeel::applyPalette (const Palette& p)
     setColour (juce::TextButton::buttonColourId, p.button);
     setColour (juce::TextButton::buttonOnColourId, p.buttonDown);
     setColour (juce::TextButton::textColourOffId, p.text);
-    setColour (juce::TextButton::textColourOnId, p.onAccent);
+    setColour (juce::TextButton::textColourOnId, juce::Colours::white);   // オンのボタン (アクセント色の塗り) の文字は白 (作者の指示)
     setColour (juce::Slider::thumbColourId, p.sliderThumb);
     setColour (juce::Slider::trackColourId, p.accent);
     setColour (juce::Slider::backgroundColourId, p.border);
