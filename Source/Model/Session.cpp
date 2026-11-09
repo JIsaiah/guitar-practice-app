@@ -106,7 +106,8 @@ juce::var Session::toVar() const
                                     { "metronome_start_ms", metronomeStartMs }, { "points", emptyArray() } }) },
         { "layout",   makeObject ({ { "video_in_main_area", videoInMainArea } }) },
         { "loop",     makeObject ({ { "a_ms", loopStartMs }, { "b_ms", loopEndMs }, { "enabled", loopEnabled } }) },
-        { "mixer",    makeObject ({ { "source", mixSource }, { "guitar", mixGuitar }, { "metronome", mixMetronome } }) },
+        { "mixer",    makeObject ({ { "source", mixSource }, { "guitar", mixGuitar }, { "metronome", mixMetronome },
+                                    { "lead_tab", mixLeadTab }, { "backing_tab", mixBackingTab } }) },
         { "tone",     makeObject ({ { "type", tonePresetId == "nam" ? "nam" : tonePresetId == "tone3000" ? "vst3" : "builtin" },
                                     { "preset_id", tonePresetId },
                                     { "nam_model", namModelPath },
@@ -162,6 +163,8 @@ Session Session::fromVar (const juce::var& value)
     s.mixSource = getOr<double> (mixer["source"], 1.0);
     s.mixGuitar = getOr<double> (mixer["guitar"], 1.0);
     s.mixMetronome = getOr<double> (mixer["metronome"], 0.8);
+    s.mixLeadTab = getOr<double> (mixer["lead_tab"], 1.0);
+    s.mixBackingTab = getOr<double> (mixer["backing_tab"], 1.0);
 
     const auto& tone = value["tone"];
     s.tonePresetId = getOr<juce::String> (tone["preset_id"], "clean-01");

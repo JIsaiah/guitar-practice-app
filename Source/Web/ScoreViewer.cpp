@@ -173,6 +173,15 @@ void ScoreViewer::setEqualBarWidths (bool equal)
     send (makeCommand ("layout", { { "equalBars", equal } }));
 }
 
+void ScoreViewer::setMidiTracks (const std::vector<MidiTrack>& midiTracks)
+{
+    juce::Array<juce::var> list;
+    for (const auto& t : midiTracks)
+        list.add (makeCommand ("t", { { "index", t.index }, { "volume", t.volume }, { "muted", t.muted } }));
+
+    send (makeCommand ("midiTracks", { { "tracks", list } }));
+}
+
 void ScoreViewer::showTrack (int trackIndex)
 {
     send (makeCommand ("track", { { "track", trackIndex } }));

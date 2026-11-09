@@ -63,7 +63,10 @@
   function createApi() {
     api = new alphaTab.AlphaTabApi(scoreElement, {
       core: { fontDirectory: "/alphatab/font/", useWorkers: false },
-      player: { playerMode: "disabled" },
+      // タブ譜の音 (MIDI)。alphaTab の音源 (SONiVOX の SoundFont、同梱) で鳴らす。
+      // 再生の位置・止める・始めるは、アプリの時計に合わせてこのページが行う (syncMidi)。alphaTab のカーソルは使わない
+      player: { playerMode: alphaTab.PlayerMode.EnabledSynthesizer, soundFont: "/alphatab/soundfont/sonivox.sf2",
+                enableCursor: false, enableAnimatedBeatCursor: false, enableUserInteraction: false },
       display: { staveProfile: "tab", scale: 1.0, resources: colourResources() }
     });
 
@@ -88,11 +91,18 @@
       });
     });
 
+    // 音源の準備ができた: 鳴らすトラックと音量を当てる。
+    // ※ api.midiLoaded には登録しない。alphaTab 1.8.4 では、登録したときに読む値 (loadedMidiInfo) が
+    //   自分自身を呼び続ける不具合があり、「Maximum call stack size exceeded」で読み込みが止まる (確かめた)。
+    //   代わりに、描き終わったとき・再生を始めるときに当て直す
+    api.playerReady.on(function () { midiReady = true; applyMidiTracks(); });
+
     api.renderFinished.on(function () {
       showMessage("");
       scoreElement.appendChild(barHighlight);
       scoreElement.appendChild(cursor);
       send("rendered");
+      applyMidiTracks();   // 表示するトラックを変えると MIDI が作り直されることがあるので、当て直す
     });
 
     api.error.on(function (e) {
@@ -147,6 +157,13 @@
       case "load": load(cmd.url, cmd.track || 0); break;
       case "clear": clearScore(); break;
       case "track": showTrack(cmd.track); break;
+      case "midiTracks":
+        midiTracks = cmd.tracks || [];
+        applyMidiTracks();
+        // 鳴らすトラックが無くなった (練習画面を閉じたときなど) なら、すぐに止める
+        if (api && midiReady && api.playerState === 1 && !midiTracks.some(function (t) { return !t.muted && t.volume > 0; }))
+          api.pause();
+        break;
       case "countdown": showCountdown(cmd.number, cmd.caption); break;
       case "position": receivePosition(cmd); break;
       case "layout":
@@ -207,6 +224,7 @@
 
   function load(url, track) {
     currentTrack = track;
+    if (api && midiReady && api.playerState === 1) api.pause();   // 前の曲の音を止める
     showMessage("タブ譜を読み込んでいます…");
     cursor.style.opacity = 0; barHighlight.style.opacity = 0;
     fetch(url).then(function (r) {
@@ -229,6 +247,54 @@
   }
 
   // 再生位置 (秒) から、今の小節と小節の中の位置を求めて、カーソルを動かす
+  // ---- タブ譜の音 (MIDI) ----
+  // アプリから: 鳴らすトラック (リード・バッキング) と、その音量・ミュート。ほかのトラックは鳴らさない
+  let midiTracks = [];
+  let midiReady = false;
+
+  // 当て直しの途中で、alphaTab が MIDI の知らせ (midiLoaded) を出すことがある。その中でまた当て直すと終わらないので、入れ子にしない
+  let applyingMidi = false;
+  function applyMidiTracks() {
+    if (!api || !score || !midiReady || applyingMidi) return;
+    applyingMidi = true;
+    try {
+      const listed = {};
+      for (const t of midiTracks) listed[t.index] = t;
+      for (let i = 0; i < score.tracks.length; i++) {
+        const t = listed[i];
+        api.changeTrackMute([score.tracks[i]], !t || t.muted);
+        if (t) api.changeTrackVolume([score.tracks[i]], t.volume);
+      }
+    } finally {
+      applyingMidi = false;
+    }
+  }
+
+  // アプリの再生に合わせて鳴らす。位置は拍で合わせる (アプリの BPM とずらしで、カーソルと同じ計算)。
+  // 速さは「アプリの速度 × アプリの BPM ÷ タブ譜のテンポ」。ずれが 0.08 秒を超えたら位置を合わせ直す
+  function syncMidi(seconds, bpm, offset, rate, playing) {
+    if (!api || !score || !midiReady || !api.isReadyForPlayback) return;
+
+    const beats = (seconds - offset) * bpm / 60;
+    const anyTrack = midiTracks.some(function (t) { return !t.muted && t.volume > 0; });
+    const playingNow = api.playerState === 1;   // alphaTab の PlayerState.Playing
+
+    if (!playing || !anyTrack || beats < 0 || bpm <= 0) {
+      if (playingNow) api.pause();
+      return;
+    }
+
+    const scoreTempo = score.tempo > 0 ? score.tempo : bpm;
+    const speed = Math.max(0.1, rate * bpm / scoreTempo);
+    if (Math.abs(api.playbackSpeed - speed) > 0.001) api.playbackSpeed = speed;
+
+    const tick = beats * 960;   // MIDI の位置 (4分音符 = 960)
+    const driftSeconds = Math.abs(api.tickPosition - tick) / 960 * 60 / bpm;
+    if (!playingNow) applyMidiTracks();   // 鳴らす前に、トラックのミュート・音量を確かめる
+    if (!playingNow || driftSeconds > 0.08) api.tickPosition = tick;
+    if (!playingNow) api.play();
+  }
+
   // ---- 再生位置 ----
   // アプリからの位置の報告は、届く間隔がばらつく (1秒に約10回)。届いたときに針を置くだけだと、ガタガタ進む。
   // そこで、報告の間はこのページで「最後の位置 + 経過時間 × 速度」で針を進め、画面の更新 (requestAnimationFrame) ごとに描く。
@@ -253,6 +319,7 @@
 
     timing = { bpm: cmd.bpm, offset: cmd.offset };
     setPosition(clock.seconds, timing.bpm, timing.offset);
+    syncMidi(cmd.seconds, cmd.bpm, cmd.offset, rate, playing);
 
     if (playing && !animating) {
       animating = true;

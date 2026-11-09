@@ -35,7 +35,7 @@ SessionScreen::SessionScreen (AudioEngine& e, SessionStore& s, ThemeManager& t, 
                               SessionOpenContext context, PlaybackSettingsResolver resolver)
     : engine (e), store (s), theme (t), youtube (yt), scoreViewer (sv), settings (appSettings),
       session (std::move (sessionToOpen)), openContext (std::move (context)), settingsResolver (std::move (resolver)),
-      backButton (t), saveButton (t), settingsButton (t),
+      backButton (t), saveButton (t),
       tapButton (t), tunerButton (t), metronomeButton (t), loopButton (t)
 {
     savedSnapshot = juce::JSON::toString (session.toVar());
@@ -46,7 +46,8 @@ SessionScreen::SessionScreen (AudioEngine& e, SessionStore& s, ThemeManager& t, 
     backButton.setFixedText (FixedTextId::BackToList, "<");
     backButton.setTooltip ("一覧に戻る"_jp);
     saveButton.setFixedText (FixedTextId::Save, "保存"_jp);
-    settingsButton.setFixedText (FixedTextId::Settings, "設定"_jp);
+    settingsButton.setTooltip ("設定"_jp);
+    settingsButton.setIconScale (0.5f);
     backButton.onClick = [this] { perform (Command::backToList); };
     saveButton.onClick = [this] { perform (Command::save); };
     settingsButton.onClick = [this] { if (onOpenSettings != nullptr) onOpenSettings(); };
@@ -267,6 +268,37 @@ SessionScreen::SessionScreen (AudioEngine& e, SessionStore& s, ThemeManager& t, 
     guitarMuteButton.setClickingTogglesState (false);
     guitarMuteButton.setTooltip ("ギターの音を消します"_jp);
     guitarMuteButton.onClick = [this] { toggleGuitarMute(); };
+
+    // タブ譜の音 (MIDI): リード・バッキングのトラック。音はタブ譜のページ (WebView) から出る (YouTube と同じく、アプリのミキサーは通らない)
+    leadTabLabel.setText ("リード"_jp, juce::dontSendNotification);
+    backingTabLabel.setText ("バッキング"_jp, juce::dontSendNotification);
+    leadTabLabel.setTooltip ("タブ譜のリードのトラックの音 (MIDI)"_jp);
+    backingTabLabel.setTooltip ("タブ譜のバッキングのトラックの音 (MIDI)"_jp);
+    setUpSlider (leadTabSlider, 0.0, 1.5, 0.01, session.mixLeadTab);
+    setUpSlider (backingTabSlider, 0.0, 1.5, 0.01, session.mixBackingTab);
+    showAsPercent (leadTabSlider, 100.0);
+    showAsPercent (backingTabSlider, 100.0);
+    leadTabSlider.onValueChange = [this] { session.mixLeadTab = leadTabSlider.getValue(); sendTabTracks(); };
+    backingTabSlider.onValueChange = [this] { session.mixBackingTab = backingTabSlider.getValue(); sendTabTracks(); };
+    for (auto* b : { &leadTabMuteButton, &backingTabMuteButton })
+    {
+        b->setButtonText ("ミュート"_jp);
+        b->setClickingTogglesState (false);
+    }
+    leadTabMuteButton.setTooltip ("タブ譜のリードの音を消します"_jp);
+    backingTabMuteButton.setTooltip ("タブ譜のバッキングの音を消します"_jp);
+    leadTabMuteButton.onClick = [this]
+    {
+        leadTabMuted = ! leadTabMuted;
+        leadTabMuteButton.setToggleState (leadTabMuted, juce::dontSendNotification);
+        sendTabTracks();
+    };
+    backingTabMuteButton.onClick = [this]
+    {
+        backingTabMuted = ! backingTabMuted;
+        backingTabMuteButton.setToggleState (backingTabMuted, juce::dontSendNotification);
+        sendTabTracks();
+    };
     guitarGainSlider.onValueChange = [this]
     {
         session.mixGuitar = guitarGainSlider.getValue();
@@ -397,6 +429,7 @@ SessionScreen::SessionScreen (AudioEngine& e, SessionStore& s, ThemeManager& t, 
              &toneSummaryLabel, &toneDetailButton, &presetLabel, &presetButtons[0], &presetButtons[1], &presetButtons[2],
              &sourceGainLabel, &guitarGainLabel, &metronomeGainLabel,
              &sourceGainSlider, &guitarGainSlider, &metronomeGainSlider, &sourceMuteButton, &guitarMuteButton,
+             &leadTabLabel, &backingTabLabel, &leadTabSlider, &backingTabSlider, &leadTabMuteButton, &backingTabMuteButton,
              &bpmLabel, &bpmSlider, &tapButton, &scoreOffsetLabel, &scoreOffsetControl, &offsetLabel, &offsetControl,
              &sideScroll, &tunerButton,
              &playHeading, &speedHeading, &metronomeHeading, &loopHeading,
@@ -420,6 +453,7 @@ SessionScreen::SessionScreen (AudioEngine& e, SessionStore& s, ThemeManager& t, 
              &toneSummaryLabel, &toneDetailButton, &presetLabel, &presetButtons[0], &presetButtons[1], &presetButtons[2],
              &mixerHeading, &sourceGainLabel, &guitarGainLabel, &metronomeGainLabel,
              &sourceGainSlider, &guitarGainSlider, &metronomeGainSlider, &sourceMuteButton, &guitarMuteButton,
+             &leadTabLabel, &backingTabLabel, &leadTabSlider, &backingTabSlider, &leadTabMuteButton, &backingTabMuteButton,
              &offsetHeading, &bpmLabel, &bpmSlider, &tapButton, &scoreOffsetLabel, &scoreOffsetControl, &offsetLabel, &offsetControl })
         sideContent.addAndMakeVisible (c);
 
@@ -487,7 +521,8 @@ SessionScreen::~SessionScreen()
     }
     youtube.hide();
 
-    // カウントダウンの表示は WebView のページの中にあるので、次の画面のために消しておく
+    // カウントダウンの表示と、タブ譜の音 (MIDI) は WebView のページの中にあるので、次の画面のために消す・止める
+    scoreViewer.setMidiTracks ({});
     youtube.showCountdown (0);
     scoreViewer.showCountdown (0);
 
@@ -1884,8 +1919,28 @@ void SessionScreen::switchPart (bool backing, bool fromUser)
     updatePresetButtons();
 }
 
+void SessionScreen::sendTabTracks()
+{
+    // 鳴らすのはリード・バッキングのトラックだけ (ほかのトラックは鳴らさない)。音は再生中だけ出る (ScoreViewer::setPosition)
+    std::vector<ScoreViewer::MidiTrack> tracks;
+    if (hasLeadTab())
+        tracks.push_back ({ session.leadTrack, session.mixLeadTab, leadTabMuted });
+    if (hasBackingTab())
+        tracks.push_back ({ session.backingTrack, session.mixBackingTab, backingTabMuted });
+    scoreViewer.setMidiTracks (tracks);
+
+    leadTabSlider.setAlpha (leadTabMuted ? 0.5f : 1.0f);
+    backingTabSlider.setAlpha (backingTabMuted ? 0.5f : 1.0f);
+}
+
 void SessionScreen::updatePartButtons()
 {
+    sendTabTracks();
+
+    // ミキサーのタブ譜の行 (リード・バッキング) は、そのトラックがあるときだけ出す
+    if ((hasLeadTab() || hasBackingTab()) != tabRowsShown)
+        resized();
+
     const auto& tracks = scoreViewer.getTracks();
     // タブ譜が無ければどちらも選ばない。タブ譜があれば、どちらか (今のパート) が必ず選ばれている
     const auto hasScore = session.scorePath.isNotEmpty();
@@ -2184,9 +2239,9 @@ void SessionScreen::selectTone (int index, bool fromUser)
         session.tonePresetId = namTonePresetId;
         engine.setTone (ToneType::nam);
 
-        // まだモデルを選んでいなければ、音色の設定を開いて選んでもらう
-        if (fromUser && session.namModelPath.isEmpty() && session.irPath.isEmpty() && tonePanel == nullptr)
-            toggleTonePanel();
+        // 押しても音色の設定は開かない (作者の指示: 切り替えるだけ)。モデルが無ければ、歯車から選べることを伝える
+        if (fromUser && session.namModelPath.isEmpty() && session.irPath.isEmpty())
+            setStatus ("NAM のモデルと IR は、音色の歯車から選べます"_jp);
     }
     else
     {
@@ -2565,7 +2620,7 @@ void SessionScreen::resized()
     auto top = area.removeFromTop (44);
     backButton.setBounds (top.removeFromLeft (48));
     top.removeFromLeft (16);
-    settingsButton.setBounds (top.removeFromRight (100));
+    settingsButton.setBounds (top.removeFromRight (44));   // 正方形 (上の帯の高さ)
     top.removeFromRight (8);
     saveButton.setBounds (top.removeFromRight (100));
     top.removeFromRight (8);
@@ -2693,7 +2748,9 @@ void SessionScreen::resized()
         // 中身の高さ (動画以外)
         constexpr int headingHeight = 24, rowHeight = 32;
         constexpr int toneHeight = headingHeight + 36 + 4 + 28 + 30;   // 音色のボタン、NAM のモデル名・プラグインの名前、プリセット
-        constexpr int mixerHeight = headingHeight + 3 * rowHeight;
+        const int tabRows = (hasLeadTab() ? 1 : 0) + (hasBackingTab() ? 1 : 0);   // タブ譜の音 (MIDI) の行
+        const int mixerHeight = headingHeight + (3 + tabRows) * rowHeight;
+        tabRowsShown = tabRows > 0;
         constexpr int tempoHeight = headingHeight + 3 * rowHeight + 2 * 4;
         const int sourceExtra = headingHeight + 30 + (hasSource() ? 0 : 40);
         constexpr int cardChrome = 16 + 8;   // カードの内側の余白と、カードの間
@@ -2814,6 +2871,23 @@ void SessionScreen::resized()
                     sourceMuteButton.setBounds (muteArea.reduced (0, 3).withTrimmedLeft (6));
                 if (slider == &guitarGainSlider)
                     guitarMuteButton.setBounds (muteArea.reduced (0, 3).withTrimmedLeft (6));
+                slider->setBounds (row);
+            }
+
+            // タブ譜の音 (MIDI): リード・バッキングのトラックがあるときだけ
+            for (auto [label, slider, mute, shown] : { std::tuple<juce::Label*, juce::Slider*, juce::Button*, bool>
+                                                           { &leadTabLabel, &leadTabSlider, &leadTabMuteButton, hasLeadTab() },
+                                                       { &backingTabLabel, &backingTabSlider, &backingTabMuteButton, hasBackingTab() } })
+            {
+                label->setVisible (shown);
+                slider->setVisible (shown);
+                mute->setVisible (shown);
+                if (! shown)
+                    continue;
+
+                auto row = mixer.removeFromTop (rowHeight);
+                label->setBounds (row.removeFromLeft (labelWidth));
+                mute->setBounds (row.removeFromRight (64).reduced (0, 3).withTrimmedLeft (6));
                 slider->setBounds (row);
             }
 

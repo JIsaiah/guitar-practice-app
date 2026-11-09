@@ -139,6 +139,7 @@ juce_add_binary_data(GuitarPracticeData
         Resources/Web/alphatab/alphaTab.min.js
         Resources/Web/alphatab/Bravura.woff2
         Resources/Web/alphatab/Bravura.woff
+        Resources/Web/alphatab/sonivox.sf2
         design/generated/tokens.css
         # アイコン (作者が置いた SVG。Source/UI/Icons で描く)
         "svg icons/help-circle-svgrepo-com.svg"

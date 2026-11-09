@@ -33,6 +33,10 @@ public:
     // 表示するトラックを変える (リード・バッキングの切り替え)。ファイルは読み直さない
     void showTrack (int trackIndex);
 
+    // タブ譜の音 (MIDI) で鳴らすトラック。ここに無いトラックは鳴らさない。音は再生中だけ (setPosition の playing)
+    struct MidiTrack { int index; double volume; bool muted; };
+    void setMidiTracks (const std::vector<MidiTrack>& tracks);
+
     // 読み込んだタブ譜のトラック (名前と、ギターか)
     const std::vector<ScoreParts::Track>& getTracks() const noexcept { return tracks; }
 

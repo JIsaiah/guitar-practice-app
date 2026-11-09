@@ -213,6 +213,10 @@ void SessionSetupScreen::updateState()
     // 必須は曲名だけ (作者の指示)。音源もタブ譜も無いまま作ると、練習画面のタブ譜の枠で選んでもらう
     startButton.setEnabled (session.title.isNotEmpty());
     startButton.setTooltip (session.title.isEmpty() ? "曲名を入れると始められます"_jp : juce::String());
+
+    // 始められるようになったら、アクセント色で塗る (作者の指示: 始められることを伝える)。
+    // オンの状態の見た目 (アクセント色・白い文字) を使う。押して切り替わるボタンではないので、状態だけを変える
+    startButton.setToggleState (session.title.isNotEmpty(), juce::dontSendNotification);
 }
 
 void SessionSetupScreen::paint (juce::Graphics& g)

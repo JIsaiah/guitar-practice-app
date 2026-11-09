@@ -6,6 +6,8 @@
 
 WebView2 SDK (YouTube の埋め込みに使う) も、初回の構成時に `build\webview2\` へ自動で取得されます (NuGet から。ハッシュで確認)。実行には WebView2 ランタイムが必要です (Windows 11 には標準で入っています)。
 
+タブ譜の音 (MIDI) の音源として、SONiVOX の SoundFont (`Resources/Web/alphatab/sonivox.sf2`。Apache License 2.0。`sonivox-LICENSE.txt`) を実行ファイルに埋め込んでいます。alphaTab 1.8.4 の npm パッケージ (`dist/soundfont/`) に入っているものです。
+
 ASIO SDK (Steinberg。GPL v3 との二重ライセンス) も、初回の構成時に公式サイトから `build\asiosdk\` へ自動で取得されます (ハッシュで確認)。使うのはヘッダーだけです。
 
 NeuralAmpModelerCore v0.6.0 (MIT。NAM の音色) と、その依存の Eigen (MPL-2.0)・nlohmann/json (MIT) も、初回の構成時に自動で取得されます。NAM の部分は Debug ビルドでも最適化してコンパイルします (Eigen は最適化しないとリアルタイムに間に合わないため)。

@@ -50,17 +50,44 @@ namespace
     }
 }
 
+namespace
+{
+    // アイコンの色を、テーマの色に塗り替える (ライト・ダークの両方で見えるように)。
+    // アイコンごとに元の色が違う (黒、紺 #1C274C、濃い灰 #292D32 …) ので、色の名前ではなく明るさで決める:
+    //   暗い色 → テーマの文字の色、明るい色 (並び替えの向きのアイコンの薄い側など) → それを薄くしたもの
+    juce::Colour tintFor (juce::Colour original, juce::Colour colour)
+    {
+        if (original.isTransparent())
+            return original;
+        return original.getPerceivedBrightness() < 0.5f ? colour.withMultipliedAlpha (original.getFloatAlpha())
+                                                        : colour.withMultipliedAlpha (0.25f * original.getFloatAlpha());
+    }
+
+    void tint (juce::Drawable& drawable, juce::Colour colour)
+    {
+        if (auto* shape = dynamic_cast<juce::DrawableShape*> (&drawable))
+        {
+            if (auto fill = shape->getFill(); fill.isColour())
+                shape->setFill (tintFor (fill.colour, colour));
+            if (auto stroke = shape->getStrokeFill(); stroke.isColour())
+                shape->setStrokeFill (tintFor (stroke.colour, colour));
+        }
+
+        for (auto* child : drawable.getChildren())
+            if (auto* d = dynamic_cast<juce::Drawable*> (child))
+                tint (*d, colour);
+    }
+}
+
 void Icons::draw (juce::Graphics& g, const char* fileName, juce::Rectangle<float> area, juce::Colour colour)
 {
     const auto* icon = findIcon (fileName);
     if (icon == nullptr || area.isEmpty() || icon->area.isEmpty())
         return;
 
-    // 色を塗り替えた複製を描く (アイコンは黒か、紺 #1C274C で描かれている)
+    // 色を塗り替えた複製を描く
     auto copy = icon->drawable->createCopy();
-    copy->replaceColour (juce::Colours::black, colour);
-    copy->replaceColour (juce::Colour (0xff1c274c), colour);
-    copy->replaceColour (juce::Colour (0xffd9d9d9), colour.withMultipliedAlpha (0.25f));   // 並び替えの向きのアイコンの、薄い側
+    tint (*copy, colour);
     copy->setTransform ({});   // 形の座標 (viewBox) から、そのまま area へ
 
     const auto transform = juce::RectanglePlacement (juce::RectanglePlacement::centred).getTransformToFit (icon->area, area);

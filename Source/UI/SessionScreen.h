@@ -155,6 +155,9 @@ private:
     void toggleSourceMute();
     void applySourceGain();   // ミキサーの「音源」の値とミュートを、エンジン (と YouTube) に送る
     void toggleGuitarMute();
+    void sendTabTracks();      // タブ譜の音 (MIDI) で鳴らすトラック・音量・ミュートを、タブ譜のページに送る
+    bool hasLeadTab() const noexcept    { return session.scorePath.isNotEmpty() && session.leadTrack >= 0; }
+    bool hasBackingTab() const noexcept { return session.scorePath.isNotEmpty() && session.backingTrack >= 0; }
     void applyGuitarGain();   // ミキサーの「ギター」の値とミュートを、エンジンに送る
     void showComingSoon (const juce::String& what);   // まだ作っていない機能のボタン (説明)
 
@@ -221,7 +224,8 @@ private:
     TempoOrigin savedTempoOrigin = TempoOrigin::manual;
 
     // 上部
-    FixedTextButton backButton, saveButton, settingsButton;
+    FixedTextButton backButton, saveButton;
+    IconButton settingsButton { Icons::settings };   // 設定 (歯車の正方形のボタン。一覧画面と同じ。作者の指示)
     juce::Label titleLabel, statusLabel;
     juce::Label artistLabel;   // 曲名の右に「—  アーティスト名」(作者のレイアウト)
 
@@ -270,6 +274,13 @@ private:
     WheelSlider sourceGainSlider, guitarGainSlider, metronomeGainSlider;
     juce::TextButton sourceMuteButton;   // 音源だけのミュート
     juce::TextButton guitarMuteButton;   // ギターのミュート (メトロノームには付けない。作者の指示)
+
+    // タブ譜の音 (MIDI): リード・バッキングのトラックの音量とミュート (トラックがあるときだけ出す。作者の指示)
+    juce::Label leadTabLabel, backingTabLabel;
+    WheelSlider leadTabSlider, backingTabSlider;
+    juce::TextButton leadTabMuteButton, backingTabMuteButton;
+    bool leadTabMuted = false, backingTabMuted = false;   // セッションには保存しない (ほかのミュートと同じ)
+    bool tabRowsShown = false;   // 並べたときにタブ譜の行を出していたか (変わったら並べ直す)
     juce::Label bpmLabel, scoreOffsetLabel, offsetLabel;
     WheelSlider bpmSlider;
     FixedTextButton tapButton;

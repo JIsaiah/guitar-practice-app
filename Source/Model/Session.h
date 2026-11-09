@@ -79,6 +79,7 @@ struct Session
     double mixSource = 1.0;
     double mixGuitar = 1.0;
     double mixMetronome = 0.8;
+    double mixLeadTab = 1.0, mixBackingTab = 1.0;   // タブ譜の音 (MIDI) の音量: リード・バッキングのトラック (1.0 = 100%)
 
     juce::String tonePresetId = "clean-01";   // 簡易な音色の ID か、"nam"、"tone3000"
     juce::String pluginPath;                   // VST3 プラグイン (TONE3000) の .vst3
