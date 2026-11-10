@@ -37,6 +37,11 @@ juce::File TimingLog::getFile()
 
 void TimingLog::mark (const juce::String& label, double startMs)
 {
+   #if ! JUCE_DEBUG
+    // 時間の計測は開発用。配布版 (Release) では timing.log を書かない
+    juce::ignoreUnused (label, startMs);
+    return;
+   #else
     const auto line = juce::Time::getCurrentTime().formatted ("%Y-%m-%d %H:%M:%S") + "  "
                     + label + ": " + juce::String (now() - startMs, 1) + " ms";
     DBG ("Timing: " << line);
@@ -44,4 +49,5 @@ void TimingLog::mark (const juce::String& label, double startMs)
     const auto file = getFile();
     file.getParentDirectory().createDirectory();
     file.appendText (line + "\n", false, false, "\n");
+   #endif
 }

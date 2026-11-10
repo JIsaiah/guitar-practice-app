@@ -34,6 +34,14 @@ cmake --build build --config Debug
 - 時間の計測の記録: `%APPDATA%\GuitarPractice\timing.log`。WebView のデータ: `%APPDATA%\GuitarPractice\WebView2\`
 - VC++ ランタイムは静的リンクしているため、配布先に追加のインストールは不要です
 
+## 配布用の zip を作る（GitHub の Releases 用）
+
+```powershell
+powershell -ExecutionPolicy Bypass -File release\make-release.ps1
+```
+
+Release ビルドをして、`dist\suguhiku-v<版>-windows-x64.zip` を作ります（中身: `suguhiku.exe`、`はじめにお読みください.txt`、`LICENSE.txt`、`licenses\`）。版の番号は `CMakeLists.txt` の `project(... VERSION ...)` です。一度 `cmake` の構成をして、依存ライブラリを取得してから使ってください（ライセンスの文書を `build\` から集めるため）。
+
 ## ソースの構成
 
 | パス | 役割 |

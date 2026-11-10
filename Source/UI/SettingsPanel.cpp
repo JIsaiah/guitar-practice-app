@@ -114,7 +114,9 @@ SettingsPanel::SettingsPanel (AppSettings& s, ThemeManager& t, juce::AudioDevice
     logoTunerButton.setTooltip ("ロゴのトゲや伸ばし方を、スライダーで調整するウィンドウを開きます"_jp);
     logoTunerButton.onClick = [this] { if (onOpenLogoTuner != nullptr) onOpenLogoTuner(); };
     addAndMakeVisible (deathMetalToggle);
-    addAndMakeVisible (logoTunerButton);
+   #if JUCE_DEBUG
+    addAndMakeVisible (logoTunerButton);   // ロゴ調整は開発用。配布版 (Release) では出さない
+   #endif
 
     //==== 詳細設定: 色 ====
     setUpColourRow (accentRow, "アクセント"_jp);

@@ -3,7 +3,7 @@
 #include <juce_core/juce_core.h>
 
 // 起動や画面遷移にかかった時間を記録する (実装指示 T5)
-// %APPDATA%\GuitarPractice\timing.log に1行ずつ追記し、Debug ビルドでは DBG にも出す
+// %APPDATA%\GuitarPractice\timing.log に1行ずつ追記し、DBG にも出す (Debug ビルドだけ。配布版 (Release) では何もしない)
 namespace TimingLog
 {
     // 今の時刻 (ミリ秒)。Time::getMillisecondCounterHiRes() と同じ基準
