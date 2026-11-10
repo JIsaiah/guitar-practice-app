@@ -84,6 +84,7 @@ void MainComponent::showList()
         // 「通しで再生」「この曲から通しで再生」: 1曲目は開くだけで、再生は自分で始める (作者の指示)。
         // 2曲目からは自動で送る
         setlistAutoAdvance = true;
+        setlistCarryOver.reset();   // 1曲目は、そのセッションの開き方のまま
         openSetlistEntryLater (setlistId, entryIndex, -1.0);
     };
 
@@ -135,6 +136,12 @@ void MainComponent::openSetlistEntryLater (const juce::String& setlistId, int en
                 if (auto* screen = dynamic_cast<SessionScreen*> (m.currentScreen.get()))
                 {
                     m.connectSetlist (*screen, setlistId, entry.entryId);
+
+                    // 前の曲のメトロノーム・右のパネルの状態を引き継ぐ (曲間でも保つ。作者の指示)
+                    if (m.setlistCarryOver.has_value())
+                        screen->applySetlistCarryOver (*m.setlistCarryOver);
+                    m.setlistCarryOver.reset();
+
                     if (startDelaySeconds >= 0.0)
                         screen->startAutomatically (startDelaySeconds);
                 }
@@ -192,6 +199,7 @@ void MainComponent::connectSetlist (SessionScreen& screen, const juce::String& s
     {
         if (safe != nullptr)
         {
+            setlistCarryOver = safe->getSetlistCarryOver();   // 画面を消す前に、引き継ぐ状態を取っておく
             safe->stopForSetlist();
             safe->saveChangesQuietly();
         }

@@ -412,6 +412,9 @@
     if (twoButtons && (e.buttons & 3) === 0) setTimeout(function () { twoButtons = false; }, 0);   // click の後で戻す
   }, true);
   document.addEventListener("contextmenu", function (e) { if (twoButtons || (e.buttons & 1)) e.preventDefault(); }, true);
+  // 真ん中のボタンでもラジアルメニューを開く。押したときの自動スクロール (丸い印が出るもの) を止める
+  document.addEventListener("mousedown", function (e) { if (e.button === 1) e.preventDefault(); }, true);
+  document.addEventListener("auxclick", function (e) { if (e.button === 1) e.preventDefault(); }, true);
 
   // 小節をクリックしたら、その小節の頭から再生できるように、アプリに知らせる
   scoreElement.addEventListener("click", function (e) {

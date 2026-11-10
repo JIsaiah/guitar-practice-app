@@ -66,26 +66,38 @@ void SetlistBar::paint (juce::Graphics& g)
     auto left = area.removeFromLeft (juce::jmin (260, area.getWidth() / 3));
     g.setColour (muted);
     g.setFont (AppLookAndFeel::scaled (juce::FontOptions (12.5f, juce::Font::bold)));
-    g.drawText ("セットリスト"_jp, left.removeFromTop (left.getHeight() / 2).withTrimmedTop (4), juce::Justification::bottomLeft, true);
+    g.drawText ("セットリスト"_jp, left.removeFromTop (headingRowHeight).withTrimmedTop (4), juce::Justification::bottomLeft, true);
     g.setColour (text);
     g.setFont (AppLookAndFeel::scaled (juce::FontOptions (16.0f, juce::Font::bold)));
     g.drawText (info.setlistName + "   " + juce::String (info.position) + " / " + juce::String (info.count),
-                left, juce::Justification::topLeft, true);
+                left, juce::Justification::centredLeft, true);
 
-    // 中央: 次の曲名と、注意 (ループ中、通し再生を止めた)
+    // 中央: 上の行に「次の曲」の見出しと注意 (ループ中、通し再生を止めた)、下の行に次の曲名を大きく
+    // (作者の指示: 演奏中に離れた位置からでも読めるように、曲名を大きくした)
     area.removeFromLeft (16);
-    auto upper = area.removeFromTop (area.getHeight() / 2);
-    g.setColour (text);
-    g.setFont (AppLookAndFeel::scaled (juce::FontOptions (15.0f)));
-    g.drawText (info.nextTitle.isNotEmpty() ? "次: "_jp + info.nextTitle : "最後の曲です"_jp,
-                upper.withTrimmedTop (4), juce::Justification::bottomLeft, true);
+    auto upper = area.removeFromTop (headingRowHeight).withTrimmedTop (4);
+    const auto headingFont = juce::Font (AppLookAndFeel::scaled (juce::FontOptions (12.5f, juce::Font::bold)));
+    const auto heading = info.nextTitle.isNotEmpty() ? "次の曲"_jp : "最後の曲です"_jp;
+    g.setColour (muted);
+    g.setFont (headingFont);
+    g.drawText (heading, upper, juce::Justification::bottomLeft, true);
 
     const auto message = ! info.autoAdvance ? "通し再生を止めています。曲が終わっても次に進みません"_jp : notice;
     if (message.isNotEmpty())
     {
+        juce::GlyphArrangement glyphs;
+        glyphs.addLineOfText (headingFont, heading, 0.0f, 0.0f);
+        auto messageArea = upper.withTrimmedLeft ((int) std::ceil (glyphs.getBoundingBox (0, -1, true).getWidth()) + 16);
         g.setColour (accent);
         g.setFont (AppLookAndFeel::scaled (juce::FontOptions (13.0f)));
-        g.drawText (message, area, juce::Justification::topLeft, true);
+        g.drawText (message, messageArea, juce::Justification::bottomLeft, true);
+    }
+
+    if (info.nextTitle.isNotEmpty())
+    {
+        g.setColour (text);
+        g.setFont (AppLookAndFeel::scaled (juce::FontOptions (26.0f, juce::Font::bold)));
+        g.drawText (info.nextTitle, area, juce::Justification::centredLeft, true);
     }
 
     // 下: セットリスト全体の進み具合
@@ -101,7 +113,7 @@ void SetlistBar::resized()
     auto area = getLocalBounds().reduced (14, 0);
     progressArea = area.removeFromBottom (10).removeFromTop (4);
 
-    auto buttons = area.reduced (0, 8);
+    auto buttons = area.withSizeKeepingCentre (area.getWidth(), juce::jmin (40, area.getHeight() - 16));   // 帯を高くしても、ボタンは前の高さ
     stopButton.setBounds (buttons.removeFromRight (170));
     buttons.removeFromRight (12);
     nextButton.setBounds (buttons.removeFromRight (120));

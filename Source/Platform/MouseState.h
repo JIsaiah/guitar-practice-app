@@ -8,4 +8,5 @@ namespace MouseState
 {
     bool isLeftDown();
     bool isRightDown();
+    bool isMiddleDown();   // 真ん中のボタン (ホイールを押し込む)。トラックボールでもラジアルメニューを開けるように
 }

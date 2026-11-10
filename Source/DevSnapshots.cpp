@@ -187,6 +187,8 @@ juce::String DevSnapshots::renderAll (const juce::File& folder)
 
                 SessionScreen practice (engine, store, theme, appSettings, youtube, scoreViewer, session);
                 snap (practice, 1280, 800, "practice" + suffix);
+                snap (practice, 1920, 1080, "practice_wide" + suffix);   // 大きな画面: 下の帯の余白がグループの間に分かれるか
+                practice.setSize (1280, 800);
 
                 // ラジアルメニュー: 何も選んでいない / 「再生・停止」を選んでいる / 画面の左上の端で開いた
                 {

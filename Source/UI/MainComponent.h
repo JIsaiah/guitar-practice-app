@@ -55,6 +55,10 @@ private:
     // 通し再生: 曲が終わったら次の曲へ進むか (「通し再生を止める」で false。次・前・再開で true に戻る)
     bool setlistAutoAdvance = true;
 
+    // 通し再生で次・前の曲へ移るときに、前の曲の画面から取っておく状態 (メトロノーム・右のパネル)。
+    // 次の曲を開いたら当てて消す。一覧から通し再生を始めたときは無い
+    std::optional<SetlistCarryOver> setlistCarryOver;
+
     // YouTube のプレイヤー (WebView)。アプリの起動中に1つだけ作り、練習画面に貸す (実装指示 T5)
     YouTubePlayer youtubePlayer;
     ScoreViewer scoreViewer;   // タブ譜 (alphaTab) の WebView。これも1つだけ作って使い回す

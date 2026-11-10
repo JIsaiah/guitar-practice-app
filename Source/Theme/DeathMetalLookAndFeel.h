@@ -13,6 +13,9 @@ public:
     static inline float textScale = 1.0f;
     static juce::FontOptions scaled (juce::FontOptions font) { return font.withHeight (font.getHeight() * textScale); }
 
+    // Font が覚えている書体を捨てた写し (テーマを切り替えたあと、新しい書体で描かせるため)
+    static juce::Font withoutCachedTypeface (const juce::Font& font);
+
     void applyPalette (const Palette& palette);
 
     // 文字

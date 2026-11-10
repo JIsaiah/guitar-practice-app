@@ -60,8 +60,17 @@ void AppLookAndFeel::applyPalette (const Palette& p)
 // 文字: 部品が持っている大きさに、文字の大きさの倍率を掛ける
 juce::Font AppLookAndFeel::getLabelFont (juce::Label& label)
 {
-    const auto font = label.getFont();
+    // ラベルが持っている Font は、一度使った書体を中に覚えている。
+    // そのまま使うと、デスメタルモードを解除しても Dela Gothic One のままになるので、覚えた書体を捨てた写しを返す
+    const auto font = withoutCachedTypeface (label.getFont());
     return font.withHeight (font.getHeight() * textScale);
+}
+
+juce::Font AppLookAndFeel::withoutCachedTypeface (const juce::Font& font)
+{
+    // JUCE の Font は、横の倍率を設定し直すと、覚えていた書体を捨てる (値は同じでも)。
+    // 次に描くときに、そのときの LookAndFeel の書体を引き直す
+    return font.withHorizontalScale (font.getHorizontalScale());
 }
 
 juce::Font AppLookAndFeel::getTextButtonFont (juce::TextButton&, int buttonHeight)

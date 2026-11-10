@@ -17,6 +17,17 @@ namespace
                                                         (size_t) BinaryData::DelaGothicOneRegular_ttfSize);
     }
 
+    // 入力欄 (TextEditor) は、文字ごとに Font を持っていて、その Font が使った書体を覚えている。
+    // テーマを切り替えたら、覚えた書体を捨てた Font を当て直す (しないと、デスメタルの書体が残る)
+    void refreshTextEditorFonts (juce::Component& component)
+    {
+        if (auto* editor = dynamic_cast<juce::TextEditor*> (&component))
+            editor->applyFontToAllText (AppLookAndFeel::withoutCachedTypeface (editor->getFont()));
+
+        for (auto* child : component.getChildren())
+            refreshTextEditorFonts (*child);
+    }
+
     ColourTheme parseColourTheme (const juce::String& text)
     {
         if (text == "light") return ColourTheme::Light;
@@ -194,6 +205,7 @@ void ThemeManager::apply()
         if (auto* resizable = dynamic_cast<juce::ResizableWindow*> (window))
             resizable->setBackgroundColour (lookAndFeel.findColour (juce::ResizableWindow::backgroundColourId));
 
+        refreshTextEditorFonts (*window);
         window->sendLookAndFeelChange();
         window->repaint();
     }

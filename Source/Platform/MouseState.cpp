@@ -13,8 +13,10 @@
 // マウスの左右を入れ替える設定でも、VK_LBUTTON / VK_RBUTTON は「体の左右」のボタンを返す (両方を見るので、どちらでも同じ)
 bool MouseState::isLeftDown()  { return (GetAsyncKeyState (VK_LBUTTON) & 0x8000) != 0; }
 bool MouseState::isRightDown() { return (GetAsyncKeyState (VK_RBUTTON) & 0x8000) != 0; }
+bool MouseState::isMiddleDown() { return (GetAsyncKeyState (VK_MBUTTON) & 0x8000) != 0; }
 
 #else
 bool MouseState::isLeftDown()  { return false; }
 bool MouseState::isRightDown() { return false; }
+bool MouseState::isMiddleDown() { return false; }
 #endif

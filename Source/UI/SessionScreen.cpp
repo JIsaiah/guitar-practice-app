@@ -521,7 +521,7 @@ SessionScreen::SessionScreen (AudioEngine& e, SessionStore& s, ThemeManager& t, 
     startTimerHz (30);
     updateLoading();   // 音源もタブ譜も無いときなどは、すぐに消す
 
-    // ラジアルメニュー: マウスの左右を同時に 0.5 秒押し続けると、カーソルのところに出る
+    // ラジアルメニュー: マウスの左右を同時に (または真ん中のボタンを) 0.2 秒押し続けると、カーソルのところに出る
     radialMenu = std::make_unique<RadialMenu> (*this, [this] { return makeRadialItems(); });
     radialMenu->onOpenChanged = [this] (bool open) { scoreViewer.setFrozen (open); };   // 出している間、タブ譜を止める
 }
@@ -2285,38 +2285,6 @@ void SessionScreen::updateLoading()
     loadingOverlay.repaint();   // 回る弧を動かす
 }
 
-#if JUCE_DEBUG
-// 開発用 (後で消す): 今流れているタブ譜の小節と拍子を、別の小さいウィンドウに出す
-void SessionScreen::updateDevScoreInfo (double scoreBeats)
-{
-    // 画面に出ている練習画面のときだけ (開発用の画面の書き出し (DevSnapshots) では出さない)
-    if (! isShowing())
-        return;
-
-    if (devScoreInfo == nullptr)
-    {
-        devScoreInfo = std::make_unique<DevScoreInfoWindow>();
-        const auto screen = getScreenBounds();
-        devScoreInfo->setTopLeftPosition (screen.getX() + 20, screen.getY() + 80);
-        devScoreInfo->setVisible (true);
-    }
-
-    const auto& bars = scoreViewer.getBarStartBeats();
-    const auto& signatures = scoreViewer.getBarSignatures();
-    const bool scoreBars = usesScoreBars();
-    static const std::vector<double> noBars;
-    static const std::vector<MusicInfo::TimeSignature> noSignatures;
-    const auto where = MusicInfo::locateBeat (scoreBeats, scoreBars ? bars : noBars, scoreBars ? signatures : noSignatures);
-
-    juce::String text;
-    text << "小節 "_jp << (scoreBeats >= 0.0 ? juce::String (where.bar + 1) : juce::String ("-"))
-         << (scoreBars ? " / " + juce::String ((int) bars.size()) : " (タブ譜なし)"_jp) << "\n"
-         << "拍子 "_jp << where.signature.numerator << "/" << where.signature.denominator
-         << "   拍 "_jp << (scoreBeats >= 0.0 ? juce::String (where.beatInBar + 1) : juce::String ("-"));
-    devScoreInfo->setInfo (text);
-}
-#endif
-
 void SessionScreen::toggleVideoCard()
 {
     videoCardCollapsed = ! videoCardCollapsed;
@@ -2369,6 +2337,27 @@ void SessionScreen::toggleMetronome()
     // 基本は、再生中に曲の拍に合わせて鳴る。止まっているときは「単体」で鳴らせる
     if (metronomeOn && ! isTransportPlaying())
         setStatus ("メトロノーム: 再生すると曲に合わせて鳴ります。「単体」でメトロノームだけ鳴らせます"_jp);
+}
+
+SetlistCarryOver SessionScreen::getSetlistCarryOver() const
+{
+    return { metronomeOn, sidePanelVisible };
+}
+
+void SessionScreen::applySetlistCarryOver (const SetlistCarryOver& carry)
+{
+    // メトロノームの「曲に合わせる」: 前の曲と同じにする (案内の文は出さない)
+    if (metronomeOn != carry.metronomeOn)
+    {
+        metronomeOn = carry.metronomeOn;
+        engine.setMetronomeEnabled (metronomeOn);
+        metronomeButton.setToggleState (metronomeOn, juce::dontSendNotification);
+        logMetronomeState ("セットリストの前の曲から引き継ぎ"_jp);
+    }
+
+    // 右のパネル: 前の曲で隠していたら、隠したまま開く
+    if (sidePanelVisible != carry.sidePanelVisible)
+        toggleSidePanel();
 }
 
 void SessionScreen::toggleMetronomeSolo()
@@ -2710,9 +2699,6 @@ void SessionScreen::timerCallback()
     scoreView.setBarAndBeat (bar, beat);
     updateMetronomeDots (beats);
 
-   #if JUCE_DEBUG
-    updateDevScoreInfo ((position - getScoreOffsetSeconds()) * session.bpm / 60.0);   // タブ譜のカーソルと同じ位置
-   #endif
     // タブ譜は「拍の位置」+「タブ譜だけ」。針はページの中で、速度と経過時間からなめらかに進める
     const auto rate = isYouTube() ? youtube.getState().rate : session.speedPercent / 100.0;
     scoreViewer.setPosition (position, session.bpm, getScoreOffsetSeconds(), rate, playing);
@@ -2865,10 +2851,11 @@ void SessionScreen::resized()
 
     // 曲名は文字の幅だけ取り、その右にアーティスト名。残りに状態 (「保存しました」など) を右寄せで出す
     {
-        const auto textWidth = [] (const juce::Label& label)
+        const auto textWidth = [] (juce::Label& label)
         {
+            // 描くときと同じ Font で測る (文字の大きさの倍率・今のテーマの書体が入る)
             juce::GlyphArrangement glyphs;
-            glyphs.addLineOfText (label.getFont(), label.getText(), 0.0f, 0.0f);
+            glyphs.addLineOfText (label.getLookAndFeel().getLabelFont (label), label.getText(), 0.0f, 0.0f);
             return (int) std::ceil (glyphs.getBoundingBox (0, -1, true).getWidth()) + 12;   // ラベルの左右の余白
         };
         const auto half = top.getWidth() / 2;
@@ -2895,6 +2882,13 @@ void SessionScreen::resized()
     constexpr int loopWidth = 96 + 96 + 96 + gap * 2;
     const auto speedWidth = juce::jlimit (130, 360, bottom.getWidth() - playWidth - metronomeWidth - loopWidth - groupGap * 3);
 
+    // 大きな画面では、速度の幅が上限になっても余白が残る。残りを、帯の左右の端とグループの間 (3か所) に分ける。
+    // 作者の指示で、端を多め (1か所あたり、間の2倍) にする: 端2か所 × 2 + 間3か所 × 1 = 7 つ分に割る
+    const auto spare = juce::jmax (0, bottom.getWidth() - (speedWidth + loopWidth + metronomeWidth + playWidth + groupGap * 3));
+    const auto spareUnit = spare / 7;
+    const auto sectionGap = groupGap + spareUnit;
+    bottom.reduce ((spare - spareUnit * 3) / 2, 0);   // 端の分 (割り切れない端数も、ここで左右に分ける)
+
     // 見出し (20px) と、その下に部品の行 (残り)
     const auto group = [&] (SectionHeading& heading, int width, bool divider)
     {
@@ -2904,8 +2898,8 @@ void SessionScreen::resized()
 
         if (divider)
         {
-            bottomDividers.push_back (bottom.getX() + groupGap / 2);
-            bottom.removeFromLeft (groupGap);
+            bottomDividers.push_back (bottom.getX() + sectionGap / 2);
+            bottom.removeFromLeft (sectionGap);
         }
         return g;
     };
@@ -2959,8 +2953,8 @@ void SessionScreen::resized()
 
     // スクロールする部分 (sideScroll) の中の部品は、sideScroll ごと隠せばよい
     for (auto* c : std::initializer_list<juce::Component*> {
-             &sourceHeading, &splitter, &videoView, &sourceInfoLabel, &sourceRemoveButton, &chooseFileButton, &pasteUrlButton,
-             &sideScroll })
+             &sourceHeading, &videoCollapseButton, &splitter, &videoView, &sourceInfoLabel, &sourceRemoveButton,
+             &chooseFileButton, &pasteUrlButton, &sideScroll })
         c->setVisible (sidePanelVisible);
 
     if (sidePanelVisible)

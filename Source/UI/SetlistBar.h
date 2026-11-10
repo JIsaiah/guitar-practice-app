@@ -26,7 +26,8 @@ public:
     std::function<void()> onPrevious, onNext;
     std::function<void (bool resume)> onAutoAdvanceToggled;   // 止める (false) ／再開 (true)
 
-    static constexpr int preferredHeight = 64;
+    static constexpr int preferredHeight = 80;     // 次の曲名を大きく出すため、64 から高くした
+    static constexpr int headingRowHeight = 24;    // 中央の上の行 (「次の曲」と注意)。その下が曲名
 
     void paint (juce::Graphics& g) override;
     void resized() override;

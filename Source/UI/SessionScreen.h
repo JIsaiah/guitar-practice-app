@@ -14,7 +14,6 @@
 #include "Commands.h"
 #include "CountdownOverlay.h"
 #include "Icons.h"
-#include "DevScoreInfoWindow.h"
 #include "../Audio/ScoreClock.h"
 #include "SetlistBar.h"
 #include "PracticeViews.h"
@@ -53,6 +52,8 @@ public:
     void stopForSetlist();         // 「通し再生を止める」: 今の曲とカウントダウンを止める
     void showSetlistEnd();         // 最後の曲が終わった
     void saveChangesQuietly();     // 次の曲へ移る前に、未保存の変更を保存する
+    SetlistCarryOver getSetlistCarryOver() const;                 // 次の曲へ引き継ぐ状態 (メトロノーム・右のパネル)
+    void applySetlistCarryOver (const SetlistCarryOver& carry);   // 前の曲から引き継いだ状態を当てる
 
     std::function<void()> onSongFinished;                  // 曲が最後まで再生された (ループ中は来ない)
     std::function<void()> onSetlistPrevious, onSetlistNext;
@@ -179,11 +180,6 @@ private:
     void toggleVideoCard();
     bool videoCardCollapsed = false;
 
-   #if JUCE_DEBUG
-    // 開発用 (後で消す): 今流れているタブ譜の小節と拍子を、別の小さいウィンドウに出す
-    std::unique_ptr<DevScoreInfoWindow> devScoreInfo;
-    void updateDevScoreInfo (double scoreBeats);
-   #endif
     void sendTabTracks();      // タブ譜の音 (MIDI) で鳴らすトラック・音量・ミュートを、タブ譜のページに送る
     bool hasLeadTab() const noexcept    { return session.scorePath.isNotEmpty() && session.leadTrack >= 0; }
     bool hasBackingTab() const noexcept { return session.scorePath.isNotEmpty() && session.backingTrack >= 0; }
@@ -212,7 +208,7 @@ private:
     void updatePresetButtons();
     int& currentPartPreset() { return session.backingActive ? session.backingPreset : session.leadPreset; }
 
-    // ラジアルメニュー (マウスの左右を同時に押し続ける)。並べる操作は開くたびに作る (ミュート中かなどで文字が変わる)
+    // ラジアルメニュー (マウスの左右を同時に、または真ん中のボタンを押し続ける)。並べる操作は開くたびに作る (ミュート中かなどで文字が変わる)
     std::unique_ptr<RadialMenu> radialMenu;
     std::vector<RadialMenu::Item> makeRadialItems();
     void stepPreset (int direction);   // 中身のある音色のプリセットを、右 (+1)・左 (-1) に1つ進める

@@ -58,14 +58,19 @@ bool RadialMenu::canStartAt (juce::Point<int> screenPos) const
 
 void RadialMenu::timerCallback()
 {
-    const bool left = MouseState::isLeftDown(), right = MouseState::isRightDown();
+    const bool left = MouseState::isLeftDown(), right = MouseState::isRightDown(), middle = MouseState::isMiddleDown();
+
+    // 開く操作: 左右の同時押し、または真ん中のボタン (ホイールの押し込み) を押し続ける。
+    // 左右の同時押しはトラックボールでは難しいので、真ん中のボタンでも開けるようにした (作者の指示)
+    const bool pressed = (left && right) || middle;
+    const bool anyDown = left || right || middle;
     const auto mouse = juce::Desktop::getInstance().getMainMouseSource().getScreenPosition().roundToInt();
     const auto now = juce::Time::getMillisecondCounterHiRes();
 
     switch (phase)
     {
         case Phase::idle:
-            if (left && right && canStartAt (mouse))
+            if (pressed && canStartAt (mouse))
             {
                 phase = Phase::holding;
                 holdStartMs = now;
@@ -73,8 +78,8 @@ void RadialMenu::timerCallback()
             break;
 
         case Phase::holding:
-            if (! (left && right))
-                phase = left || right ? Phase::waitRelease : Phase::idle;   // 0.5 秒より前に離した
+            if (! pressed)
+                phase = anyDown ? Phase::waitRelease : Phase::idle;   // 出るより前に離した
             else if (now - holdStartMs >= holdMs)
                 show (mouse);
             break;
@@ -90,8 +95,8 @@ void RadialMenu::timerCallback()
             const auto local = (mouse - target.getScreenPosition()).toFloat();
             window->updateHover (local);
 
-            // どちらかのボタンを離したら、選んでいる操作を実行して閉じる
-            if (! (left && right))
+            // ボタンを離したら (左右ならどちらか、真ん中ならそれ)、選んでいる操作を実行して閉じる
+            if (! pressed)
             {
                 close (true);
                 break;
@@ -103,8 +108,8 @@ void RadialMenu::timerCallback()
         }
 
         case Phase::waitRelease:
-            // 両方のボタンを離すまでは、次を始めない。離したら、使えなくしていた部品を戻す
-            if (! left && ! right)
+            // すべてのボタンを離すまでは、次を始めない。離したら、使えなくしていた部品を戻す
+            if (! anyDown)
             {
                 phase = Phase::idle;
                 if (suppressed != nullptr)
