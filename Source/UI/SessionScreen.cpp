@@ -159,6 +159,19 @@ SessionScreen::SessionScreen (AudioEngine& e, SessionStore& s, ThemeManager& t, 
     chooseFileButton.setButtonText ("ファイルを選ぶ…"_jp);
     pasteUrlButton.setButtonText ("YouTube の URL を貼り付け"_jp);
     chooseFileButton.onClick = [this] { chooseSourceFile(); };
+
+    // 音源のカードをたたむボタン (右上)。たたんだかはアプリの設定に覚える
+    videoCardCollapsed = settings.getVideoCardCollapsed();
+    videoCollapseButton.setButtonText (videoCardCollapsed ? juce::String::fromUTF8 ("▼") : juce::String::fromUTF8 ("▲"));
+    videoCollapseButton.setTooltip (videoCardCollapsed ? "音源のカードを広げる"_jp : "音源のカードをたたむ"_jp);
+    videoCollapseButton.setMouseClickGrabsKeyboardFocus (false);
+    videoCollapseButton.setWantsKeyboardFocus (false);
+    videoCollapseButton.onClick = [this] { toggleVideoCard(); };
+    addAndMakeVisible (videoCollapseButton);
+
+    // 読み込み中の画面 (いちばん手前。準備ができたら消す)
+    loadingStartedMs = juce::Time::getMillisecondCounterHiRes();
+    addAndMakeVisible (loadingOverlay);
     pasteUrlButton.onClick = [this] { pasteYouTubeUrl(); };
 
     //==== 右: 音色 (簡易な音色 3 つ、TONE3000 プラグイン、NAM) ====
@@ -403,6 +416,7 @@ SessionScreen::SessionScreen (AudioEngine& e, SessionStore& s, ThemeManager& t, 
     {
         session.speedPercent = (int) speedSlider.getValue();
         engine.setSpeed (session.speedPercent / 100.0);
+        scoreClock.setRate (session.speedPercent / 100.0, juce::Time::getMillisecondCounterHiRes());   // タブ譜だけのとき
 
         if (isYouTube())
         {
@@ -505,6 +519,7 @@ SessionScreen::SessionScreen (AudioEngine& e, SessionStore& s, ThemeManager& t, 
     setUpYouTube();
     loadScore();
     startTimerHz (30);
+    updateLoading();   // 音源もタブ譜も無いときなどは、すぐに消す
 
     // ラジアルメニュー: マウスの左右を同時に 0.5 秒押し続けると、カーソルのところに出る
     radialMenu = std::make_unique<RadialMenu> (*this, [this] { return makeRadialItems(); });
@@ -945,25 +960,113 @@ void SessionScreen::updateEmptyPrompt()
 //==============================================================================
 double SessionScreen::getPosition() const
 {
+    if (isScoreOnly())
+        return scoreClock.getPosition (juce::Time::getMillisecondCounterHiRes());
     return isYouTube() ? youtube.getEstimatedTime() : engine.getPositionSeconds();
 }
 
 double SessionScreen::getLength() const
 {
+    if (isScoreOnly())
+        return getScoreLengthSeconds();
     return isYouTube() ? youtube.getState().duration : engine.getSourceLengthSeconds();
 }
 
 bool SessionScreen::isTransportPlaying() const
 {
+    if (isScoreOnly())
+        return scoreClock.isPlaying();
     return isYouTube() ? youtube.isPlaying() : (isLocalSource() && engine.isPlaying());
 }
 
 void SessionScreen::seekTo (double seconds)
 {
-    if (isYouTube())
+    if (isScoreOnly())
+        scoreClock.seek (juce::jlimit (0.0, getScoreLengthSeconds(), seconds), juce::Time::getMillisecondCounterHiRes());
+    else if (isYouTube())
         youtube.seek (seconds);
     else
         engine.seekSeconds (seconds);
+}
+
+void SessionScreen::pauseTransport()
+{
+    if (isScoreOnly())
+        scoreClock.pause (juce::Time::getMillisecondCounterHiRes());
+    else if (isYouTube())
+        youtube.pause();
+    else
+        engine.setPlaying (false);
+}
+
+//==============================================================================
+// タブ譜だけで再生する (音源が無いとき)
+bool SessionScreen::isScoreOnly() const
+{
+    return ! hasSource() && session.scorePath.isNotEmpty() && ! scoreViewer.getBarStartBeats().empty();
+}
+
+double SessionScreen::getScoreLengthSeconds() const
+{
+    const auto& bars = scoreViewer.getBarStartBeats();
+    const auto& signatures = scoreViewer.getBarSignatures();
+    if (bars.empty() || session.bpm <= 0.0)
+        return 0.0;
+
+    // 最後の小節の始まり + その小節の長さ (拍子から。4分音符の数)
+    const auto last = signatures.empty() ? MusicInfo::TimeSignature {} : signatures.back();
+    const auto lastBarBeats = last.denominator > 0 ? last.numerator * 4.0 / last.denominator : 4.0;
+    return getScoreOffsetSeconds() + (bars.back() + lastBarBeats) * 60.0 / session.bpm;
+}
+
+void SessionScreen::updateScoreOnly (double nowMs)
+{
+    const auto scoreOnly = isScoreOnly();
+
+    // タブ譜だけになった (タブ譜を読み込んだ・音源を外した) / 音源が入った
+    if (scoreOnly != scoreOnlyActive)
+    {
+        scoreOnlyActive = scoreOnly;
+        scoreClock.pause (nowMs);
+        scoreClock.seek (0.0, nowMs);
+        scoreClock.setRate (session.speedPercent / 100.0, nowMs);
+        // 音源が入ったときは、音源の読み込みの側が準備の状態を決める (読み込みが先に終わることもあるので、ここでは触らない)
+        if (scoreOnly || ! hasSource())
+        {
+            sourceReady = scoreOnly;
+            setTransportEnabled (scoreOnly);
+        }
+
+        if (scoreOnly)
+            setStatus ("音源がないので、タブ譜の音で再生します"_jp);
+        else if (! isYouTube())
+            engine.clearExternalClock();
+    }
+
+    if (! scoreOnly)
+        return;
+
+    const auto length = getScoreLengthSeconds();
+    auto position = scoreClock.getPosition (nowMs);
+
+    // A-B ループ: B まで来たら A に戻る
+    if (scoreClock.isPlaying() && session.loopEnabled && session.loopEndMs > session.loopStartMs
+        && position >= session.loopEndMs / 1000.0)
+    {
+        scoreClock.seek (session.loopStartMs / 1000.0, nowMs);
+        position = session.loopStartMs / 1000.0;
+    }
+
+    // 曲の終わり: 止める (セットリストの自動送りは、止まったことで曲の終わりと分かる)
+    if (scoreClock.isPlaying() && length > 0.0 && position >= length)
+    {
+        scoreClock.pause (nowMs);
+        scoreClock.seek (length, nowMs);
+        position = length;
+    }
+
+    // メトロノームは、YouTube と同じく「外の時計」として、この位置で鳴らす
+    engine.setExternalClock (position, scoreClock.getRate(), scoreClock.isPlaying());
 }
 
 bool SessionScreen::isDirty() const
@@ -1110,10 +1213,7 @@ void SessionScreen::togglePlay()
             break;
 
         case PlayButtonPresses::Action::pause:
-            if (isYouTube())
-                youtube.pause();
-            else
-                engine.setPlaying (false);
+            pauseTransport();
             break;
 
         case PlayButtonPresses::Action::startCountdown:
@@ -1190,6 +1290,16 @@ void SessionScreen::startPlayback()
     songEndNotified = false;
     updateCountdownDisplay();
 
+    // タブ譜だけ: タブ譜の時計を進める (最後まで来ていたら頭から)
+    if (isScoreOnly())
+    {
+        const auto now = juce::Time::getMillisecondCounterHiRes();
+        if (scoreClock.getPosition (now) >= getScoreLengthSeconds() - 0.05)
+            scoreClock.seek (0.0, now);
+        scoreClock.play (now);
+        return;
+    }
+
     if (isYouTube())
     {
         youtube.play();   // 最後まで再生していたら、YouTube が頭から再生する
@@ -1244,12 +1354,7 @@ void SessionScreen::stopForSetlist()
     waitingForSource = false;
 
     if (isTransportPlaying())
-    {
-        if (isYouTube())
-            youtube.pause();
-        else
-            engine.setPlaying (false);
-    }
+        pauseTransport();
 
     updatePlayButton();
     updateCountdownDisplay();
@@ -1916,7 +2021,9 @@ void SessionScreen::switchPart (bool backing, bool fromUser)
                    + (slot > 0 ? " (プリセット "_jp + juce::String (slot) + ")" : juce::String()));
     }
 
-    if (fromUser && ! wasDirty)
+    // 最後に選んだトラックを覚える (作者の指示: 次に開いたとき、そのトラックから始める)。
+    // ほかに未保存の変更が無ければ、そのまま保存する (変更として「保存 *」にはしない)。あれば次の保存で一緒に保存される
+    if (fromUser && ! wasDirty && writeToDisk())
         savedSnapshot = juce::JSON::toString (session.toVar());
 
     updatePartButtons();
@@ -2148,6 +2255,75 @@ void SessionScreen::updatePresetButtons()
             : "プリセット "_jp + juce::String (slot) + ": "_jp + describeToneSlot (s) + "。押すと"_jp + part
                   + "に割り当てます。右クリックで保存し直す・空にする"_jp);
     }
+}
+
+//==============================================================================
+// 読み込み中の画面
+void SessionScreen::updateLoading()
+{
+    if (! loading)
+        return;
+
+    // タブ譜: 描き終えた (ファイルが無い・タブ譜が無いなら待たない)
+    const auto scoreFile = juce::File (session.scorePath);
+    const bool scoreReady = session.scorePath.isEmpty() || ! scoreFile.existsAsFile() || scoreViewer.isRendered();
+
+    // 音源: 再生できる・読めなかった (音源が無いなら待たない)
+    const bool sourceDone = ! hasSource() || sourceReady || sourceFailed;
+
+    const bool timedOut = juce::Time::getMillisecondCounterHiRes() - loadingStartedMs > maxLoadingMs;
+
+    if ((scoreReady && sourceDone) || timedOut)
+    {
+        loading = false;
+        loadingOverlay.setVisible (false);
+        placeWebViews();   // 隠していたタブ譜・動画を出す
+        return;
+    }
+
+    loadingOverlay.toFront (false);
+    loadingOverlay.repaint();   // 回る弧を動かす
+}
+
+#if JUCE_DEBUG
+// 開発用 (後で消す): 今流れているタブ譜の小節と拍子を、別の小さいウィンドウに出す
+void SessionScreen::updateDevScoreInfo (double scoreBeats)
+{
+    // 画面に出ている練習画面のときだけ (開発用の画面の書き出し (DevSnapshots) では出さない)
+    if (! isShowing())
+        return;
+
+    if (devScoreInfo == nullptr)
+    {
+        devScoreInfo = std::make_unique<DevScoreInfoWindow>();
+        const auto screen = getScreenBounds();
+        devScoreInfo->setTopLeftPosition (screen.getX() + 20, screen.getY() + 80);
+        devScoreInfo->setVisible (true);
+    }
+
+    const auto& bars = scoreViewer.getBarStartBeats();
+    const auto& signatures = scoreViewer.getBarSignatures();
+    const bool scoreBars = usesScoreBars();
+    static const std::vector<double> noBars;
+    static const std::vector<MusicInfo::TimeSignature> noSignatures;
+    const auto where = MusicInfo::locateBeat (scoreBeats, scoreBars ? bars : noBars, scoreBars ? signatures : noSignatures);
+
+    juce::String text;
+    text << "小節 "_jp << (scoreBeats >= 0.0 ? juce::String (where.bar + 1) : juce::String ("-"))
+         << (scoreBars ? " / " + juce::String ((int) bars.size()) : " (タブ譜なし)"_jp) << "\n"
+         << "拍子 "_jp << where.signature.numerator << "/" << where.signature.denominator
+         << "   拍 "_jp << (scoreBeats >= 0.0 ? juce::String (where.beatInBar + 1) : juce::String ("-"));
+    devScoreInfo->setInfo (text);
+}
+#endif
+
+void SessionScreen::toggleVideoCard()
+{
+    videoCardCollapsed = ! videoCardCollapsed;
+    settings.setVideoCardCollapsed (videoCardCollapsed);
+    videoCollapseButton.setButtonText (videoCardCollapsed ? juce::String::fromUTF8 ("▼") : juce::String::fromUTF8 ("▲"));
+    videoCollapseButton.setTooltip (videoCardCollapsed ? "音源のカードを広げる"_jp : "音源のカードをたたむ"_jp);
+    resized();
 }
 
 void SessionScreen::showComingSoon (const juce::String& what)
@@ -2493,6 +2669,9 @@ void SessionScreen::toggleTonePanel()
 //==============================================================================
 void SessionScreen::timerCallback()
 {
+    if (loading)
+        updateLoading();
+    updateScoreOnly (juce::Time::getMillisecondCounterHiRes());
     const auto position = getPosition();
     const auto length = getLength();
     const auto playing = isTransportPlaying();
@@ -2530,6 +2709,10 @@ void SessionScreen::timerCallback()
     positionLabel.setText ("小節 "_jp + juce::String (bar) + "   拍 "_jp + juce::String (beat), juce::dontSendNotification);
     scoreView.setBarAndBeat (bar, beat);
     updateMetronomeDots (beats);
+
+   #if JUCE_DEBUG
+    updateDevScoreInfo ((position - getScoreOffsetSeconds()) * session.bpm / 60.0);   // タブ譜のカーソルと同じ位置
+   #endif
     // タブ譜は「拍の位置」+「タブ譜だけ」。針はページの中で、速度と経過時間からなめらかに進める
     const auto rate = isYouTube() ? youtube.getState().rate : session.speedPercent / 100.0;
     scoreViewer.setPosition (position, session.bpm, getScoreOffsetSeconds(), rate, playing);
@@ -2640,13 +2823,14 @@ void SessionScreen::placeWebViews()
     // WebView (動画・タブ譜) は、ほかの部品より手前に描かれる。
     // チューナーを開いている間と、右のパネルを隠しているとき (動画) は隠す
     // 入れ替え中は、動画を左の大きな枠に、タブ譜を右のパネルの枠に重ねる
-    const bool canShow = tunerPanel == nullptr && tonePanel == nullptr
+    const bool canShow = tunerPanel == nullptr && tonePanel == nullptr && ! loading
                       && getParentComponent() != nullptr && ! getBounds().isEmpty();
     const bool swapped = isSwapped();
     auto& videoTarget = swapped ? static_cast<juce::Component&> (scoreView) : static_cast<juce::Component&> (videoView);
     auto& scoreTarget = swapped ? static_cast<juce::Component&> (videoView) : static_cast<juce::Component&> (scoreView);
-    const bool videoTargetVisible = swapped || sidePanelVisible;
-    const bool scoreTargetVisible = ! swapped || sidePanelVisible;
+    // 音源のカードをたたんでいるときは、そこに重ねるもの (ふだんは動画、入れ替え中はタブ譜) を出さない
+    const bool videoTargetVisible = swapped || (sidePanelVisible && ! videoCardCollapsed);
+    const bool scoreTargetVisible = ! swapped || (sidePanelVisible && ! videoCardCollapsed);
 
     if (isYouTube() && canShow && videoTargetVisible)
         youtube.placeOver (videoTarget);
@@ -2806,11 +2990,12 @@ void SessionScreen::resized()
         constexpr int cardChrome = 16 + 8;   // カードの内側の余白と、カードの間
         constexpr int labelWidth = 84;       // 行の名前の列。狭くして、スライダーを長くする
 
-        // 動画は 16:9 で最大 260px。縦が足りないときは、ほかのカードが入るように小さくする
-        constexpr int minVideoHeight = 90;
+        // 動画はパネルの横幅いっぱいの 16:9 (作者の指示: 縦が短すぎて小さかった)。その下のカードはスクロールするので、
+        // 下に最低 160px (カード1枚ぶんほど) を残すときだけ小さくする
+        constexpr int minVideoHeight = 90, minScrollHeight = 160;
         const auto videoFor16by9 = juce::roundToInt ((float) (panelWidth - 24) * 9.0f / 16.0f);
-        const auto otherHeights = toneHeight + mixerHeight + tempoHeight + sourceExtra + cardChrome * 4;
-        auto videoHeight = juce::jlimit (minVideoHeight, 260, juce::jmin (videoFor16by9, right.getHeight() - otherHeights));
+        auto videoHeight = juce::jlimit (minVideoHeight, juce::jmax (minVideoHeight, videoFor16by9),
+                                         right.getHeight() - (sourceExtra + cardChrome) - minScrollHeight);
 
         // TONE3000: プラグインの画面がスクロールする枠に丸ごと入るか調べる。
         // 入るなら、その高さを空けるために動画を小さくする。入らなければ、カードは別のウィンドウで開く形になる
@@ -2828,16 +3013,20 @@ void SessionScreen::resized()
             }
         }
 
-        // 音源: 見出し、動画 (16:9)、その下に URL かファイル名と、外すボタン
-        auto source = card (videoHeight + sourceExtra);
-        sourceHeading.setBounds (source.removeFromTop (20));
+        // 音源: 見出し (右上にたたむボタン)、動画 (16:9)、その下に URL かファイル名と、外すボタン。
+        // たたんでいるときは見出しだけ
+        auto source = card (videoCardCollapsed ? 20 : videoHeight + sourceExtra);
+        auto sourceHeadingRow = source.removeFromTop (20);
+        videoCollapseButton.setBounds (sourceHeadingRow.removeFromRight (32).withSizeKeepingCentre (32, 22));
+        sourceHeading.setBounds (sourceHeadingRow);
         source.removeFromTop (4);
-        videoView.setBounds (source.removeFromTop (videoHeight));
+        videoView.setBounds (source.removeFromTop (videoCardCollapsed ? 0 : videoHeight));
+        videoView.setVisible (! videoCardCollapsed);
 
-        chooseFileButton.setVisible (! hasSource());
-        pasteUrlButton.setVisible (! hasSource());
-        sourceInfoLabel.setVisible (hasSource());
-        sourceRemoveButton.setVisible (hasSource());
+        chooseFileButton.setVisible (! hasSource() && ! videoCardCollapsed);
+        pasteUrlButton.setVisible (! hasSource() && ! videoCardCollapsed);
+        sourceInfoLabel.setVisible (hasSource() && ! videoCardCollapsed);
+        sourceRemoveButton.setVisible (hasSource() && ! videoCardCollapsed);
 
         if (hasSource())
         {
@@ -3026,6 +3215,7 @@ void SessionScreen::resized()
     updateEmptyPrompt();
 
     dimOverlay.setBounds (getLocalBounds());
+    loadingOverlay.setBounds (getLocalBounds());
     if (tunerPanel != nullptr)
         tunerPanel->setBounds (getLocalBounds().withSizeKeepingCentre (TunerPanel::preferredWidth, TunerPanel::preferredHeight));
     if (tonePanel != nullptr)

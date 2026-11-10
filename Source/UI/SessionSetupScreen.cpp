@@ -20,8 +20,8 @@ SessionSetupScreen::SessionSetupScreen (ScoreViewer& reader)
 
     // 左の項目には番号を付けない (作者の指示)
     titleLabel.setText ("曲名"_jp, juce::dontSendNotification);
-    sourceLabel.setText ("音源 (任意)"_jp, juce::dontSendNotification);
-    scoreLabel.setText ("タブ譜 (任意)"_jp, juce::dontSendNotification);
+    sourceLabel.setText ("音源"_jp, juce::dontSendNotification);
+    scoreLabel.setText ("タブ譜"_jp, juce::dontSendNotification);
     bpmLabel.setText ("BPM", juce::dontSendNotification);
     artistLabel.setText ("アーティスト"_jp, juce::dontSendNotification);
     tuningLabel.setText ("チューニング"_jp, juce::dontSendNotification);
@@ -31,7 +31,7 @@ SessionSetupScreen::SessionSetupScreen (ScoreViewer& reader)
 
     titleEditor.setTextToShowWhenEmpty ("必須。音源やタブ譜を選ぶと自動で入ります"_jp, juce::Colours::grey);
     titleEditor.onTextChange = [this] { session.title = titleEditor.getText().trim(); updateState(); };
-    artistEditor.setTextToShowWhenEmpty ("任意。タブ譜に書かれていれば自動で入ります"_jp, juce::Colours::grey);
+    artistEditor.setTextToShowWhenEmpty ("タブ譜に書かれていれば自動で入ります"_jp, juce::Colours::grey);
     artistEditor.onTextChange = [this] { session.artist = artistEditor.getText().trim(); };
     tuningEditor.setTextToShowWhenEmpty ("例: E Standard、Drop D。タブ譜から自動で入ります"_jp, juce::Colours::grey);
     tuningEditor.onTextChange = [this] { session.tuning = tuningEditor.getText().trim(); };

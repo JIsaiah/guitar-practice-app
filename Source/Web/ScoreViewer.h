@@ -47,6 +47,7 @@ public:
     void showCountdown (int number, const juce::String& caption = {});
 
     bool hasScore() const noexcept { return scoreFile.existsAsFile(); }
+    bool isRendered() const noexcept { return rendered; }   // 今のタブ譜を描き終えたか (練習画面の「読み込み中…」を消すのに使う)
     double getScoreTempo() const noexcept { return scoreTempo; }
 
     // 各小節が曲の頭から何拍目 (4分音符の数) で始まるか。タブ譜の拍子から求める。タブ譜がなければ空

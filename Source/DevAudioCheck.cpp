@@ -331,7 +331,7 @@ juce::String DevAudioCheck::run (const juce::String& commandLine)
     folder.createDirectory();
 
     juce::String report;
-    report << "Guitar Practice audio check  " << juce::Time::getCurrentTime().toString (true, true) << "\n"
+    report << "suguhiku audio check  " << juce::Time::getCurrentTime().toString (true, true) << "\n"
            << "JUCE_ASIO=" << JUCE_ASIO << "\n\n";
 
     listDevices (report);

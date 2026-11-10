@@ -43,6 +43,17 @@ void AppSettings::setLibraryTab (int tab)
     file.setValue (libraryTabKey, libraryTab);
 }
 
+bool AppSettings::getVideoCardCollapsed() const
+{
+    return file.getBoolValue ("videoCardCollapsed", false);
+}
+
+void AppSettings::setVideoCardCollapsed (bool collapsed)
+{
+    // ボタンを押したときだけ変わるので、知らせは出さずに保存する
+    file.setValue ("videoCardCollapsed", collapsed);
+}
+
 void AppSettings::setScoreEqualBars (bool equal)
 {
     // 練習画面のトグルで変えるだけなので、知らせは出さずに保存する

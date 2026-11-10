@@ -224,6 +224,16 @@ juce::String DevSnapshots::renderAll (const juce::File& folder)
                     snap (emptyScreen, 1280, 800, "practice_empty" + suffix);
                 }
 
+                // 開いた直後の「読み込み中…」(YouTube の準備ができるまで。書き出しではネットに出ないので、ずっとこの状態)
+                {
+                    Session loadingSession;
+                    loadingSession.title = "Loading";
+                    loadingSession.sourceType = SourceType::youtube;
+                    loadingSession.youtubeUrl = "https://www.youtube.com/watch?v=dQw4w9WgXcQ";
+                    SessionScreen loadingScreen (engine, store, theme, appSettings, youtube, scoreViewer, loadingSession);
+                    snap (loadingScreen, 1280, 800, "practice_loading" + suffix);
+                }
+
                 // 新しいセッションを作る画面
                 {
                     SessionSetupScreen setup (scoreViewer);
@@ -260,20 +270,21 @@ juce::String DevSnapshots::renderAll (const juce::File& folder)
                 tuner.setTestFrequency (110.2);   // ほぼ合っている
                 snap (tuner, TunerPanel::preferredWidth, TunerPanel::preferredHeight, "tuner_ok" + suffix);
 
-                // メトロノームのビジュアライザー: 4/4 の1拍目、3/4 の3拍目、9/8 の4拍目、止まっているとき (縦に並べる)
+                // メトロノームのビジュアライザー: 4/4 の1拍目、6/8 の3拍目、9/8 の4拍目、12/8 の8拍目、止まっているとき (縦に並べる)。
+                // 大きさは下の帯の中と同じ (116 x 46)。数が多いと何列かに折り返す
                 {
-                    juce::Image strip (juce::Image::ARGB, 116, 4 * 36, true);
+                    juce::Image strip (juce::Image::ARGB, 116, 5 * 50, true);
                     {
                         juce::Graphics g (strip);
                         g.fillAll (theme.getPalette().panel);
                         MetronomeDots dots;
                         dots.setLookAndFeel (&juce::LookAndFeel::getDefaultLookAndFeel());
-                        dots.setSize (116, 32);
-                        const int states[][3] { { 4, 4, 0 }, { 3, 4, 2 }, { 9, 8, 3 }, { 4, 4, -1 } };
-                        for (int i = 0; i < 4; ++i)
+                        dots.setSize (116, 46);
+                        const int states[][3] { { 4, 4, 0 }, { 6, 8, 2 }, { 9, 8, 3 }, { 12, 8, 7 }, { 4, 4, -1 } };
+                        for (int i = 0; i < 5; ++i)
                         {
                             dots.setState (states[i][0], states[i][1], states[i][2]);
-                            g.drawImageAt (dots.createComponentSnapshot (dots.getLocalBounds(), true, 1.0f), 0, i * 36);
+                            g.drawImageAt (dots.createComponentSnapshot (dots.getLocalBounds(), true, 1.0f), 0, i * 50);
                         }
                         dots.setLookAndFeel (nullptr);
                     }
@@ -356,7 +367,7 @@ juce::String DevSnapshots::renderAll (const juce::File& folder)
                     sampleLog.replaceWithText ("2026-11-05 09:32:51 起動 (0.1.0)\n2026-11-05 09:33:37 画面: 練習画面\n"
                                                "2026-11-05 09:33:40 プラグインを読み込んだ\n"
                                                "2026-11-05 09:40:02 !! 落ちました: 例外 0xc0000005 場所 Archetype Misha Mansoor X.vst3 + 0x5c26ce\n"
-                                               "2026-11-05 09:40:02 呼び出しの流れ:\n0: Guitar Practice: juce::SystemStats::getStackBacktrace + 0x86\n"
+                                               "2026-11-05 09:40:02 呼び出しの流れ:\n0: suguhiku: juce::SystemStats::getStackBacktrace + 0x86\n"
                                                "2026-11-05 09:41:10 !! 前回は正しく終了していません (落ちたか、強制終了された)。最後の記録: !! 落ちました: …\n"
                                                "2026-11-05 09:41:10 起動 (0.1.0)\n"_jp);
                     AppLog::fileOverride() = sampleLog;

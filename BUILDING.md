@@ -12,9 +12,9 @@ ASIO SDK (Steinberg。GPL v3 との二重ライセンス) も、初回の構成�
 
 NeuralAmpModelerCore v0.6.0 (MIT。NAM の音色) と、その依存の Eigen (MPL-2.0)・nlohmann/json (MIT) も、初回の構成時に自動で取得されます。NAM の部分は Debug ビルドでも最適化してコンパイルします (Eigen は最適化しないとリアルタイムに間に合わないため)。
 
-開発用の確認 (Debug のみ): `"Guitar Practice.exe" --audio-check <出力フォルダ> --nam <モデル.nam> [--ir <IR.wav>] [--plugin <プラグイン.vst3>]` で、使えるオーディオデバイスの一覧、NAM の処理時間、VST3 プラグインの読み込み・処理時間・状態の保存と復元・画面の大きさを `audio-check.txt` に書き出します (音は出さず、画面も開きません)。
+開発用の確認 (Debug のみ): `suguhiku.exe --audio-check <出力フォルダ> --nam <モデル.nam> [--ir <IR.wav>] [--plugin <プラグイン.vst3>]` で、使えるオーディオデバイスの一覧、NAM の処理時間、VST3 プラグインの読み込み・処理時間・状態の保存と復元・画面の大きさを `audio-check.txt` に書き出します (音は出さず、画面も開きません)。
 
-`"Guitar Practice.exe" --plugin-window-test <出力フォルダ> --plugin <プラグイン.vst3>` は、練習画面と同じ部品でプラグインの画面のウィンドウを開き、約 10 秒後に、Windows から見た表示の状態 (表示・位置・持ち主・プラグインが描く子ウィンドウ) を `plugin-window.txt` に書き出して終わります (画面に数秒ウィンドウが出ます。画面の撮影はしません)。
+`suguhiku.exe --plugin-window-test <出力フォルダ> --plugin <プラグイン.vst3>` は、練習画面と同じ部品でプラグインの画面のウィンドウを開き、約 10 秒後に、Windows から見た表示の状態 (表示・位置・持ち主・プラグインが描く子ウィンドウ) を `plugin-window.txt` に書き出して終わります (画面に数秒ウィンドウが出ます。画面の撮影はしません)。
 
 デザイントークン (`design/tokens.json`) を変えたときは、ビルドの前に `python design/generate_tokens.py` を実行します (`design/README.md`)。
 
@@ -23,7 +23,9 @@ cmake -S . -B build -G "Visual Studio 17 2022" -A x64
 cmake --build build --config Debug
 ```
 
-実行ファイル: `build\GuitarPractice_artefacts\Debug\Guitar Practice.exe`
+実行ファイル: `build\GuitarPractice_artefacts\Debug\suguhiku.exe`
+
+アプリの名前は **suguhiku** です (2026年11月に決定)。ビルドのターゲット名 (`GuitarPractice`)、保存先のフォルダ名 (`ドキュメント\GuitarPractice`、`%APPDATA%\GuitarPractice`) は、前からのセッションと設定をそのまま使えるよう、変えていません
 
 - セッションの保存先: `ドキュメント\GuitarPractice\Sessions\*.gppractice`
 - セットリストの保存先: `ドキュメント\GuitarPractice\Setlists\*.gpsetlist`

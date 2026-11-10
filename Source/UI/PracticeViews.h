@@ -598,6 +598,37 @@ public:
     }
 };
 
+// 練習画面を開いてから、タブ譜と音源の準備ができるまで、画面全体を覆う「読み込み中…」(作者の指示)。
+// 回る弧を描く。動かすのは練習画面のタイマー (repaint を呼ぶ)
+class LoadingOverlay final : public juce::Component
+{
+public:
+    void paint (juce::Graphics& g) override
+    {
+        g.fillAll (findColour (juce::ResizableWindow::backgroundColourId));
+
+        const auto centre = getLocalBounds().getCentre().toFloat().translated (0.0f, -20.0f);
+        const auto radius = 22.0f;
+        const auto angle = (float) std::fmod (juce::Time::getMillisecondCounterHiRes() / 1000.0 * juce::MathConstants<double>::twoPi,
+                                              juce::MathConstants<double>::twoPi);
+
+        juce::Path ring;
+        ring.addCentredArc (centre.x, centre.y, radius, radius, 0.0f, 0.0f, juce::MathConstants<float>::twoPi, true);
+        g.setColour (findColour (ThemeColourIds::border));
+        g.strokePath (ring, juce::PathStrokeType (4.0f));
+
+        juce::Path arc;
+        arc.addCentredArc (centre.x, centre.y, radius, radius, 0.0f, angle, angle + juce::MathConstants<float>::pi * 0.6f, true);
+        g.setColour (findColour (ThemeColourIds::accent));
+        g.strokePath (arc, juce::PathStrokeType (4.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+
+        g.setColour (findColour (ThemeColourIds::textMuted));
+        g.setFont (AppLookAndFeel::scaled (juce::FontOptions (15.0f)));
+        g.drawText ("読み込み中…"_jp, getLocalBounds().withSizeKeepingCentre (getWidth(), 24).translated (0, 30),
+                    juce::Justification::centred);
+    }
+};
+
 // チューナーなどを開いている間、後ろの画面を少し暗くする幕。クリックすると onClick (閉じる)
 class DimOverlay final : public juce::Component
 {
@@ -743,15 +774,32 @@ public:
         g.drawText (juce::String (count) + "/" + juce::String (unit), area.removeFromLeft (labelSize * 2.6f),
                     juce::Justification::centredLeft);
 
-        // ドットの大きさは、数が多いときは幅に収まるよう小さくする
-        const auto pitch = juce::jmin (area.getHeight(), area.getWidth() / (float) count);
+        // ドットが多い (9/8 など) と、1列では小さくなりすぎるので、何列かに折り返す (作者の指示)。
+        // 1列で十分な大きさ (minPitch) が取れるなら1列のまま。取れなければ、ドットがいちばん大きくなる列の数にする
+        const auto pitchFor = [&area, this] (int rows)
+        {
+            const auto perRow = (count + rows - 1) / rows;
+            return juce::jmin (area.getHeight() / (float) rows, area.getWidth() / (float) perRow);
+        };
+        const auto minPitch = large ? area.getHeight() * 0.3f : 16.0f;
+        int rows = 1;
+        if (pitchFor (1) < minPitch)
+            for (int r = 2; r <= 4; ++r)
+                if (pitchFor (r) > pitchFor (rows))
+                    rows = r;
+
+        const auto perRow = (count + rows - 1) / rows;
+        const auto pitch = pitchFor (rows);
         const auto radius = juce::jlimit (2.0f, large ? area.getHeight() * 0.3f : 7.0f, pitch * 0.36f);
+        const auto top = area.getCentreY() - pitch * (float) rows * 0.5f;   // 何列でも、縦は真ん中にそろえる
         const auto accent = findColour (ThemeColourIds::accent);
         const auto idle = findColour (ThemeColourIds::textMuted);
 
         for (int i = 0; i < count; ++i)
         {
-            const auto centre = juce::Point<float> (area.getX() + pitch * ((float) i + 0.5f), area.getCentreY());
+            const auto row = i / perRow, column = i % perRow;
+            const auto centre = juce::Point<float> (area.getX() + pitch * ((float) column + 0.5f),
+                                                    top + pitch * ((float) row + 0.5f));
             const auto r = i == 0 ? radius * 1.25f : radius;
             const auto dot = juce::Rectangle<float> (r * 2.0f, r * 2.0f).withCentre (centre);
 

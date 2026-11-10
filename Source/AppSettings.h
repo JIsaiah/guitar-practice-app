@@ -70,6 +70,10 @@ public:
     bool getScoreEqualBars() const noexcept { return scoreEqualBars; }
     void setScoreEqualBars (bool equal);
 
+    // 練習画面の音源 (動画) のカードをたたんでいるか (カードの右上のボタン)
+    bool getVideoCardCollapsed() const;
+    void setVideoCardCollapsed (bool collapsed);
+
     // 一覧画面で最後に開いていたタブ (0: セッション、1: セットリスト。setlist-mode.md 4.1)
     int getLibraryTab() const noexcept { return libraryTab; }
     void setLibraryTab (int tab);

@@ -18,7 +18,7 @@ inline juce::String getFixedText (FixedTextId id)
 {
     switch (id)
     {
-        case FixedTextId::AppTitle:       return "Guitar Practice";
+        case FixedTextId::AppTitle:       return "suguhiku";
         case FixedTextId::Sessions:       return "セッション一覧"_jp;
         case FixedTextId::Setlists:       return "セットリスト"_jp;
         case FixedTextId::NewSession:     return "新しいセッション"_jp;

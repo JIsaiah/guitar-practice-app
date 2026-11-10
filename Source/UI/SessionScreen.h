@@ -14,6 +14,8 @@
 #include "Commands.h"
 #include "CountdownOverlay.h"
 #include "Icons.h"
+#include "DevScoreInfoWindow.h"
+#include "../Audio/ScoreClock.h"
 #include "SetlistBar.h"
 #include "PracticeViews.h"
 #include "TunerPanel.h"
@@ -156,6 +158,32 @@ private:
     void toggleSourceMute();
     void applySourceGain();   // ミキサーの「音源」の値とミュートを、エンジン (と YouTube) に送る
     void toggleGuitarMute();
+
+    //==== タブ譜だけで再生する (音源が無いとき。作者の指示) ====
+    // 音源の代わりに ScoreClock を再生位置にする。タブ譜の針・タブ譜の音 (MIDI)・メトロノームが付いてくる
+    bool isScoreOnly() const;            // 音源が無く、タブ譜を読み込んである
+    double getScoreLengthSeconds() const;   // タブ譜の終わりの位置 (秒。ずらしを含む)
+    void updateScoreOnly (double nowMs);   // タイマーから: 始まり・終わり・ループ・メトロノームの時計
+    void pauseTransport();               // 再生を止める (音源・YouTube・タブ譜の時計のどれでも)
+    ScoreClock scoreClock;
+    bool scoreOnlyActive = false;
+
+    //==== 読み込み中の画面 (作者の指示: 枠だけが見える間を出さない) ====
+    // タブ譜を描き終え、音源の準備ができるまで (最大 8 秒)、画面全体に「読み込み中…」を出し、WebView も隠しておく
+    void updateLoading();
+    bool loading = true;
+    double loadingStartedMs = 0.0;
+    static constexpr double maxLoadingMs = 8000.0;
+
+    // 音源 (動画) のカードをたたむ (カードの右上のボタン。作者の指示)
+    void toggleVideoCard();
+    bool videoCardCollapsed = false;
+
+   #if JUCE_DEBUG
+    // 開発用 (後で消す): 今流れているタブ譜の小節と拍子を、別の小さいウィンドウに出す
+    std::unique_ptr<DevScoreInfoWindow> devScoreInfo;
+    void updateDevScoreInfo (double scoreBeats);
+   #endif
     void sendTabTracks();      // タブ譜の音 (MIDI) で鳴らすトラック・音量・ミュートを、タブ譜のページに送る
     bool hasLeadTab() const noexcept    { return session.scorePath.isNotEmpty() && session.leadTrack >= 0; }
     bool hasBackingTab() const noexcept { return session.scorePath.isNotEmpty() && session.backingTrack >= 0; }
@@ -254,6 +282,8 @@ private:
     PlaceholderView videoView;
     juce::Label sourceInfoLabel;        // 動画の真下: YouTube の URL (ダブルクリックで変更) か、音源のファイル名
     TrashButton sourceRemoveButton;     // 音源を外す
+    juce::TextButton videoCollapseButton;   // 音源のカードをたたむ・広げる (▲ / ▼)
+    LoadingOverlay loadingOverlay;          // 読み込み中の画面
     juce::TextButton chooseFileButton, pasteUrlButton;   // 音源がないとき
     std::array<juce::TextButton, 4> toneButtons;   // クリーン・歪み・TONE3000 (VST)・NAM (クランチは作者の指示で外した)
     juce::Label toneSummaryLabel;                  // NAM のモデルと IR の名前

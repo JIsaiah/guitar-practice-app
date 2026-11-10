@@ -75,7 +75,7 @@ if(MSVC)
 endif()
 
 juce_add_gui_app(GuitarPractice
-    PRODUCT_NAME "Guitar Practice"
+    PRODUCT_NAME "suguhiku"   # アプリの名前 (ウィンドウの題名・実行ファイル名)。保存先のフォルダ名 (GuitarPractice) は変えない
     COMPANY_NAME "GuitarPractice"
     NEEDS_WEBVIEW2 TRUE)
 
@@ -191,7 +191,7 @@ target_link_libraries(GuitarPractice
 #   ctest --test-dir build -C Debug --output-on-failure
 enable_testing()
 juce_add_console_app(GuitarPracticeTests
-    PRODUCT_NAME "Guitar Practice Tests")
+    PRODUCT_NAME "suguhiku Tests")
 
 target_sources(GuitarPracticeTests PRIVATE
     Tests/TestMain.cpp
@@ -204,6 +204,7 @@ target_sources(GuitarPracticeTests PRIVATE
     Tests/SessionFolderTests.cpp
     Tests/SessionSortTests.cpp
     Tests/ScorePartsTests.cpp
+    Tests/ScoreClockTests.cpp
     Source/Model/Session.cpp
     Source/Model/SessionStore.cpp
     Source/Library/SessionLibrary.cpp

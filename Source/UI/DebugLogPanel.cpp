@@ -15,7 +15,8 @@ namespace
 
     juce::Array<juce::File> findDumps()
     {
-        auto dumps = getDumpFolder().findChildFiles (juce::File::findFiles, false, "Guitar Practice.exe.*.dmp");
+        // アプリの名前を「suguhiku」にした (実行ファイル名も変わった)。前の名前のときの記録も出す
+        auto dumps = getDumpFolder().findChildFiles (juce::File::findFiles, false, "suguhiku.exe.*.dmp;Guitar Practice.exe.*.dmp");
 
         // 新しい順
         std::sort (dumps.begin(), dumps.end(), [] (const juce::File& a, const juce::File& b)
