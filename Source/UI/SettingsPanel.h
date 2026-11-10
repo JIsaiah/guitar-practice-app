@@ -5,6 +5,7 @@
 #include "../Theme/ThemeManager.h"
 
 // 設定画面 (一覧の「⚙ 設定」、練習画面の「⚙ 詳細」から開く)
+//   いちばん上: フィードバックのフォーム (ブラウザで開く。アクセントの色で塗る)
 //   一般: テーマ、文字の大きさ、戻る・進むの秒数、ホイール1目盛りで変わる量
 //   デスメタルモード: オン・オフ、ロゴ調整ウィンドウ
 //   詳細設定: 色 (アクセントなどを HEX で。背景と文字の色は変えない)、オーディオの入出力
@@ -70,6 +71,8 @@ private:
     juce::ToggleButton deathMetalToggle;
     juce::TextButton logoTunerButton;
     juce::TextButton debugLogButton;
+    juce::TextButton feedbackButton;   // いちばん上の「フィードバックを送る」(真ん中・白い文字)
+    juce::Label feedbackNote;          // ボタンの下の「(外部のブラウザで開きます)」
 
     ColourRow accentRow, goodRow;
 

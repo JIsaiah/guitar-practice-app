@@ -5,6 +5,10 @@ namespace
 {
     // 文字の大きさの選択肢 (倍率)
     constexpr float textScales[] = { 0.85f, 0.9f, 1.0f, 1.1f, 1.2f, 1.3f };
+
+    // フィードバックのフォーム (Google フォーム)
+    constexpr const char* feedbackFormUrl =
+        "https://docs.google.com/forms/d/e/1FAIpQLScpCp7HUFtvVAEUsn4N_fgcNOKd3g68-fjdz4vUnbe5O-h9fQ/viewform?usp=header";
 }
 
 void SettingsPanel::Swatch::paint (juce::Graphics& g)
@@ -24,6 +28,16 @@ SettingsPanel::SettingsPanel (AppSettings& s, ThemeManager& t, juce::AudioDevice
                      false, false,
                      true, false)
 {
+    //==== いちばん上: フィードバック ====
+    feedbackButton.setButtonText ("フィードバックを送る (ご意見・不具合の報告)"_jp);
+    feedbackButton.setTooltip ("ブラウザでフィードバックのフォームを開きます"_jp);
+    feedbackButton.onClick = [] { juce::URL (feedbackFormUrl).launchInDefaultBrowser(); };
+    addAndMakeVisible (feedbackButton);
+    feedbackNote.setText ("(外部のブラウザで開きます)"_jp, juce::dontSendNotification);
+    feedbackNote.setFont (juce::FontOptions (13.0f));
+    feedbackNote.setJustificationType (juce::Justification::centred);
+    addAndMakeVisible (feedbackNote);
+
     for (auto* heading : { &generalHeading, &deathMetalHeading, &advancedHeading })
     {
         heading->setFont (juce::FontOptions (20.0f, juce::Font::bold));
@@ -125,7 +139,7 @@ SettingsPanel::SettingsPanel (AppSettings& s, ThemeManager& t, juce::AudioDevice
     theme.addChangeListener (this);
     settings.addChangeListener (this);
 
-    setSize (600, 1194);
+    setSize (600, 1194 + 70);
 }
 
 SettingsPanel::~SettingsPanel()
@@ -235,9 +249,15 @@ void SettingsPanel::updateFromSettings()
                         juce::dontSendNotification);
 
     const auto muted = findColour (ThemeColourIds::textMuted);
-    for (auto* label : { &wheelHeading, &colourHeading, &colourNote, &audioHeading })
+    for (auto* label : { &wheelHeading, &colourHeading, &colourNote, &audioHeading, &feedbackNote })
         label->setColour (juce::Label::textColourId, muted);
     colourError.setColour (juce::Label::textColourId, findColour (ThemeColourIds::accent));
+
+    // フィードバックのボタンはアクセントで塗る (テーマ・アクセントの色を変えたら塗り直す)
+    feedbackButton.setColour (juce::TextButton::buttonColourId, findColour (ThemeColourIds::accent));
+    // 文字は白 (作者の指示。アクセントの色に関係なく白にする)
+    feedbackButton.setColour (juce::TextButton::textColourOffId, juce::Colours::white);
+    feedbackButton.setColour (juce::TextButton::textColourOnId, juce::Colours::white);
 }
 
 void SettingsPanel::storeWheelSteps()
@@ -289,6 +309,13 @@ void SettingsPanel::resized()
         heading.setBounds (area.removeFromTop (30));
         area.removeFromTop (6);
     };
+
+    //==== いちばん上: フィードバック ====
+    // ボタンと補足は画面の真ん中に揃える
+    feedbackButton.setBounds (area.removeFromTop (36).withSizeKeepingCentre (360, 36));
+    area.removeFromTop (4);
+    feedbackNote.setBounds (area.removeFromTop (20));
+    area.removeFromTop (10);
 
     //==== 一般 ====
     generalHeading.setBounds (area.removeFromTop (30));
