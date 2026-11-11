@@ -83,6 +83,7 @@ juce::var Session::toVar() const
         { "difficulty", difficulty },
         { "folder",     folder },
         { "last_opened", lastOpened.toMilliseconds() > 0 ? lastOpened.toISO8601 (true) : juce::String() },
+        { "created",     created.toMilliseconds() > 0 ? created.toISO8601 (true) : juce::String() },
         { "source",   source },
         { "score",    makeObject ({ { "path", scorePath }, { "track_index", scoreTrackIndex },
                                     // リード・バッキング
@@ -137,6 +138,8 @@ Session Session::fromVar (const juce::var& value)
     s.folder = getOr<juce::String> (value["folder"], {});
     if (const auto opened = getOr<juce::String> (value["last_opened"], {}); opened.isNotEmpty())
         s.lastOpened = juce::Time::fromISO8601 (opened);
+    if (const auto made = getOr<juce::String> (value["created"], {}); made.isNotEmpty())
+        s.created = juce::Time::fromISO8601 (made);
 
     const auto& source = value["source"];
     s.sourceType = sourceTypeFromString (getOr<juce::String> (source["type"], "none"));

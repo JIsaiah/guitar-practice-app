@@ -46,6 +46,7 @@ struct Session
     static constexpr int maxDifficulty = 5;
     juce::String folder;     // 一覧のフォルダの名前 (1段だけ)。空ならフォルダなし
     juce::Time lastOpened;   // 最後に練習画面で開いた日時 (一覧の「最後の練習日」)。開いたことが無ければ 0
+    juce::Time created;      // 作った日時 (ファイル名に入れる)。初めて保存したときに決まる。古いファイルは 0
 
     SourceType sourceType = SourceType::none;
     juce::String sourcePath;  // local のとき

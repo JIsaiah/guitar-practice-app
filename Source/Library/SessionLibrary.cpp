@@ -8,6 +8,7 @@ SessionLibrary::SessionLibrary (SessionStore& s)
 void SessionLibrary::rescan()
 {
     store.assignMissingSessionIds();
+    store.renameToReadableNames();   // 前の名前 (英数字の ID) のファイルを、曲名の名前に直す
 
     items.clear();
     knownMissing.clear();

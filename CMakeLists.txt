@@ -198,6 +198,7 @@ juce_add_console_app(GuitarPracticeTests
 
 target_sources(GuitarPracticeTests PRIVATE
     Tests/NoiseGateTests.cpp
+    Tests/SessionFileNameTests.cpp
     Tests/TestMain.cpp
     Tests/SetlistTests.cpp
     Tests/PlaybackSettingsResolverTests.cpp

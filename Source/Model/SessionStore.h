@@ -6,6 +6,12 @@
 
 // セッションファイル (.gppractice) の一覧・読み書き
 // 保存先: ドキュメント\GuitarPractice\Sessions
+//
+// ファイル名 (= id) は「曲名 - アーティスト名 (作った日時).gppractice」(作者の指示)。
+//   - 何の曲のファイルか、見て分かるように。ほかの PC へ手でコピーして使えるように
+//   - 作った日時を入れて、同じ曲名のセッションでも名前がぶつからないようにする (それでもぶつかれば「 2」などを付ける)
+//   - 曲名・アーティスト名を変えて保存すると、ファイル名も変える。セットリストはファイル名ではなく
+//     session_id でセッションを指すので、名前を変えてもリンクは切れない (SessionLibrary)
 class SessionStore
 {
 public:
@@ -28,7 +34,9 @@ public:
 
     std::vector<Entry> list() const;  // 新しい順。ファイルは書き換えない
     std::optional<Session> load (const juce::String& id);   // session_id が無ければ付けて保存し直す
-    bool save (Session& session);  // id・sessionId が空なら採番する
+    // id・sessionId が空なら決める。曲名・アーティスト名に合わせてファイル名 (id) を変えることがある
+    // (session.id が新しい名前になる。古い名前のファイルは消す)
+    bool save (Session& session);
     bool remove (const juce::String& id);
 
     // 読み込み → change で書き換え → 保存。一覧の並び (更新日時の新しい順) は変えない。
@@ -41,6 +49,15 @@ public:
 
     // session_id の無い古いファイルに ID を付けて保存し直す (setlist-mode.md 3.1 のマイグレーション)
     void assignMissingSessionIds();
+
+    // 前の名前 (英数字 32 文字の ID) のファイルを、「曲名 - アーティスト名 (作った日時)」の名前に直す (ほかの名前は変えない)。
+    // 作った日時の無いファイルは、ファイルの作られた日時を使って書き足す。更新日時 (一覧の並び) は変えない
+    void renameToReadableNames();
+
+    // セッションに合うファイル名 (拡張子なし)。currentId がすでに合う名前ならそれを返す。
+    // ほかのファイルとぶつかるときは「 2」「 3」… を付ける
+    juce::String readableIdFor (const Session& session, const juce::String& currentId) const;
+    static juce::String baseNameFor (const juce::String& title, const juce::String& artist, juce::Time created);
 
     const juce::File& getDirectory() const noexcept { return directory; }
 

@@ -184,8 +184,9 @@ void SessionListScreen::updateEntry (const Session& updated)
 {
     for (auto* list : { &allEntries, &entries })
         for (auto& e : *list)
-            if (e.id == updated.id)
+            if (e.sessionId == updated.sessionId)   // 曲名を変えるとファイル名 (id) も変わるので、session_id で探す
             {
+                e.id = updated.id;
                 e.title = updated.title;
                 e.artist = updated.artist;
                 e.tuning = updated.tuning;
