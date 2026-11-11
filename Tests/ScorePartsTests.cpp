@@ -87,6 +87,24 @@ public:
             expect (! old.backingActive);
             expect (old.toneSlots[0].isEmpty());
         }
+
+        beginTest ("Mixer mutes are saved and loaded (old files: not muted)");
+        {
+            Session s;
+            s.mixSource = 0.7;
+            s.muteSource = true;
+            s.muteBackingTab = true;
+
+            const auto loaded = Session::fromVar (juce::JSON::parse (juce::JSON::toString (s.toVar())));
+            expectEquals (loaded.mixSource, 0.7);
+            expect (loaded.muteSource);
+            expect (! loaded.muteGuitar);
+            expect (! loaded.muteLeadTab);
+            expect (loaded.muteBackingTab);
+
+            const auto old = Session::fromVar (juce::JSON::parse (R"({ "mixer": { "source": 0.5 } })"));
+            expect (! old.muteSource && ! old.muteGuitar && ! old.muteLeadTab && ! old.muteBackingTab);
+        }
     }
 };
 

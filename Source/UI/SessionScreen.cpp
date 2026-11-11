@@ -38,6 +38,10 @@ SessionScreen::SessionScreen (AudioEngine& e, SessionStore& s, ThemeManager& t, 
       backButton (t), saveButton (t),
       tapButton (t), tunerButton (t), metronomeButton (t), loopButton (t)
 {
+    // 音源の音量は 100% まで (作者の指示。YouTube はプレイヤーの音量が 100 までなので、全部の音源で揃える)。
+    // 前に 100% より大きく保存したセッションは、ここで 100% にする (開いただけで「未保存」にならないよう、控えを取る前に)
+    session.mixSource = juce::jlimit (0.0, 1.0, session.mixSource);
+
     savedSnapshot = juce::JSON::toString (session.toVar());
     savedBpm = session.bpm;
     savedTempoOrigin = session.tempoOrigin;
@@ -258,7 +262,7 @@ SessionScreen::SessionScreen (AudioEngine& e, SessionStore& s, ThemeManager& t, 
     guitarGainLabel.setText ("ギター"_jp, juce::dontSendNotification);
     metronomeGainLabel.setText ("メトロノーム"_jp, juce::dontSendNotification);
 
-    setUpSlider (sourceGainSlider, 0.0, 1.5, 0.01, session.mixSource);
+    setUpSlider (sourceGainSlider, 0.0, 1.0, 0.01, session.mixSource);   // 音源は 100% まで (作者の指示)
     setUpSlider (guitarGainSlider, 0.0, 1.5, 0.01, session.mixGuitar);
     setUpSlider (metronomeGainSlider, 0.0, 1.5, 0.01, session.mixMetronome);
     for (auto* slider : { &sourceGainSlider, &guitarGainSlider, &metronomeGainSlider })
@@ -302,14 +306,14 @@ SessionScreen::SessionScreen (AudioEngine& e, SessionStore& s, ThemeManager& t, 
     backingTabMuteButton.setTooltip ("タブ譜のバッキングの音を消します"_jp);
     leadTabMuteButton.onClick = [this]
     {
-        leadTabMuted = ! leadTabMuted;
-        leadTabMuteButton.setToggleState (leadTabMuted, juce::dontSendNotification);
+        session.muteLeadTab = ! session.muteLeadTab;
+        leadTabMuteButton.setToggleState (session.muteLeadTab, juce::dontSendNotification);
         sendTabTracks();
     };
     backingTabMuteButton.onClick = [this]
     {
-        backingTabMuted = ! backingTabMuted;
-        backingTabMuteButton.setToggleState (backingTabMuted, juce::dontSendNotification);
+        session.muteBackingTab = ! session.muteBackingTab;
+        backingTabMuteButton.setToggleState (session.muteBackingTab, juce::dontSendNotification);
         sendTabTracks();
     };
     guitarGainSlider.onValueChange = [this]
@@ -323,10 +327,18 @@ SessionScreen::SessionScreen (AudioEngine& e, SessionStore& s, ThemeManager& t, 
         engine.setMetronomeGain ((float) session.mixMetronome);
     };
 
-    // ダブルクリックで、この曲に保存されている音量に戻す (BPM と同じ)
-    for (auto* slider : { &sourceGainSlider, &guitarGainSlider, &metronomeGainSlider })
-        slider->setTooltip ("ダブルクリックで、保存されている音量に戻す"_jp);
-    updateMixerDefaults();
+    // ダブルクリックで 100% に戻す (作者の指示。前は保存されている音量に戻していた)
+    for (auto* slider : { &sourceGainSlider, &guitarGainSlider, &metronomeGainSlider, &leadTabSlider, &backingTabSlider })
+    {
+        slider->setDoubleClickReturnValue (true, 1.0);
+        slider->setTooltip ("ダブルクリックで 100% に戻す"_jp);
+    }
+
+    // 保存されているミュートの状態をボタンに出す (音への反映は applySessionToEngine と sendTabTracks で行う)
+    sourceMuteButton.setToggleState (session.muteSource, juce::dontSendNotification);
+    guitarMuteButton.setToggleState (session.muteGuitar, juce::dontSendNotification);
+    leadTabMuteButton.setToggleState (session.muteLeadTab, juce::dontSendNotification);
+    backingTabMuteButton.setToggleState (session.muteBackingTab, juce::dontSendNotification);
 
     //==== 右: テンポ (BPM) とずらし ====
     bpmLabel.setText ("BPM", juce::dontSendNotification);
@@ -1013,10 +1025,14 @@ double SessionScreen::getScoreLengthSeconds() const
     if (bars.empty() || session.bpm <= 0.0)
         return 0.0;
 
-    // 最後の小節の始まり + その小節の長さ (拍子から。4分音符の数)
-    const auto last = signatures.empty() ? MusicInfo::TimeSignature {} : signatures.back();
-    const auto lastBarBeats = last.denominator > 0 ? last.numerator * 4.0 / last.denominator : 4.0;
-    return getScoreOffsetSeconds() + (bars.back() + lastBarBeats) * 60.0 / session.bpm;
+    // 曲の終わりの拍 (ページが、繰り返しを展開して数えたもの)。無ければ、最後の小節の始まり + その小節の長さ (拍子から)
+    auto endBeats = scoreViewer.getScoreEndBeats();
+    if (endBeats <= bars.back())
+    {
+        const auto last = signatures.empty() ? MusicInfo::TimeSignature {} : signatures.back();
+        endBeats = bars.back() + (last.denominator > 0 ? last.numerator * 4.0 / last.denominator : 4.0);
+    }
+    return getScoreOffsetSeconds() + endBeats * 60.0 / session.bpm;
 }
 
 void SessionScreen::updateScoreOnly (double nowMs)
@@ -1104,7 +1120,6 @@ bool SessionScreen::save()
     savedBpm = session.bpm;
     savedTempoOrigin = session.tempoOrigin;
     bpmSlider.setDoubleClickReturnValue (true, savedBpm);
-    updateMixerDefaults();
     setStatus ("保存しました"_jp);
     return true;
 }
@@ -1674,8 +1689,10 @@ void SessionScreen::updateLoop()
         return;
     }
 
-    const auto firstBar = barIndexNear (session.loopStartMs / 1000.0) + 1;
-    const auto lastBar = juce::jmax (1, barIndexNear (session.loopEndMs / 1000.0));
+    // 番号は楽譜の小節の番号 (繰り返しのある曲では、演奏する順の何番目かとは違う)
+    const auto numberOf = [this] (int index) { return usesScoreBars() ? scoreViewer.getBarNumber (index) : index + 1; };
+    const auto firstBar = numberOf (barIndexNear (session.loopStartMs / 1000.0));
+    const auto lastBar = numberOf (juce::jmax (0, barIndexNear (session.loopEndMs / 1000.0) - 1));
 
     loopStartButton.setButtonText (unset ? juce::String ("A") : "A:" + juce::String (firstBar) + "小節"_jp);
     loopEndButton.setButtonText (unset ? juce::String ("B") : "B:" + juce::String (lastBar) + "小節"_jp);
@@ -1805,13 +1822,6 @@ void SessionScreen::updateSwapUi()
 }
 
 //==============================================================================
-void SessionScreen::updateMixerDefaults()
-{
-    sourceGainSlider.setDoubleClickReturnValue (true, session.mixSource);
-    guitarGainSlider.setDoubleClickReturnValue (true, session.mixGuitar);
-    metronomeGainSlider.setDoubleClickReturnValue (true, session.mixMetronome);
-}
-
 void SessionScreen::renameSession (const juce::String& newTitle)
 {
     const auto title = newTitle.trim();
@@ -1830,25 +1840,25 @@ void SessionScreen::renameSession (const juce::String& newTitle)
 
 void SessionScreen::toggleSourceMute()
 {
-    sourceMuted = ! sourceMuted;
-    sourceMuteButton.setToggleState (sourceMuted, juce::dontSendNotification);
+    session.muteSource = ! session.muteSource;
+    sourceMuteButton.setToggleState (session.muteSource, juce::dontSendNotification);
     applySourceGain();
-    setStatus (sourceMuted ? "音源をミュートしました (タブ譜とメトロノームはそのまま動きます)"_jp : juce::String());
+    setStatus (session.muteSource ? "音源をミュートしました (タブ譜とメトロノームはそのまま動きます)"_jp : juce::String());
 }
 
 void SessionScreen::toggleGuitarMute()
 {
-    guitarMuted = ! guitarMuted;
-    guitarMuteButton.setToggleState (guitarMuted, juce::dontSendNotification);
+    session.muteGuitar = ! session.muteGuitar;
+    guitarMuteButton.setToggleState (session.muteGuitar, juce::dontSendNotification);
     applyGuitarGain();
-    setStatus (guitarMuted ? "ギターをミュートしました"_jp : juce::String());
+    setStatus (session.muteGuitar ? "ギターをミュートしました"_jp : juce::String());
 }
 
 void SessionScreen::applyGuitarGain()
 {
     // 音源のミュートと同じく、スライダーの値 (session.mixGuitar) は変えない。解除すると元の音量に戻る
-    engine.setGuitarGain (guitarMuted ? 0.0f : (float) session.mixGuitar);
-    guitarGainSlider.setAlpha (guitarMuted ? 0.5f : 1.0f);
+    engine.setGuitarGain (session.muteGuitar ? 0.0f : (float) session.mixGuitar);
+    guitarGainSlider.setAlpha (session.muteGuitar ? 0.5f : 1.0f);
 }
 
 //==============================================================================
@@ -2035,13 +2045,13 @@ void SessionScreen::sendTabTracks()
     // 鳴らすのはリード・バッキングのトラックだけ (ほかのトラックは鳴らさない)。音は再生中だけ出る (ScoreViewer::setPosition)
     std::vector<ScoreViewer::MidiTrack> tracks;
     if (hasLeadTab())
-        tracks.push_back ({ session.leadTrack, session.mixLeadTab, leadTabMuted });
+        tracks.push_back ({ session.leadTrack, session.mixLeadTab, session.muteLeadTab });
     if (hasBackingTab())
-        tracks.push_back ({ session.backingTrack, session.mixBackingTab, backingTabMuted });
+        tracks.push_back ({ session.backingTrack, session.mixBackingTab, session.muteBackingTab });
     scoreViewer.setMidiTracks (tracks);
 
-    leadTabSlider.setAlpha (leadTabMuted ? 0.5f : 1.0f);
-    backingTabSlider.setAlpha (backingTabMuted ? 0.5f : 1.0f);
+    leadTabSlider.setAlpha (session.muteLeadTab ? 0.5f : 1.0f);
+    backingTabSlider.setAlpha (session.muteBackingTab ? 0.5f : 1.0f);
 }
 
 void SessionScreen::updatePartButtons()
@@ -2144,10 +2154,10 @@ std::vector<RadialMenu::Item> SessionScreen::makeRadialItems()
         { session.loopEnabled ? "ループ解除"_jp : "ループ"_jp,
                                          [this] { perform (Command::toggleLoop); }, hasLoop },
         { "右の音色プリセット"_jp,       [this] { stepPreset (1); }, hasPresets },
-        { guitarMuted ? "ギターミュート解除"_jp : "ギターミュート"_jp,
+        { session.muteGuitar ? "ギターミュート解除"_jp : "ギターミュート"_jp,
                                          [this] { toggleGuitarMute(); } },
         { "メトロノームオン・オフ"_jp,   [this] { perform (Command::toggleMetronome); } },
-        { sourceMuted ? "音源ミュート解除"_jp : "音源ミュート"_jp,
+        { session.muteSource ? "音源ミュート解除"_jp : "音源ミュート"_jp,
                                          [this] { toggleSourceMute(); } },
         { "左の音色プリセット"_jp,       [this] { stepPreset (-1); }, hasPresets },
         { "トラック切り替え"_jp,         [this] { switchPart (! session.backingActive, true); }, hasTwoParts },
@@ -2302,13 +2312,13 @@ void SessionScreen::showComingSoon (const juce::String& what)
 void SessionScreen::applySourceGain()
 {
     // ミュートしても、スライダーの値 (session.mixSource) は変えない。解除すると元の音量に戻る
-    const auto gain = sourceMuted ? 0.0 : session.mixSource;
+    const auto gain = session.muteSource ? 0.0 : session.mixSource;
     engine.setSourceGain ((float) gain);
 
     if (isYouTube())   // YouTube の音はアプリのミキサーを通らないので、プレイヤーの音量で合わせる
         youtube.setVolume (gain);
 
-    sourceGainSlider.setAlpha (sourceMuted ? 0.5f : 1.0f);
+    sourceGainSlider.setAlpha (session.muteSource ? 0.5f : 1.0f);
 }
 
 // 動作ログに、メトロノームの今の状態を書く (鳴らないときに、どこで止まっているかを見分けるため)

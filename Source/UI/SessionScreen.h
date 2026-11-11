@@ -154,7 +154,6 @@ private:
     void toggleSwap();
     bool isSwapped() const noexcept { return session.videoInMainArea && isYouTube(); }
     void updateSwapUi();
-    void updateMixerDefaults();     // ミキサーのスライダーをダブルクリックしたときに戻す値 (保存されている値)
     void renameSession (const juce::String& newTitle);
     void toggleSourceMute();
     void applySourceGain();   // ミキサーの「音源」の値とミュートを、エンジン (と YouTube) に送る
@@ -243,8 +242,6 @@ private:
     bool sourceReady = false;
     double requestedRate = 1.0, rateRequestedAtMs = 0.0;   // YouTube に頼んだ速度 (YouTube 側での変更を見分けるため)
     bool metronomeOn = false, wasPlaying = false;
-    bool sourceMuted = false;   // 音源だけを消す (タブ譜だけを流したいとき)。セッションには保存しない
-    bool guitarMuted = false;   // ギターの音を消す (作者の指示)。セッションには保存しない
     bool sidePanelVisible = true;
     int sidePanelWidthAtDragStart = 0;
     std::unique_ptr<juce::FileChooser> fileChooser;
@@ -311,7 +308,6 @@ private:
     juce::Label leadTabLabel, backingTabLabel;
     WheelSlider leadTabSlider, backingTabSlider;
     juce::TextButton leadTabMuteButton, backingTabMuteButton;
-    bool leadTabMuted = false, backingTabMuted = false;   // セッションには保存しない (ほかのミュートと同じ)
     bool tabRowsShown = false;   // 並べたときにタブ譜の行を出していたか (変わったら並べ直す)
     juce::Label bpmLabel, scoreOffsetLabel, offsetLabel;
     WheelSlider bpmSlider;

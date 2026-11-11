@@ -50,10 +50,16 @@ public:
     bool isRendered() const noexcept { return rendered; }   // 今のタブ譜を描き終えたか (練習画面の「読み込み中…」を消すのに使う)
     double getScoreTempo() const noexcept { return scoreTempo; }
 
-    // 各小節が曲の頭から何拍目 (4分音符の数) で始まるか。タブ譜の拍子から求める。タブ譜がなければ空
+    // 各小節が曲の頭から何拍目 (4分音符の数) で始まるか。タブ譜がなければ空。
+    // 「小節」は **演奏する順** に並ぶ (繰り返し記号・1番かっこ 2番かっこを展開したもの。作者の指示)。
+    // 例: 2〜3小節目を2回くり返す曲なら、楽譜の小節 1 2 3 2 3 4 … の順に並ぶ
     const std::vector<double>& getBarStartBeats() const noexcept { return barStartBeats; }
     // 各小節の拍子 (getBarStartBeats() と同じ数)
     const std::vector<MusicInfo::TimeSignature>& getBarSignatures() const noexcept { return barSignatures; }
+    // 演奏する順の index 番目の小節が、楽譜の何小節目か (1 から。画面に出す番号)。タブ譜の最後より後は、その続きの番号
+    int getBarNumber (int index) const;
+    // 曲の終わり (最後の小節の終わり) が、曲の頭から何拍目か。タブ譜がなければ 0
+    double getScoreEndBeats() const noexcept { return scoreEndBeats; }
 
     // タブ譜に書かれている曲の情報 (読み込めたあと)。無ければ空
     const juce::String& getScoreTitle() const noexcept { return scoreTitle; }
@@ -82,6 +88,8 @@ private:
     double scoreTempo = 0.0;
     std::vector<double> barStartBeats;
     std::vector<MusicInfo::TimeSignature> barSignatures;
+    std::vector<int> barNumbers;     // 演奏する順の小節ごとの、楽譜の小節の番号 (1 から)
+    double scoreEndBeats = 0.0;
     juce::String scoreTitle, scoreArtist, scoreTuning;
     std::vector<ScoreParts::Track> tracks;
     double lastSentSeconds = -1.0, lastSentBpm = 0.0, lastSentOffset = 0.0, lastSentRate = 1.0, lastSentAtMs = 0.0;

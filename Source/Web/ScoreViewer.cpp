@@ -106,6 +106,8 @@ void ScoreViewer::load (const juce::File& file, int trackIndex)
     scoreTempo = 0.0;
     barStartBeats.clear();
     barSignatures.clear();
+    barNumbers.clear();
+    scoreEndBeats = 0.0;
     scoreTitle = scoreArtist = scoreTuning = {};
     lastSentSeconds = -1.0;
     pending.erase (std::remove_if (pending.begin(), pending.end(),
@@ -225,6 +227,14 @@ void ScoreViewer::handleEvent (const juce::var& event)
             for (const auto& sig : *sigs)
                 barSignatures.push_back ({ (int) sig[0], (int) sig[1] });
 
+        // 演奏する順の小節ごとの、楽譜の小節の番号 (ページは 0 からの番号を送ってくる)
+        barNumbers.clear();
+        if (const auto* numbers = event["barIndex"].getArray())
+            for (const auto& n : *numbers)
+                barNumbers.push_back ((int) n + 1);
+
+        scoreEndBeats = (double) event["endBeats"];
+
         std::vector<int> strings;
         if (const auto* notes = event["tuning"].getArray())
             for (const auto& note : *notes)
@@ -267,4 +277,13 @@ void ScoreViewer::handleEvent (const juce::var& event)
 
     if (type == "error" && onError != nullptr)
         onError (event["message"].toString());
+}
+
+int ScoreViewer::getBarNumber (int index) const
+{
+    if (barNumbers.empty() || index < 0)
+        return index + 1;
+
+    const auto last = (int) barNumbers.size() - 1;
+    return index <= last ? barNumbers[(size_t) index] : barNumbers.back() + (index - last);
 }

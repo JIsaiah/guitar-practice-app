@@ -63,7 +63,11 @@
   const barHighlight = document.createElement("div"); barHighlight.id = "barHighlight";
 
   let api = null, score = null, colours = null;
-  let barStartBeats = [];   // 各小節の始まりの拍 (4分音符の数)
+  // 小節は「演奏する順」に並べる (繰り返し記号・1番かっこ 2番かっこを展開したもの)。
+  // タブ譜の音 (MIDI) は alphaTab がこの順で鳴らすので、針・小節のクリック・アプリのループもこの順で数える
+  let barStartBeats = [];   // 演奏する順の小節の始まりの拍 (4分音符の数)
+  let barIndex = [];        // 演奏する順の小節が、楽譜の何番目の小節か (0 から。針を置く場所)
+  let scoreEndBeats = 0;    // 曲の終わりの拍
 
   function createApi() {
     api = new alphaTab.AlphaTabApi(scoreElement, {
@@ -83,18 +87,15 @@
       for (const t of s.tracks)
         if (isGuitar(t) && t.playbackInfo) t.playbackInfo.program = 29;
       applyLayout();   // 描く前に、小節の幅の決め方を設定する
-      // 拍子から、各小節が何拍目から始まるかを計算しておく (テンポは一定とみなす。設計書 3.1 の「一定テンポ」)
-      barStartBeats = [];
-      let beats = 0;
-      for (const mb of s.masterBars) {
-        barStartBeats.push(beats);
-        beats += mb.timeSignatureNumerator * 4 / mb.timeSignatureDenominator;
-      }
+      // 演奏する順の小節と、それぞれが何拍目から始まるかを求めておく (テンポは一定とみなす。設計書 3.1 の「一定テンポ」)
+      computePlayOrder(s);
       send("loaded", {
         title: s.title || "", artist: s.artist || "", tempo: s.tempo || 0,
-        bars: barStartBeats,   // 各小節が曲の頭から何拍目で始まるか (アプリがループを小節の頭に合わせるのに使う)
+        bars: barStartBeats,   // 演奏する順の各小節が、曲の頭から何拍目で始まるか (アプリがループを小節の頭に合わせるのに使う)
+        barIndex: barIndex,    // 演奏する順の各小節が、楽譜の何番目の小節か (アプリが小節の番号を出すのに使う)
+        endBeats: scoreEndBeats,
         // 各小節の拍子 [分子, 分母] (メトロノームのビジュアライザーのドットの数)
-        sigs: s.masterBars.map(function (mb) { return [mb.timeSignatureNumerator, mb.timeSignatureDenominator]; }),
+        sigs: barIndex.map(function (i) { const mb = s.masterBars[i]; return [mb.timeSignatureNumerator, mb.timeSignatureDenominator]; }),
         tuning: trackTuning(s, currentTrack),   // 弦の音の高さ (MIDI。1弦から)。名前はアプリが付ける
         // トラックの名前と、ギターか (リード・バッキングを決めるのに使う)
         tracks: s.tracks.map(function (t) { return { name: t.name || "", guitar: isGuitar(t) }; })
@@ -251,7 +252,7 @@
   }
 
   function clearScore() {
-    score = null; barStartBeats = [];
+    score = null; barStartBeats = []; barIndex = []; scoreEndBeats = 0;
     scoreElement.innerHTML = "";
     if (api) { api.destroy(); api = null; }
     showMessage("");
@@ -262,6 +263,34 @@
   // アプリから: 鳴らすトラック (リード・バッキング) と、その音量・ミュート。ほかのトラックは鳴らさない
   let midiTracks = [];
   let midiReady = false;
+
+  // 演奏する順の小節を求める。alphaTab が MIDI を作るときと同じ方法 (MidiFileGenerator) で作り、
+  // その「小節の表」(tickLookup) を読む。繰り返し・1番かっこ 2番かっこ・弱起の小節も、鳴る音とぴったり合う。
+  // 位置は MIDI の単位 (4分音符 = 960) なので、960 で割って拍にする。うまくいかなければ、楽譜の順に並べる
+  function computePlayOrder(s) {
+    barStartBeats = []; barIndex = []; scoreEndBeats = 0;
+    try {
+      const midiFile = new alphaTab.midi.MidiFile();
+      const generator = new alphaTab.midi.MidiFileGenerator(s, api.settings, new alphaTab.midi.AlphaSynthMidiFileHandler(midiFile));
+      generator.generate();
+      for (const m of generator.tickLookup.masterBars) {
+        barStartBeats.push(m.start / 960);
+        barIndex.push(m.masterBar.index);
+        scoreEndBeats = Math.max(scoreEndBeats, m.end / 960);
+      }
+    } catch (e) {
+      barStartBeats = []; barIndex = [];
+    }
+    if (barStartBeats.length > 0) return;
+
+    let beats = 0;
+    s.masterBars.forEach(function (mb, i) {
+      barStartBeats.push(beats);
+      barIndex.push(i);
+      beats += mb.timeSignatureNumerator * 4 / mb.timeSignatureDenominator;
+    });
+    scoreEndBeats = beats;
+  }
 
   // 当て直しの途中で、alphaTab が MIDI の知らせ (midiLoaded) を出すことがある。その中でまた当て直すと終わらないので、入れ子にしない
   let applyingMidi = false;
@@ -377,10 +406,12 @@
     let index = 0;
     while (index + 1 < barStartBeats.length && barStartBeats[index + 1] <= beats) index++;
 
-    const barLength = (index + 1 < barStartBeats.length ? barStartBeats[index + 1] : barStartBeats[index] + 4) - barStartBeats[index];
+    const barEnd = index + 1 < barStartBeats.length ? barStartBeats[index + 1] : Math.max(scoreEndBeats, barStartBeats[index] + 1);
+    const barLength = Math.max(0.001, barEnd - barStartBeats[index]);
     const fraction = Math.min(1, Math.max(0, (beats - barStartBeats[index]) / barLength));
 
-    const bounds = api.renderer.boundsLookup.findMasterBarByIndex(index);
+    // 針は、演奏する順の小節ではなく、楽譜の上のその小節に置く (繰り返しの2回目は、同じ小節にもう一度戻る)
+    const bounds = api.renderer.boundsLookup.findMasterBarByIndex(barIndex[index]);
     if (!bounds) return;
 
     const v = bounds.visualBounds, line = bounds.lineAlignedBounds || bounds.realBounds;
@@ -423,9 +454,16 @@
     const rect = scoreElement.getBoundingClientRect();
     const beat = api.renderer.boundsLookup.getBeatAtPos(e.clientX - rect.left, e.clientY - rect.top);
     if (!beat || !beat.voice || !beat.voice.bar || !beat.voice.bar.masterBar) return;
-    const index = beat.voice.bar.masterBar.index;
-    if (index >= 0 && index < barStartBeats.length)
-      send("barClicked", { bar: index, beats: barStartBeats[index] });
+    // 繰り返しのある曲では、同じ小節を何度も弾く。今の位置にいちばん近い回を選ぶ
+    // (2回目を弾いているときにクリックしたら、2回目のその小節へ)
+    const clicked = beat.voice.bar.masterBar.index;
+    const nowBeats = Math.max(0, (currentSeconds(performance.now()) - timing.offset) * timing.bpm / 60);
+    let best = -1;
+    for (let i = 0; i < barIndex.length; i++)
+      if (barIndex[i] === clicked && (best < 0 || Math.abs(barStartBeats[i] - nowBeats) < Math.abs(barStartBeats[best] - nowBeats)))
+        best = i;
+    if (best >= 0)
+      send("barClicked", { bar: best, beats: barStartBeats[best] });
   });
 
   // 再生の操作キーは、タブ譜の上で押してもアプリに渡す (WebView がキーを受け取ってしまうため)
