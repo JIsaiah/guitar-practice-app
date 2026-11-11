@@ -1,0 +1,31 @@
+suguhiku の「歪み」の音色に使っているファイル
+==============================================
+
+suguhiku.exe には、「歪み」の音色のために、次の2つのファイルが含まれています。
+
+1. キャビネットの IR（drive-cab.wav）
+   作品:     "TL806 and "Basement" 1960B Guitar Cab Impulse Responses"
+   作者:     Zach Weeks
+   入手先:   https://zachweeks.gumroad.com/l/tl806cabir
+   ライセンス: Creative Commons Attribution-ShareAlike 4.0 International (CC BY-SA 4.0)
+             https://creativecommons.org/licenses/by-sa/4.0/
+   変更:     ファイル名だけを変えています。音のデータは変えていません
+             （アプリが使うときに、オーディオ機器のサンプルレートに合わせて変換します）。
+
+2. アンプのモデル（drive-amp.nam）
+   入手先:   NeuralAmpModelerCore（Steven Atkinson）の example_models/wavenet.nam
+             https://github.com/sdatkinson/NeuralAmpModelerCore
+   ライセンス: MIT License（NeuralAmpModelerCore-LICENSE.txt）
+   変更:     ファイル名だけを変えています。
+
+
+The "Distortion" tone in suguhiku uses:
+
+1. Cabinet IR (drive-cab.wav): "TL806 and "Basement" 1960B Guitar Cab Impulse Responses"
+   by Zach Weeks (https://zachweeks.gumroad.com/l/tl806cabir),
+   licensed under CC BY-SA 4.0 (https://creativecommons.org/licenses/by-sa/4.0/).
+   Only the file name was changed.
+
+2. Amp model (drive-amp.nam): example_models/wavenet.nam from NeuralAmpModelerCore
+   by Steven Atkinson (https://github.com/sdatkinson/NeuralAmpModelerCore), MIT License.
+   Only the file name was changed.

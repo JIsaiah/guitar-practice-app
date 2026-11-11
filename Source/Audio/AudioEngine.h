@@ -7,6 +7,7 @@
 #include <juce_audio_utils/juce_audio_utils.h>
 #include "../Model/TonePresets.h"
 #include "NamTone.h"
+#include "NoiseGate.h"
 #include "PluginTone.h"
 
 // 音声処理の中心 (設計書 5.1)
@@ -94,6 +95,10 @@ public:
     void loadNamToneAsync (const juce::File& ampModel, const juce::File& cabinetIr, LoadCallback onDone);
     void clearNamTone();
 
+    // 「歪み」の音色: アプリに同梱した NAM のモデルと IR (作者の指示)。「NAM」のボタンの音色とは別に持つので、
+    // 歪みと NAM を切り替えても読み込み直さない。同じファイルを読み込み済み (読み込み中) なら何もしない
+    void loadDriveToneAsync (const juce::File& ampModel, const juce::File& cabinetIr, LoadCallback onDone);
+
     struct NamToneInfo
     {
         bool loading = false;
@@ -103,6 +108,7 @@ public:
         double modelSampleRate = 0.0;     // モデルを作ったときのサンプルレート (分からなければ 0)
     };
     NamToneInfo getNamToneInfo() const;
+    NamToneInfo getDriveToneInfo() const;
 
     //==== VST3 プラグインの音色 (TONE3000 など。メッセージスレッドから呼ぶ) ====
     // プラグインを非同期で作り、準備ができたら差し替える。vst3File が空なら外す。
@@ -131,6 +137,8 @@ public:
 
     // ギターの入力の大きさ (dB)。NAM のモデルは、入る音の大きさで歪み方が変わる
     void setInputGainDb (float db) noexcept { inputGain.store (juce::Decibels::decibelsToGain (db)); }
+    // ノイズゲートのしきい値 (dB)。NoiseGate::offDb (-90) 以下ならオフ。音色の前にかける
+    void setNoiseGateDb (float db) noexcept { noiseGateDb.store (db); }
 
     // メーター用: 前回読んでから今までの、ギターの入力と出力の最大値 (0〜1)。読むと 0 に戻る
     float takeInputPeak() noexcept  { return inputPeak.exchange (0.0f); }
@@ -176,7 +184,21 @@ private:
 
     std::shared_ptr<LoadedAudio> readAudioFile (const juce::File& file, juce::String& error);
     void installSource (std::shared_ptr<LoadedAudio> newSource);
-    void installNamTone (std::shared_ptr<NamTone> newTone);
+    // NAM の音色の入れ物。「NAM」のボタン用 (userNam) と、「歪み」用 (driveNam) の2つ
+    struct NamSlot
+    {
+        std::shared_ptr<NamTone> owned;            // メッセージスレッドだけが触る
+        std::atomic<NamTone*> current { nullptr };  // オーディオスレッドが読む
+        juce::File ampFile, cabinetFile;            // 選ばれているファイル (デバイスの設定が変わったら、読み込み直す)
+        int generation = 0;
+        bool loading = false;
+        juce::String error;
+    };
+    void loadNamSlotAsync (NamSlot& slot, const juce::File& ampModel, const juce::File& cabinetIr, LoadCallback onDone);
+    void installNamTone (NamSlot& slot, std::shared_ptr<NamTone> newTone);
+    NamToneInfo getNamSlotInfo (const NamSlot& slot) const;
+    void reloadNamSlotIfDeviceChanged (NamSlot& slot);
+    bool processNam (const NamSlot& slot, float* buffer, int numSamples) noexcept;   // 鳴らせたら true
     void installPluginTone (std::shared_ptr<PluginTone> newTone);
     void startPendingPluginLoad();    // 古いプラグインを消し終えていれば、待っている読み込みを始める
     bool hasRetiredPlugin() const;
@@ -194,7 +216,7 @@ private:
     std::vector<RetiredSource> retired;
     int loadGeneration = 0;
 
-    std::shared_ptr<NamTone> ownedNamTone;
+    NamSlot userNam, driveNam;
 
     juce::AudioPluginFormatManager pluginFormats;   // VST3 (メッセージスレッドだけが使う)
     std::shared_ptr<PluginTone> ownedPluginTone;
@@ -212,17 +234,14 @@ private:
     std::optional<PendingPluginLoad> pendingPluginLoad;
     // 準備し直し: オーディオスレッドから外した時点のコールバックの回数。-1 なら準備し直していない
     juce::int64 pluginDetachedAtCallback = -1;
-    juce::File namAmpFile, namCabinetFile;   // 選ばれているファイル (デバイスの設定が変わったら、読み込み直す)
-    int namToneGeneration = 0;
-    bool namToneLoading = false;
-    juce::String namToneError;
 
     // スレッド間で共有する値
     std::atomic<LoadedAudio*> currentSource { nullptr };
-    std::atomic<NamTone*> currentNamTone { nullptr };
     std::atomic<PluginTone*> currentPluginTone { nullptr };
     std::atomic<int> deviceBufferSize { 512 };
     std::atomic<float> inputGain { 1.0f };
+    std::atomic<float> noiseGateDb { NoiseGate::offDb };
+    NoiseGate noiseGate;   // オーディオスレッドだけが使う
     std::atomic<float> inputPeak { 0.0f }, guitarPeak { 0.0f };
     std::atomic<juce::uint64> callbackCount { 0 };
     std::atomic<double> deviceSampleRate { 48000.0 };

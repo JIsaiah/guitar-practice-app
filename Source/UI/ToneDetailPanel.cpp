@@ -19,6 +19,7 @@ ToneDetailPanel::ToneDetailPanel (AudioEngine& e, Session& s)
     ampLabel.setText ("アンプ (.nam)"_jp, juce::dontSendNotification);
     cabinetLabel.setText ("キャビネット (IR .wav)"_jp, juce::dontSendNotification);
     inputLabel.setText ("入力の大きさ"_jp, juce::dontSendNotification);
+    gateLabel.setText ("ノイズゲート"_jp, juce::dontSendNotification);
 
     ampChooseButton.setButtonText ("選ぶ…"_jp);
     cabinetChooseButton.setButtonText ("選ぶ…"_jp);
@@ -43,6 +44,34 @@ ToneDetailPanel::ToneDetailPanel (AudioEngine& e, Session& s)
         engine.setInputGainDb ((float) session.inputGainDb);
     };
 
+    // ノイズゲート (作者の指示): この大きさより小さい音 (弾いていないときの雑音) を消す。
+    // いちばん左 (-90 dB) がオフ。どの音色 (クリーン・歪み・NAM・VST) にも、音色の前にかかる
+    gateSlider.setSliderStyle (juce::Slider::LinearHorizontal);
+    gateSlider.setTextBoxStyle (juce::Slider::TextBoxRight, false, 64, 24);
+    gateSlider.setRange (NoiseGate::offDb, -20.0, 1.0);
+    gateSlider.textFromValueFunction = [this] (double value)
+    {
+        if (isPluginTone())
+            return "オフ (VST)"_jp;
+        return value <= NoiseGate::offDb ? "オフ"_jp : juce::String (juce::roundToInt (value)) + " dB";
+    };
+    gateSlider.valueFromTextFunction = [] (const juce::String& text)
+    {
+        const auto digits = text.retainCharacters ("-0123456789.");
+        return digits.isEmpty() ? (double) NoiseGate::offDb : -std::abs (digits.getDoubleValue());   // 「50」と入れても -50 dB にする
+    };
+    gateSlider.setValue (session.noiseGateDb, juce::dontSendNotification);
+    gateSlider.updateText();
+    gateSlider.setDoubleClickReturnValue (true, NoiseGate::offDb);
+    gateSlider.setTooltip ("この大きさより小さい音 (弾いていないときの雑音) を消します。右ほど強く消します。"
+                           "弾いた音の消え際が切れるときは、左に戻してください。ダブルクリックでオフ"_jp);
+    gateSlider.onValueChange = [this]
+    {
+        session.noiseGateDb = gateSlider.getValue();
+        engine.setNoiseGateDb ((float) session.noiseGateDb);
+    };
+    updateGateEnabled();
+
     audioSettingsButton.setButtonText ("オーディオ設定…"_jp);
     audioSettingsButton.setTooltip ("ASIO の選択、入力チャンネル、サンプルレート、バッファの大きさ"_jp);
     audioSettingsButton.onClick = [this] { if (onOpenAudioSettings != nullptr) onOpenAudioSettings(); };
@@ -57,7 +86,7 @@ ToneDetailPanel::ToneDetailPanel (AudioEngine& e, Session& s)
     for (auto* c : std::initializer_list<juce::Component*> {
              &ampLabel, &ampName, &ampChooseButton, &ampClearButton,
              &cabinetLabel, &cabinetName, &cabinetChooseButton, &cabinetClearButton,
-             &inputLabel, &inputSlider, &statusLabel, &deviceLabel, &audioSettingsButton, &closeButton })
+             &inputLabel, &inputSlider, &gateLabel, &gateSlider, &statusLabel, &deviceLabel, &audioSettingsButton, &closeButton })
         addAndMakeVisible (c);
 
     updateFileLabels();
@@ -165,8 +194,35 @@ juce::String ToneDetailPanel::describeDevice() const
     return text;
 }
 
+bool ToneDetailPanel::isPluginTone() const
+{
+    return session.tonePresetId == pluginTonePresetId;
+}
+
+// VST プラグインのときは、ノイズゲートをオフにして、スライダーを使えなくする (作者の指示)。
+// 保存してある値は変えないので、ほかの音色に戻すと、前のゲートの設定に戻る
+void ToneDetailPanel::updateGateEnabled()
+{
+    const auto plugin = isPluginTone();
+    if (gateSlider.isEnabled() == ! plugin && gateLabel.getTooltip().isNotEmpty() == plugin)
+        return;
+
+    gateSlider.setEnabled (! plugin);
+    // つまみも「オフ」の位置 (左端) に置く。知らせを出さないので、保存してある値 (session.noiseGateDb) は変わらない
+    gateSlider.setValue (plugin ? (double) NoiseGate::offDb : session.noiseGateDb, juce::dontSendNotification);
+    gateSlider.updateText();
+    const auto tip = plugin ? "VST プラグインを使っているときは、ノイズゲートはオフです (プラグインの中のゲートを使ってください)"_jp
+                            : juce::String();
+    gateLabel.setTooltip (tip);
+    gateSlider.setTooltip (plugin ? tip
+                                  : "この大きさより小さい音 (弾いていないときの雑音) を消します。右ほど強く消します。"
+                                    "弾いた音の消え際が切れるときは、左に戻してください。ダブルクリックでオフ"_jp);
+}
+
 void ToneDetailPanel::timerCallback()
 {
+    updateGateEnabled();   // 開いている間に音色が変わっても合わせる
+
     // メーター: 上がるときはすぐ、下がるときは 1 フレームに 1.5 dB ずつ
     const auto update = [] (float& shownDb, bool& clipped, float peak)
     {
@@ -205,7 +261,7 @@ void ToneDetailPanel::paint (juce::Graphics& g)
 
     g.setColour (findColour (juce::Label::textColourId));
     g.setFont (font (18.0f, juce::Font::bold));
-    g.drawText ("音色の設定 (NAM)"_jp, getLocalBounds().reduced (24, 16).removeFromTop (28), juce::Justification::centredLeft);
+    g.drawText ("音色の設定"_jp, getLocalBounds().reduced (24, 16).removeFromTop (28), juce::Justification::centredLeft);
 
     // メーター
     const auto drawMeter = [&] (juce::Rectangle<int> area, const juce::String& name, float levelDb, bool clipped)
@@ -262,6 +318,11 @@ void ToneDetailPanel::resized()
     auto inputRow = area.removeFromTop (rowHeight);
     inputLabel.setBounds (inputRow.removeFromLeft (labelWidth));
     inputSlider.setBounds (inputRow);
+
+    area.removeFromTop (6);
+    auto gateRow = area.removeFromTop (rowHeight);
+    gateLabel.setBounds (gateRow.removeFromLeft (labelWidth));
+    gateSlider.setBounds (gateRow);
 
     area.removeFromTop (8);
     inputMeterArea = area.removeFromTop (24);

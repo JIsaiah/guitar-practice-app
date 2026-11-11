@@ -97,6 +97,7 @@ juce::var Session::toVar() const
                     slots.add (slot.isEmpty() ? juce::var()
                                               : makeObject ({ { "preset_id", slot.tonePresetId }, { "nam_model", slot.namModelPath },
                                                               { "ir", slot.irPath }, { "input_gain_db", slot.inputGainDb },
+                                                              { "noise_gate_db", slot.noiseGateDb },
                                                               { "plugin_path", slot.pluginPath }, { "plugin_state", slot.pluginState } }));
                 return juce::var (slots);
             }() },
@@ -115,6 +116,7 @@ juce::var Session::toVar() const
                                     { "nam_model", namModelPath },
                                     { "ir", irPath },
                                     { "input_gain_db", inputGainDb },
+                                    { "noise_gate_db", noiseGateDb },
                                     // 設計書 6章の "vst3": プラグインのファイルと状態 (今は1つだけ)
                                     { "vst3", pluginPath.isEmpty() ? emptyArray()
                                                                    : juce::var (juce::Array<juce::var> {
@@ -169,14 +171,15 @@ Session Session::fromVar (const juce::var& value)
     s.mixBackingTab = getOr<double> (mixer["backing_tab"], 1.0);
     s.muteSource = getOr<bool> (mixer["source_muted"], false);
     s.muteGuitar = getOr<bool> (mixer["guitar_muted"], false);
-    s.muteLeadTab = getOr<bool> (mixer["lead_tab_muted"], false);
-    s.muteBackingTab = getOr<bool> (mixer["backing_tab_muted"], false);
+    s.muteLeadTab = getOr<bool> (mixer["lead_tab_muted"], true);        // 項目が無い (古い) ファイルも、はじめはミュート
+    s.muteBackingTab = getOr<bool> (mixer["backing_tab_muted"], true);
 
     const auto& tone = value["tone"];
     s.tonePresetId = getOr<juce::String> (tone["preset_id"], "clean-01");
     s.namModelPath = getOr<juce::String> (tone["nam_model"], {});
     s.irPath = getOr<juce::String> (tone["ir"], {});
     s.inputGainDb = getOr<double> (tone["input_gain_db"], 0.0);
+    s.noiseGateDb = getOr<double> (tone["noise_gate_db"], -90.0);
 
     // リード・バッキング (無い古いファイルは -1 = これから決める)
     const auto& parts = value["score"];
@@ -198,6 +201,7 @@ Session Session::fromVar (const juce::var& value)
             t.namModelPath = getOr<juce::String> (slot["nam_model"], {});
             t.irPath = getOr<juce::String> (slot["ir"], {});
             t.inputGainDb = getOr<double> (slot["input_gain_db"], 0.0);
+            t.noiseGateDb = getOr<double> (slot["noise_gate_db"], -90.0);
             t.pluginPath = getOr<juce::String> (slot["plugin_path"], {});
             t.pluginState = getOr<juce::String> (slot["plugin_state"], {});
         }

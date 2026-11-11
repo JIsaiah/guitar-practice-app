@@ -143,6 +143,9 @@ juce_add_binary_data(GuitarPracticeData
         Resources/Web/alphatab/Bravura.woff
         Resources/Web/alphatab/sonivox.sf2
         design/generated/tokens.css
+        # 「歪み」の音色 (作者が選んだ NAM のモデルとキャビネットの IR。元は 音色プリセット/ のファイル)
+        Resources/Tones/drive-amp.nam
+        Resources/Tones/drive-cab.wav
         # アイコン (作者が置いた SVG。Source/UI/Icons で描く)
         "svg icons/help-circle-svgrepo-com.svg"
         "svg icons/media-backward-end-svgrepo-com.svg"
@@ -194,6 +197,7 @@ juce_add_console_app(GuitarPracticeTests
     PRODUCT_NAME "suguhiku Tests")
 
 target_sources(GuitarPracticeTests PRIVATE
+    Tests/NoiseGateTests.cpp
     Tests/TestMain.cpp
     Tests/SetlistTests.cpp
     Tests/PlaybackSettingsResolverTests.cpp

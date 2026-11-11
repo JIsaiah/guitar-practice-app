@@ -106,7 +106,13 @@
     // ※ api.midiLoaded には登録しない。alphaTab 1.8.4 では、登録したときに読む値 (loadedMidiInfo) が
     //   自分自身を呼び続ける不具合があり、「Maximum call stack size exceeded」で読み込みが止まる (確かめた)。
     //   代わりに、描き終わったとき・再生を始めるときに当て直す
-    api.playerReady.on(function () { midiReady = true; applyMidiTracks(); });
+    api.playerReady.on(function () {
+      midiReady = true;
+      // 音割れを防ぐ: 全体の音量を下げておく。リード・バッキングの2トラックが重なり、
+      // ミキサーで 150% まで上げても、音が割れない大きさにする
+      api.masterVolume = 0.5;
+      applyMidiTracks();
+    });
 
     api.renderFinished.on(function () {
       showMessage("");
@@ -312,15 +318,27 @@
 
   // アプリの再生に合わせて鳴らす。位置は拍で合わせる (アプリの BPM とずらしで、カーソルと同じ計算)。
   // 速さは「アプリの速度 × アプリの BPM ÷ タブ譜のテンポ」。
-  // 前は、ずれが 0.08 秒を超えるたびに位置を飛ばしていた。届く位置 (特に YouTube) はばらつくので、
-  // 何度も飛んで音が切れ、ガタガタに聞こえていた。今は:
-  //   - 位置は、このページでなめらかにした時計 (receivePosition) で比べる
-  //   - 小さいずれ (0.25 秒まで) は、速さを少しだけ (最大 ±4%) 変えて、ゆっくり追いつく (音は切れない)
-  //   - 大きいずれ (移動・ループで戻ったとき) だけ、位置を飛ばす
-  const midiJumpSeconds = 0.25, midiDeadZone = 0.02, midiMaxNudge = 0.04;
+  //
+  // 【ガタガタ・音割れの原因だったこと】alphaTab は、再生の速さ (playbackSpeed) を変えるたびに、
+  // 中でその位置へ移動し直し、作ってあった音を捨てる (AlphaSynth.updatePlaybackSpeed → timePosition → seek)。
+  // 前は、ずれを直すために速さを 0.1 秒ごとに少しずつ変えていたので、そのたびに音が途切れていた。
+  // 今は:
+  //   - 速さを変えるのは、アプリの速度・BPM が変わったときだけ
+  //   - ずれは、届くたびの値をならして (ばらつきを消して) 見る。大きくずれたときだけ位置を合わせ直す
+  //   - 合わせ直したあと 2 秒は、合わせ直さない (alphaTab の位置の知らせが追いつくのを待つ)
+  const midiJumpSeconds = 0.12, midiJumpCooldownMs = 2000;
+  let midiDrift = 0, midiLastJumpAt = 0, midiSpeed = 0;
 
   function setMidiSpeed(speed) {
-    if (Math.abs(api.playbackSpeed - speed) > 0.002) api.playbackSpeed = speed;
+    if (Math.abs(midiSpeed - speed) < 0.0005) return;
+    midiSpeed = speed;
+    api.playbackSpeed = speed;
+  }
+
+  function jumpMidi(tick) {
+    api.tickPosition = tick;
+    midiDrift = 0;
+    midiLastJumpAt = performance.now();
   }
 
   function syncMidi(seconds, bpm, offset, rate, playing) {
@@ -341,22 +359,27 @@
 
     if (!playingNow) {
       applyMidiTracks();   // 鳴らす前に、トラックのミュート・音量を確かめる
+      midiSpeed = 0;       // 止まっている間に alphaTab の側で変わっていてもよいように、必ず設定し直す
       setMidiSpeed(speed);
-      api.tickPosition = tick;
+      jumpMidi(tick);
       api.play();
       return;
     }
 
-    // ずれ (秒)。プラス = MIDI が先に進んでいる
-    const drift = (api.tickPosition - tick) / 960 * 60 / bpm;
-    if (Math.abs(drift) > midiJumpSeconds) {
-      api.tickPosition = tick;
+    // 速度・BPM が変わったとき (変わったときだけ。上の【原因】を参照)
+    if (Math.abs(midiSpeed - speed) >= 0.0005) {
       setMidiSpeed(speed);
+      jumpMidi(tick);
       return;
     }
 
-    const nudge = Math.abs(drift) < midiDeadZone ? 0 : Math.max(-midiMaxNudge, Math.min(midiMaxNudge, -drift * 0.5));
-    setMidiSpeed(speed * (1 + nudge));
+    // ずれ (秒)。プラス = MIDI が先に進んでいる。alphaTab の位置の知らせは飛び飛びなので、ならして見る
+    const drift = (api.tickPosition - tick) / 960 * 60 / bpm;
+    midiDrift = midiDrift * 0.7 + drift * 0.3;
+
+    const now = performance.now();
+    if (Math.abs(drift) > 1.0 || (Math.abs(midiDrift) > midiJumpSeconds && now - midiLastJumpAt > midiJumpCooldownMs))
+      jumpMidi(tick);   // 移動・ループで戻ったとき (大きくずれた) は、すぐに合わせる
   }
 
   // ---- 再生位置 ----

@@ -129,7 +129,8 @@ private:
     void toggleMetronomeSolo();
     void toggleTuner();
     void selectTone (int index, bool fromUser);   // index: 0〜2 が簡易な音色、3 が NAM
-    void loadNamTone();                           // セッションの NAM のファイルを、エンジンに読み込ませる
+    void loadNamTone();
+    void loadDriveTone();   // 「歪み」の音色 (同梱の NAM のモデルと IR) を読み込む                           // セッションの NAM のファイルを、エンジンに読み込ませる
     void loadPluginTone();                        // TONE3000 プラグインを探して、エンジンに読み込ませる
     void choosePluginFile();
     void capturePluginState();                    // プラグインの状態をセッションに入れる (保存の前)

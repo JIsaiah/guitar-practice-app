@@ -88,11 +88,12 @@ public:
             expect (old.toneSlots[0].isEmpty());
         }
 
-        beginTest ("Mixer mutes are saved and loaded (old files: not muted)");
+        beginTest ("Mixer mutes are saved and loaded (tab sound starts muted)");
         {
             Session s;
             s.mixSource = 0.7;
             s.muteSource = true;
+            s.muteLeadTab = false;
             s.muteBackingTab = true;
 
             const auto loaded = Session::fromVar (juce::JSON::parse (juce::JSON::toString (s.toVar())));
@@ -103,7 +104,10 @@ public:
             expect (loaded.muteBackingTab);
 
             const auto old = Session::fromVar (juce::JSON::parse (R"({ "mixer": { "source": 0.5 } })"));
-            expect (! old.muteSource && ! old.muteGuitar && ! old.muteLeadTab && ! old.muteBackingTab);
+            expect (! old.muteSource && ! old.muteGuitar);
+            expect (old.muteLeadTab && old.muteBackingTab);   // タブ譜の音は、はじめはミュート
+
+            expect (Session().muteLeadTab && Session().muteBackingTab);   // 新しいセッションも
         }
     }
 };

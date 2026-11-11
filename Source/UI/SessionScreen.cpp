@@ -2,6 +2,7 @@
 #include "../Model/TonePresets.h"
 #include "../Model/YouTubeUrl.h"
 #include "../Audio/PluginLocator.h"
+#include "../Audio/BuiltInTones.h"
 #include "../Platform/WindowOwner.h"
 #include "../AppLog.h"
 #include "../Text.h"
@@ -195,6 +196,7 @@ SessionScreen::SessionScreen (AudioEngine& e, SessionStore& s, ThemeManager& t, 
         // オンになったときだけ処理する
         button.onClick = [this, i] { if (toneButtons[i].getToggleState()) selectTone ((int) i, true); };
     }
+    toneButtons[1].setTooltip ("アプリに入っているアンプのモデル (NAM) で歪ませます"_jp);
     toneButtons[namToneIndex].setTooltip ("NAM のアンプのモデル (.nam) とキャビネットの IR (.wav) で鳴らします"_jp);
     toneButtons[pluginToneIndex].setTooltip ("VST3 プラグイン (TONE3000、Neural DSP など) で鳴らします。プラグインの画面は別のウィンドウで開きます"_jp);
 
@@ -524,6 +526,7 @@ SessionScreen::SessionScreen (AudioEngine& e, SessionStore& s, ThemeManager& t, 
     setTransportEnabled (false);  // 音源の読み込みが終わってから有効にする
 
     applySessionToEngine();
+    loadDriveTone();   // 「歪み」の音色 (同梱)。一度読み込めば、ほかの曲を開いても読み込み直さない
     updatePartButtons();
     updatePresetButtons();
     updateSourceUi();
@@ -582,6 +585,7 @@ void SessionScreen::applySessionToEngine()
               : session.tonePresetId == pluginTonePresetId ? pluginToneIndex
                                                            : findTonePresetIndex (session.tonePresetId), false);
     engine.setInputGainDb ((float) session.inputGainDb);
+    engine.setNoiseGateDb ((float) session.noiseGateDb);
     loadNamTone();
 
     // TONE3000 を使うセッションなら、プラグインを読み込み、保存した状態 (選んだ音色・つまみ) に戻す
@@ -2171,6 +2175,7 @@ void SessionScreen::savePreset (int slot)
     s.namModelPath = session.namModelPath;
     s.irPath = session.irPath;
     s.inputGainDb = session.inputGainDb;
+    s.noiseGateDb = session.noiseGateDb;
     s.pluginPath = session.pluginPath;
     s.pluginState = session.pluginState;
 
@@ -2192,12 +2197,14 @@ void SessionScreen::applyPreset (int slot)
     session.namModelPath = s.namModelPath;
     session.irPath = s.irPath;
     session.inputGainDb = s.inputGainDb;
+    session.noiseGateDb = s.noiseGateDb;
 
     // 音色を開いたときと同じ順で、エンジンに渡す (applySessionToEngine)
     selectTone (session.tonePresetId == namTonePresetId    ? namToneIndex
               : session.tonePresetId == pluginTonePresetId ? pluginToneIndex
                                                            : findTonePresetIndex (session.tonePresetId), false);
     engine.setInputGainDb ((float) session.inputGainDb);
+    engine.setNoiseGateDb ((float) session.noiseGateDb);
     loadNamTone();
 
     if (session.tonePresetId == pluginTonePresetId && s.pluginPath.isNotEmpty())
@@ -2610,6 +2617,25 @@ void SessionScreen::loadNamTone()
     });
 
     updateToneSummary();
+}
+
+// 「歪み」の音色: 同梱の NAM のモデルと IR を読み込む (作者の指示)。
+// 「NAM」のボタンの音色とは別に持つので、セッションには保存しない。一度読み込めば、ほかの曲でもそのまま使う
+void SessionScreen::loadDriveTone()
+{
+    const auto files = BuiltInTones::getDriveTone();
+    if (! files.amp.existsAsFile())
+    {
+        AppLog::write ("歪みの音色のファイルを書き出せませんでした"_jp);
+        return;
+    }
+
+    engine.loadDriveToneAsync (files.amp, files.cabinet,
+                               [safe = juce::Component::SafePointer (this)] (bool succeeded, const juce::String& error)
+    {
+        if (safe != nullptr && ! succeeded)
+            safe->setStatus ("歪みの音色を読み込めませんでした: "_jp + error);
+    });
 }
 
 void SessionScreen::updateToneSummary()

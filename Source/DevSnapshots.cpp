@@ -170,6 +170,59 @@ juce::String DevSnapshots::renderAll (const juce::File& folder)
                     log << "wrote " << file.getFullPathName() << "\n";
             };
 
+            // 数字の入力の確かめ (画面ではなく、部品の動きをまねて、結果を log.txt に書く)
+            {
+                // ずらし: 欄に「25」と入れて Enter → onChange に 25 が来る
+                OffsetControl offset;
+                int received = 0;
+                offset.onChange = [&received] (int ms) { received = ms; };
+                offset.setSize (300, 30);
+                for (auto* child : offset.getChildren())
+                    if (auto* label = dynamic_cast<juce::Label*> (child))
+                    {
+                        label->showEditor();
+                        auto* editor = label->getCurrentTextEditor();
+                        log << "  editor=" << (editor != nullptr ? "yes" : "no");
+                        if (editor != nullptr)
+                        {
+                            editor->setText ("25");
+                            log << " text=" << editor->getText();
+                            // Enter: TextEditor は「Enter が押された」をメッセージで後から知らせる。ここではその知らせを直接渡す
+                            // (0x10003002 は JUCE の TextEditor の中の番号 returnKeyMessageId)
+                            static_cast<juce::Component*> (editor)->handleCommandMessage (0x10003002);   // TextEditor では private のため、部品として呼ぶ
+                        }
+                        log << " label=" << label->getText() << " editing=" << (label->isBeingEdited() ? "yes" : "no") << "\n";
+                    }
+                log << "check offset entry: " << received << (received == 25 ? " OK" : " NG") << "\n";
+
+                // BPM などのスライダー: 数字の欄のダブルクリックでは値を戻さない。スライダーの部分では戻す
+                WheelSlider slider;
+                slider.setRange (40.0, 300.0, 1.0);
+                slider.setTextBoxStyle (juce::Slider::TextBoxRight, false, 44, 24);
+                slider.setDoubleClickReturnValue (true, 100.0);
+                slider.setSize (300, 30);
+                slider.setValue (150.0);
+                juce::Label* box = nullptr;
+                for (auto* child : slider.getChildren())
+                    if (auto* label = dynamic_cast<juce::Label*> (child))
+                        box = label;
+
+                const auto doubleClickOn = [&slider] (juce::Component* target)
+                {
+                    const auto now = juce::Time::getCurrentTime();
+                    const juce::MouseEvent e (juce::Desktop::getInstance().getMainMouseSource(), {}, {},
+                                              juce::MouseInputSource::defaultPressure, 0.0f, 0.0f, 0.0f, 0.0f,
+                                              target, target, now, {}, now, 2, false);
+                    slider.mouseDoubleClick (e);
+                };
+                doubleClickOn (box);
+                const auto afterBox = slider.getValue();
+                doubleClickOn (&slider);
+                const auto afterSlider = slider.getValue();
+                log << "check slider double-click: text box -> " << afterBox << ", slider -> " << afterSlider
+                    << ((box != nullptr && juce::exactlyEqual (afterBox, 150.0) && juce::exactlyEqual (afterSlider, 100.0)) ? " OK" : " NG") << "\n";
+            }
+
             for (auto colour : { ColourTheme::Light, ColourTheme::Dark })
             {
                 theme.setColourTheme (colour);
@@ -358,6 +411,13 @@ juce::String DevSnapshots::renderAll (const juce::File& folder)
                     toneSession.irPath = "C:/IRs/BD_RH_GatesOfHell.wav";
                     ToneDetailPanel tonePanel (engine, toneSession);
                     snap (tonePanel, ToneDetailPanel::preferredWidth, ToneDetailPanel::preferredHeight, "tone_panel.png");
+
+                    // VST プラグインのとき: ノイズゲートは「オフ (VST)」で使えない
+                    Session pluginSession = toneSession;
+                    pluginSession.tonePresetId = pluginTonePresetId;
+                    pluginSession.noiseGateDb = -50.0;
+                    ToneDetailPanel pluginPanel (engine, pluginSession);
+                    snap (pluginPanel, ToneDetailPanel::preferredWidth, ToneDetailPanel::preferredHeight, "tone_panel_vst.png");
                 }
 
                 SettingsPanel panel (appSettings, theme, engine.getDeviceManager());

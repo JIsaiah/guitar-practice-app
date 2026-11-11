@@ -2,7 +2,7 @@ suguhiku に含まれるソフトウェア・フォントのライセンス
 ====================================================
 
 suguhiku 本体は GNU Affero General Public License v3（AGPL v3。LICENSE.txt）で公開しています。
-suguhiku.exe には、次のものが含まれています。各ライセンスの全文は、このフォルダの同じ名前のファイルにあります。
+suguhiku.exe には、次のものが含まれています。各ライセンスの全文（または入手先とライセンスの案内）は、このフォルダの同じ名前のファイルにあります。
 
 | 名前                          | 用途                         | ライセンス                          | ファイル                 |
 |-------------------------------|------------------------------|-------------------------------------|--------------------------|
@@ -14,6 +14,8 @@ suguhiku.exe には、次のものが含まれています。各ライセンス�
 | NeuralAmpModelerCore          | NAM の音色                   | MIT License                         | NeuralAmpModelerCore-LICENSE.txt |
 | Eigen                         | NAM の計算                   | Mozilla Public License 2.0          | Eigen-COPYING.MPL2       |
 | nlohmann/json                 | NAM のファイルの読み込み     | MIT License                         | nlohmann-json-LICENSE.txt |
+| Zach Weeks のキャビネットの IR | 「歪み」の音色               | CC BY-SA 4.0                        | drive-tone-LICENSE.txt   |
+| NAM の見本のモデル (wavenet)  | 「歪み」の音色               | MIT License                         | drive-tone-LICENSE.txt   |
 | Microsoft WebView2 SDK        | タブ譜・YouTube の表示       | BSD 形式（Microsoft）               | WebView2-LICENSE.txt     |
 | Steinberg ASIO SDK            | ASIO ドライバーとの接続      | GPL v3（Steinberg のライセンスとの二重ライセンスのうち GPL v3 を選択） | ASIO-SDK-LICENSE.txt |
 

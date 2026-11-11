@@ -25,6 +25,7 @@ struct ToneSlot
     juce::String tonePresetId;   // 空なら、まだ保存していない
     juce::String namModelPath, irPath, pluginPath, pluginState;
     double inputGainDb = 0.0;
+    double noiseGateDb = -90.0;   // ノイズゲートのしきい値 (-90 = オフ)
 
     bool isEmpty() const noexcept { return tonePresetId.isEmpty(); }
 };
@@ -81,7 +82,8 @@ struct Session
     double mixMetronome = 0.8;
     double mixLeadTab = 1.0, mixBackingTab = 1.0;   // タブ譜の音 (MIDI) の音量: リード・バッキングのトラック (1.0 = 100%)
     // ミュート (作者の指示で、開き直しても残るように保存する)。ミュートしても音量の値は変えない
-    bool muteSource = false, muteGuitar = false, muteLeadTab = false, muteBackingTab = false;
+    // タブ譜の音 (リード・バッキング) は、はじめはミュート (作者の指示)
+    bool muteSource = false, muteGuitar = false, muteLeadTab = true, muteBackingTab = true;
 
     juce::String tonePresetId = "clean-01";   // 簡易な音色の ID か、"nam"、"tone3000"
     juce::String pluginPath;                   // VST3 プラグイン (TONE3000) の .vst3
@@ -89,6 +91,7 @@ struct Session
     juce::String namModelPath;                 // NAM のアンプのモデル (.nam)
     juce::String irPath;                       // キャビネットの IR (.wav)
     double inputGainDb = 0.0;                  // ギターの入力の大きさ (dB)
+    double noiseGateDb = -90.0;                // ノイズゲートのしきい値 (dB。-90 = オフ)
 
     juce::var toVar() const;
     static Session fromVar (const juce::var& value);

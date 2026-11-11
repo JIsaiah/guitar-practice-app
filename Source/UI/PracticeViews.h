@@ -499,7 +499,14 @@ public:
         valueLabel.onTextChange = [this] { change (valueLabel.getText().removeCharacters (" msMS+").getIntValue()); };
         valueLabel.onEditorHide = [this]
         {
-            show();
+            // 「+10 ms」の形に戻すのは、あとで (次のメッセージで) 行う。
+            // JUCE は Enter で確定したとき、入力欄を閉じる知らせ (ここ) を、値が変わった知らせ (onTextChange) より先に出す。
+            // ここで表示を書き戻すと、onTextChange が書き戻した古い値を読んでしまい、入力した数字が反映されなかった
+            juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<OffsetControl> (this)]
+            {
+                if (safe != nullptr)
+                    safe->show();
+            });
             if (onEditFinished != nullptr)
                 onEditFinished();
         };
@@ -661,6 +668,17 @@ public:
         const auto direction = accumulated > 0.0f ? 1.0 : -1.0;
         accumulated = 0.0f;
         setValue (getValue() + direction * wheelStep, juce::sendNotificationSync);
+    }
+
+    // 横の数字の欄でのダブルクリックは、数字の入力に使う (作者の指示)。
+    // JUCE のスライダーは数字の欄のマウスの操作も受け取るので、そのままだと「ダブルクリックで値を戻す」が働き、
+    // 値を戻すときに入力欄が閉じてしまう。値を戻すのは、スライダーの部分をダブルクリックしたときだけにする
+    void mouseDoubleClick (const juce::MouseEvent& e) override
+    {
+        if (e.eventComponent != this)
+            return;
+
+        juce::Slider::mouseDoubleClick (e);
     }
 
 private:

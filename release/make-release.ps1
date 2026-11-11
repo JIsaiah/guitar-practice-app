@@ -52,6 +52,7 @@ $copies = @(
     @('Resources\Web\alphatab\sonivox-LICENSE.txt',                            'sonivox-LICENSE.txt'),
     @('Resources\Fonts\OFL.txt',                                               'DelaGothicOne-OFL.txt'),
     @('build\_deps\neuralampmodelercore-src\LICENSE',                          'NeuralAmpModelerCore-LICENSE.txt'),
+    @('Resources\Tones\drive-tone-LICENSE.txt',                               'drive-tone-LICENSE.txt'),
     @('build\_deps\neuralampmodelercore-src\Dependencies\eigen\COPYING.MPL2',  'Eigen-COPYING.MPL2'),
     @('build\asiosdk\ASIOSDK\LICENSE.txt',                                     'ASIO-SDK-LICENSE.txt')
 )

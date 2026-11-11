@@ -10,14 +10,16 @@ struct AudioEngine::LoadedAudio
 
 namespace
 {
-    // 簡易な音色 (ファイルなしで使える)。tanh で大きい値をなめらかに押さえ込み、アンプの歪みに似せる
+    // 簡易な音色 (ファイルなしで使える)。tanh で大きい値をなめらかに押さえ込む。
+    // 「クリーン」は、前の「歪み」の式 (作者の指示: 前のクリーン (そのまま出す) は音が小さすぎ、
+    // 前の歪みが、ちょうどよい音量のクリーンの音になっていた)。「歪み」は同梱の NAM で鳴らす (processGuitar)
     float applySimpleTone (float sample, int toneType) noexcept
     {
         switch ((ToneType) toneType)
         {
+            case ToneType::clean:  return std::tanh (sample * 20.0f) * 0.4f;
             case ToneType::crunch: return std::tanh (sample * 4.0f) * 0.6f;
-            case ToneType::drive:  return std::tanh (sample * 20.0f) * 0.4f;
-            case ToneType::clean:
+            case ToneType::drive:
             case ToneType::nam:
             case ToneType::plugin: break;
         }
@@ -86,43 +88,62 @@ AudioEngine::DeviceInfo AudioEngine::getDeviceInfo() const
 // NAM の音色
 void AudioEngine::loadNamToneAsync (const juce::File& ampModel, const juce::File& cabinetIr, LoadCallback onDone)
 {
-    namAmpFile = ampModel;
-    namCabinetFile = cabinetIr;
-    namToneError = {};
+    loadNamSlotAsync (userNam, ampModel, cabinetIr, std::move (onDone));
+}
 
-    const auto generation = ++namToneGeneration;
-
-    if (ampModel == juce::File() && cabinetIr == juce::File())
+void AudioEngine::loadDriveToneAsync (const juce::File& ampModel, const juce::File& cabinetIr, LoadCallback onDone)
+{
+    // 同じファイルを読み込み済み・読み込み中なら、そのまま使う (練習画面を開くたびに読み込み直さない)
+    if (driveNam.ampFile == ampModel && driveNam.cabinetFile == cabinetIr && (driveNam.owned != nullptr || driveNam.loading))
     {
-        namToneLoading = false;
-        installNamTone (nullptr);
         if (onDone != nullptr)
             onDone (true, {});
         return;
     }
 
-    namToneLoading = true;
+    loadNamSlotAsync (driveNam, ampModel, cabinetIr, std::move (onDone));
+}
+
+void AudioEngine::loadNamSlotAsync (NamSlot& slot, const juce::File& ampModel, const juce::File& cabinetIr, LoadCallback onDone)
+{
+    slot.ampFile = ampModel;
+    slot.cabinetFile = cabinetIr;
+    slot.error = {};
+
+    const auto generation = ++slot.generation;
+
+    if (ampModel == juce::File() && cabinetIr == juce::File())
+    {
+        slot.loading = false;
+        installNamTone (slot, nullptr);
+        if (onDone != nullptr)
+            onDone (true, {});
+        return;
+    }
+
+    slot.loading = true;
 
     // 今のデバイスの設定で準備する (違うサンプルレートで準備したモデルは、オーディオスレッドで使わない)
     const auto sampleRate = deviceSampleRate.load();
     const auto blockSize = namBlockSizeFor (deviceBufferSize.load());
     juce::WeakReference<AudioEngine> weakThis (this);
+    auto* slotPtr = &slot;   // AudioEngine のメンバー。使う前に weakThis で、エンジンがまだあるか確かめる
 
-    loaderPool.addJob ([weakThis, ampModel, cabinetIr, sampleRate, blockSize, generation, onDone]
+    loaderPool.addJob ([weakThis, slotPtr, ampModel, cabinetIr, sampleRate, blockSize, generation, onDone]
     {
         auto result = NamTone::load (ampModel, cabinetIr, sampleRate, blockSize);
 
-        juce::MessageManager::callAsync ([weakThis, result, generation, onDone]
+        juce::MessageManager::callAsync ([weakThis, slotPtr, result, generation, onDone]
         {
             auto* self = weakThis.get();
-            if (self == nullptr || generation != self->namToneGeneration)
+            if (self == nullptr || generation != slotPtr->generation)
                 return;   // 破棄済み、または後から別のファイルが選ばれた
 
-            self->namToneLoading = false;
-            self->namToneError = result.error;
+            slotPtr->loading = false;
+            slotPtr->error = result.error;
 
             if (result.tone != nullptr)
-                self->installNamTone (result.tone);
+                self->installNamTone (*slotPtr, result.tone);
 
             if (onDone != nullptr)
                 onDone (result.tone != nullptr, result.error);
@@ -266,28 +287,31 @@ void AudioEngine::updatePluginPreparation()
     currentPluginTone.store (ownedPluginTone.get());
 }
 
-void AudioEngine::installNamTone (std::shared_ptr<NamTone> newTone)
+void AudioEngine::installNamTone (NamSlot& slot, std::shared_ptr<NamTone> newTone)
 {
     // 音源と同じく、古いものはオーディオスレッドが使い終わってから解放する
-    if (ownedNamTone != nullptr)
-        retired.push_back ({ ownedNamTone, callbackCount.load() });
+    if (slot.owned != nullptr)
+        retired.push_back ({ slot.owned, callbackCount.load() });
 
-    ownedNamTone = std::move (newTone);
-    currentNamTone.store (ownedNamTone.get());
+    slot.owned = std::move (newTone);
+    slot.current.store (slot.owned.get());
 }
 
-AudioEngine::NamToneInfo AudioEngine::getNamToneInfo() const
+AudioEngine::NamToneInfo AudioEngine::getNamToneInfo() const   { return getNamSlotInfo (userNam); }
+AudioEngine::NamToneInfo AudioEngine::getDriveToneInfo() const { return getNamSlotInfo (driveNam); }
+
+AudioEngine::NamToneInfo AudioEngine::getNamSlotInfo (const NamSlot& slot) const
 {
     NamToneInfo info;
-    info.loading = namToneLoading;
-    info.error = namToneError;
-    info.ampFile = namAmpFile;
-    info.cabinetFile = namCabinetFile;
+    info.loading = slot.loading;
+    info.error = slot.error;
+    info.ampFile = slot.ampFile;
+    info.cabinetFile = slot.cabinetFile;
 
-    if (ownedNamTone != nullptr)
+    if (slot.owned != nullptr)
     {
-        info.modelSampleRate = ownedNamTone->getModelSampleRate();
-        info.active = juce::approximatelyEqual (ownedNamTone->getSampleRate(), deviceSampleRate.load());
+        info.modelSampleRate = slot.owned->getModelSampleRate();
+        info.active = juce::approximatelyEqual (slot.owned->getSampleRate(), deviceSampleRate.load());
     }
     return info;
 }
@@ -398,16 +422,25 @@ void AudioEngine::timerCallback()
 
     // デバイスのサンプルレートやバッファの大きさが変わったら (設定画面で ASIO に切り替えたときなど)、
     // NAM の音色を今の設定で読み込み直す。それまでは、ギターの音をそのまま (音色なしで) 出す
-    if (ownedNamTone != nullptr && ! namToneLoading && deviceRunning)
+    if (deviceRunning)
     {
-        const bool rateChanged = ! juce::approximatelyEqual (ownedNamTone->getSampleRate(), deviceSampleRate.load());
-        const bool blockTooSmall = ownedNamTone->getMaxBlockSize() < deviceBufferSize.load();
-
-        if (rateChanged || blockTooSmall)
-            loadNamToneAsync (namAmpFile, namCabinetFile, nullptr);
+        reloadNamSlotIfDeviceChanged (userNam);
+        reloadNamSlotIfDeviceChanged (driveNam);
     }
 
     updatePluginPreparation();
+}
+
+void AudioEngine::reloadNamSlotIfDeviceChanged (NamSlot& slot)
+{
+    if (slot.owned == nullptr || slot.loading)
+        return;
+
+    const bool rateChanged = ! juce::approximatelyEqual (slot.owned->getSampleRate(), deviceSampleRate.load());
+    const bool blockTooSmall = slot.owned->getMaxBlockSize() < deviceBufferSize.load();
+
+    if (rateChanged || blockTooSmall)
+        loadNamSlotAsync (slot, slot.ampFile, slot.cabinetFile, nullptr);
 }
 
 //==============================================================================
@@ -473,6 +506,12 @@ void AudioEngine::processGuitar (const float* input, int numSamples, int toneTyp
     if (inPeak > inputPeak.load())
         inputPeak.store (inPeak);
 
+    // ノイズゲート: 弾いていないときの雑音を、音色 (アンプ) で大きくなる前に消す。
+    // VST プラグインのときは、いつもオフ (作者の指示: プラグインの中のゲートを使う。二重にかけると音の消え際が切れる)。
+    // オフで呼ぶと、ゲートの状態が「開いている」に戻るので、ほかの音色に戻したときに音が急に消えない
+    const auto gateDb = (ToneType) toneType == ToneType::plugin ? NoiseGate::offDb : noiseGateDb.load();
+    noiseGate.process (buffer, numSamples, gateDb, deviceSampleRate.load());
+
     if ((ToneType) toneType == ToneType::plugin)
     {
         // VST3 プラグイン。準備し直している最中 (外している間) は、音色なしでそのまま出す
@@ -486,21 +525,34 @@ void AudioEngine::processGuitar (const float* input, int numSamples, int toneTyp
     }
     else if ((ToneType) toneType == ToneType::nam)
     {
-        // 今のデバイスと同じサンプルレートで準備したモデルだけを使う。
-        // 違うとき (読み込み直している最中) は、音色なしでそのまま出す
-        auto* namTone = currentNamTone.load();
-        if (namTone != nullptr && juce::approximatelyEqual (namTone->getSampleRate(), deviceSampleRate.load()))
-        {
-            const auto block = namTone->getMaxBlockSize();
-            for (int start = 0; start < numSamples; start += block)
-                namTone->process (buffer + start, juce::jmin (block, numSamples - start));
-        }
+        processNam (userNam, buffer, numSamples);
+    }
+    else if ((ToneType) toneType == ToneType::drive)
+    {
+        // 「歪み」: 同梱の NAM のモデル。まだ読み込めていないときは、クリーンの音で出す (音が消えないように)
+        if (! processNam (driveNam, buffer, numSamples))
+            for (int i = 0; i < numSamples; ++i)
+                buffer[i] = applySimpleTone (buffer[i], (int) ToneType::clean);
     }
     else
     {
         for (int i = 0; i < numSamples; ++i)
             buffer[i] = applySimpleTone (buffer[i], toneType);
     }
+}
+
+bool AudioEngine::processNam (const NamSlot& slot, float* buffer, int numSamples) noexcept
+{
+    // 今のデバイスと同じサンプルレートで準備したモデルだけを使う。
+    // 違うとき (読み込み直している最中) は、何もしない (false を返す)
+    auto* namTone = slot.current.load();
+    if (namTone == nullptr || ! juce::approximatelyEqual (namTone->getSampleRate(), deviceSampleRate.load()))
+        return false;
+
+    const auto block = namTone->getMaxBlockSize();
+    for (int start = 0; start < numSamples; start += block)
+        namTone->process (buffer + start, juce::jmin (block, numSamples - start));
+    return true;
 }
 
 void AudioEngine::setExternalClock (double position, double rate, bool isPlaying) noexcept

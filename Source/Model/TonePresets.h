@@ -4,7 +4,8 @@
 #include "../Text.h"
 
 // 音色の種類
-//   clean / crunch / drive: 簡易な音色 (AudioEngine で tanh による歪みをかける。ファイルなしで、すぐ音が出る)
+//   clean / crunch: 簡易な音色 (AudioEngine で tanh をかける。ファイルなしで、すぐ音が出る)
+//   drive: 「歪み」。アプリに同梱した NAM のモデルと IR で鳴らす (Audio/BuiltInTones.h。「NAM」のボタンとは別)
 //   nam: NAM のアンプのモデル (.nam) とキャビネットの IR (.wav)。ファイルを選んで使う (設計書 #6)
 enum class ToneType
 {
