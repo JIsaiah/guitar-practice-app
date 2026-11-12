@@ -46,6 +46,39 @@ public:
         }
     }
 
+    // ローカル音源をタブ譜と入れ替えたとき (作者の指示): 映像が無いので、動画の代わりに、
+    // 今の時刻と音源の名前を大きく出す。この枠をクリックすると再生・停止 (onClicked)
+    void setAudioMode (bool on, const juce::String& fileName)
+    {
+        if (on != audioMode || fileName != audioName)
+        {
+            audioMode = on;
+            audioName = fileName;
+            setMouseCursor (on ? juce::MouseCursor::PointingHandCursor : juce::MouseCursor::NormalCursor);
+            repaint();
+        }
+    }
+
+    void setTimeText (const juce::String& text)
+    {
+        if (text != timeText)
+        {
+            timeText = text;
+            if (audioMode)
+                repaint();
+        }
+    }
+
+    std::function<void()> onClicked;
+
+    void mouseUp (const juce::MouseEvent& e) override
+    {
+        // 左のボタンだけで、動かさずに押して離したとき (ラジアルメニューの操作や、右クリックは数えない)
+        if (onClicked != nullptr && e.mods.isLeftButtonDown() && ! e.mods.isRightButtonDown() && ! e.mods.isMiddleButtonDown()
+            && ! e.mouseWasDraggedSinceMouseDown())
+            onClicked();
+    }
+
     // 音源もタブ譜も無いとき: 小節・拍の代わりに、選ぶボタン (練習画面が上に置く) のための案内だけを描く
     void setEmptySession (bool empty)
     {
@@ -63,6 +96,22 @@ public:
         g.fillRoundedRectangle (bounds.toFloat(), 8.0f);
         g.setColour (findColour (ThemeColourIds::border));
         g.drawRoundedRectangle (bounds.toFloat().reduced (0.5f), 8.0f, 1.0f);
+
+        if (audioMode)
+        {
+            g.setColour (findColour (juce::Label::textColourId));
+            g.setFont (AppLookAndFeel::scaled (juce::FontOptions (56.0f, juce::Font::bold)));
+            g.drawText (timeText, bounds.withSizeKeepingCentre (bounds.getWidth(), 90), juce::Justification::centred);
+
+            g.setColour (findColour (ThemeColourIds::textMuted));
+            g.setFont (AppLookAndFeel::scaled (juce::FontOptions (16.0f)));
+            g.drawText ("ローカル音源: "_jp + audioName, bounds.withSizeKeepingCentre (bounds.getWidth() - 24, 30).translated (0, -70),
+                        juce::Justification::centred, true);
+            g.setFont (AppLookAndFeel::scaled (juce::FontOptions (14.0f)));
+            g.drawText ("クリックで再生・停止"_jp, bounds.withSizeKeepingCentre (bounds.getWidth(), 30).translated (0, 70),
+                        juce::Justification::centred);
+            return;
+        }
 
         if (emptySession)
         {
@@ -91,6 +140,8 @@ public:
 private:
     int bar = 0, beat = 0;
     bool emptySession = false;
+    bool audioMode = false;
+    juce::String audioName, timeText { "00:00.0 / 00:00.0" };   // 再生位置が届くまでの表示
 };
 
 // 再生位置のバー。A-B ループの範囲と、経過時間 / 長さも表示する

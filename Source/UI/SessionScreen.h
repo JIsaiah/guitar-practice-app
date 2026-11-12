@@ -153,7 +153,7 @@ private:
     void seekToBar (double barStartBeats);
     void handlePageKey (const juce::String& key);   // WebView (タブ譜・動画) の上で押されたキー
     void toggleSwap();
-    bool isSwapped() const noexcept { return session.videoInMainArea && isYouTube(); }
+    bool isSwapped() const noexcept { return session.videoInMainArea && hasSource(); }   // 音源 (動画) を左の大きな枠に出しているか
     void updateSwapUi();
     void renameSession (const juce::String& newTitle);
     void toggleSourceMute();

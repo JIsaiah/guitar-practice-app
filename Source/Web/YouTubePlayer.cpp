@@ -168,6 +168,13 @@ void YouTubePlayer::handleEvent (const juce::var& event)
         return;
     }
 
+    if (type == "clicked")
+    {
+        if (onClicked != nullptr)
+            onClicked();
+        return;
+    }
+
     if (type == "error")
     {
         if (onError != nullptr)

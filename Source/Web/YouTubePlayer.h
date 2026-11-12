@@ -56,6 +56,7 @@ public:
     std::function<void (const juce::String& message)> onError;
     std::function<void()> onApiReady;                        // 準備完了 (時間の計測用)
     std::function<void (const juce::String& key)> onKey;     // ページの上で押された再生の操作キー
+    std::function<void()> onClicked;                         // 動画を (左のボタンだけで) クリックした
 
     void resized() override;
 

@@ -176,6 +176,17 @@
   document.addEventListener("auxclick", function (e) { if (e.button === 1) e.preventDefault(); }, true);
   document.addEventListener("mousedown", function (e) { if (e.detail > 1) e.preventDefault(); }, true);   // ダブルクリックでの選択
 
+  // 動画を押したら、アプリに知らせる (動画表示のときに再生・停止する。作者の指示)。
+  // 左のボタンだけのクリックを数える。ラジアルメニュー (左右の同時押し) の操作のあとのクリックは数えない
+  let otherButtons = false;
+  document.addEventListener("mousedown", function (e) { if (e.button !== 0 || (e.buttons & ~1)) otherButtons = true; }, true);
+  document.addEventListener("mouseup", function (e) {
+    if (otherButtons && e.buttons === 0) setTimeout(function () { otherButtons = false; }, 0);   // click の後で戻す
+  }, true);
+  document.getElementById("shield").addEventListener("click", function (e) {
+    if (!otherButtons && e.button === 0) send("clicked");
+  });
+
   document.addEventListener("DOMContentLoaded", function () { send("pageReady"); });
 </script>
 <!-- YouTube の公式プレイヤー API。これだけはネットから読む (YouTube を使うときはネット接続が必要) -->

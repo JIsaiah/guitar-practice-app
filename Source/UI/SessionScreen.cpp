@@ -144,6 +144,9 @@ SessionScreen::SessionScreen (AudioEngine& e, SessionStore& s, ThemeManager& t, 
     scoreViewer.onBarClicked = [this] (double barStartBeats) { seekToBar (barStartBeats); };
     scoreViewer.onKey = [this] (const juce::String& key) { handlePageKey (key); };
     youtube.onKey = [this] (const juce::String& key) { handlePageKey (key); };
+    // 動画表示 (入れ替え中) で、動画を押すと再生・停止 (作者の指示)。再生ボタンと同じ (1回目はカウントダウン)
+    youtube.onClicked = [this] { if (isSwapped()) perform (Command::togglePlay); grabKeyboardFocus(); };
+    scoreView.onClicked = [this] { if (isSwapped()) perform (Command::togglePlay); };
     timeline.onSeek = [this] (double seconds) { if (sourceReady) seekTo (seconds); };
 
     //==== 境目 (引っ張ると右のパネルの幅が変わる) と、隠す・出すタブ ====
@@ -566,6 +569,7 @@ SessionScreen::~SessionScreen()
     pluginCard.deleteEditor();
 
     youtube.onKey = nullptr;
+    youtube.onClicked = nullptr;
     scoreViewer.onLoaded = nullptr;
     scoreViewer.onError = nullptr;
     scoreViewer.onBarClicked = nullptr;
@@ -1268,7 +1272,7 @@ void SessionScreen::updateCountdownDisplay()
     // メインの枠 (左の大きな枠) に今あるものの上に出す
     const bool scoreShown = session.scorePath.isNotEmpty() && juce::File (session.scorePath).existsAsFile();
     const auto target = number == 0 && caption.isEmpty() ? CountdownTarget::none
-                      : isSwapped()  ? CountdownTarget::video
+                      : isSwapped()  ? (isYouTube() ? CountdownTarget::video : CountdownTarget::native)
                       : scoreShown   ? CountdownTarget::score
                                      : CountdownTarget::native;
 
@@ -1801,10 +1805,11 @@ void SessionScreen::handlePageKey (const juce::String& key)
 }
 
 //==============================================================================
-// タブ譜と動画の入れ替え (YouTube のときだけ)
+// タブ譜と動画 (音源) の入れ替え。YouTube とローカル音源 (作者の指示で、ローカル音源でもできるようにした)
+// ローカル音源には映像が無いので、左の大きな枠には、今の時刻と音源の名前を大きく出す (ScoreView の音源の表示)
 void SessionScreen::toggleSwap()
 {
-    if (! isYouTube())
+    if (! hasSource())
         return;
 
     session.videoInMainArea = ! session.videoInMainArea;
@@ -1813,10 +1818,13 @@ void SessionScreen::toggleSwap()
 
 void SessionScreen::updateSwapUi()
 {
-    swapButton.setEnabled (isYouTube());
+    swapButton.setEnabled (hasSource());
     swapButton.setToggleState (isSwapped(), juce::dontSendNotification);
-    swapButton.setTooltip (isYouTube() ? "タブ譜と動画の場所を入れ替えます (タブ譜つきの動画で練習するとき)"_jp
-                                       : "YouTube の音源のときに使えます"_jp);
+    swapButton.setTooltip (isYouTube()       ? "タブ譜と動画の場所を入れ替えます (タブ譜つきの動画で練習するとき)"_jp
+                           : isLocalSource() ? "タブ譜と音源の場所を入れ替えます。ループ・戻る・進むが秒単位になります"_jp
+                                             : "音源があるときに使えます"_jp);
+    // ローカル音源を入れ替えたとき: 左の大きな枠に、今の時刻と音源の名前を出す (クリックで再生・停止)
+    scoreView.setAudioMode (isSwapped() && isLocalSource(), juce::File (session.sourcePath).getFileName());
     sourceHeading.setText (isSwapped() ? "タブ譜 (動画と入れ替え中)"_jp : "音源"_jp, juce::dontSendNotification);
     updateSkipButtons();
     updateLoop();   // ループの A・B の表示 (小節 ⇔ 時刻) を合わせる
@@ -2456,13 +2464,10 @@ void SessionScreen::selectTone (int index, bool fromUser)
             }
 
         // 音色とミキサーの間に出たカードの全体が見えるところまで、スクロールする (resized の最後で行う)。
-        // プラグインの画面は別のウィンドウで開く (読み込み中なら、できたときに開く)。
-        // TONE3000 を選んだままもう一度押したときも、閉じたウィンドウをまた開く
+        // プラグインのウィンドウは開かない (作者の指示: 音色を切り替えるだけにする)。
+        // ウィンドウは、カードの「ウィンドウを開く」ボタンで開く
         if (fromUser)
-        {
             pluginScrollPending = true;
-            pluginCard.requestOpenWindow();
-        }
 
         resized();
     }
@@ -2733,6 +2738,7 @@ void SessionScreen::timerCallback()
     const auto beat = beats >= 0.0 ? (int) std::floor (beats) % 4 + 1 : 0;
     positionLabel.setText ("小節 "_jp + juce::String (bar) + "   拍 "_jp + juce::String (beat), juce::dontSendNotification);
     scoreView.setBarAndBeat (bar, beat);
+    scoreView.setTimeText (formatTime (position) + " / " + formatTime (length));   // ローカル音源を入れ替えたときに出す
     updateMetronomeDots (beats);
 
     // タブ譜は「拍の位置」+「タブ譜だけ」。針はページの中で、速度と経過時間からなめらかに進める
