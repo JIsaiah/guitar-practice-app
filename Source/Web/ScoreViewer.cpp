@@ -1,5 +1,6 @@
 #include "ScoreViewer.h"
 #include "WebResources.h"
+#include "ScoreFileData.h"
 
 namespace
 {
@@ -51,11 +52,19 @@ std::optional<juce::WebBrowserComponent::Resource> ScoreViewer::provide (const j
     // タブ譜のファイルそのもの。/score?n=番号 (番号は、同じファイルでも読み直させるため)
     if (path.startsWith ("/score?") || path == "/score")
     {
+        // 音声入りの .gp は、音声を抜いて渡す (ScoreFileData.h)。トラックの切り替えなどで同じファイルを
+        // 読み直すことがあるので、ファイルと更新日時が同じなら、前に作ったものを使う
         const juce::ScopedLock lock (fileLock);
-        juce::MemoryBlock data;
-        if (scoreFile.loadFileAsData (data))
-            return WebResources::fromMemory (data.getData(), data.getSize(), "application/octet-stream");
-        return std::nullopt;
+        const auto modified = scoreFile.getLastModificationTime();
+        if (cachedFile != scoreFile || cachedModified != modified || cachedData.isEmpty())
+        {
+            cachedData.reset();
+            if (! ScoreFileData::load (scoreFile, cachedData))
+                return std::nullopt;
+            cachedFile = scoreFile;
+            cachedModified = modified;
+        }
+        return WebResources::fromMemory (cachedData.getData(), cachedData.getSize(), "application/octet-stream");
     }
 
     return WebResources::findBundled (path);

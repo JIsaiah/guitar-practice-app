@@ -36,7 +36,7 @@ void SessionFolderList::paintListBoxItem (int row, juce::Graphics& g, int width,
 
     const auto& item = items[(size_t) row];
     if (selected)
-        g.fillAll (list.findColour (ThemeColourIds::listSelection));
+        AppLookAndFeel::fillListHighlight (g, { 0, 0, width, height }, list.findColour (ThemeColourIds::listSelection));
 
     const auto textColour = list.findColour (juce::ListBox::textColourId);
     auto area = juce::Rectangle<int> (0, 0, width, height).reduced (10, 0);

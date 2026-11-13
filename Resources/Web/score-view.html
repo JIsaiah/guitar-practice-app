@@ -12,6 +12,16 @@
   #scroller { position: absolute; inset: 0; overflow-y: auto; overflow-x: hidden; }
   /* ラジアルメニュー (アプリ側) を出している間: マウスではスクロールさせず、タブ譜にマウスの操作を渡さない */
   #scroller.frozen { overflow-y: hidden; }
+  /* スクロールバー: 細く、目立たない形 (作者の指示)。溝は透明で、つまみだけを丸く出す。上下の矢印は出さない。
+     つまみは薄い色 (75%)。ふだんは隠し、ホイールを回したとき・スクロールバーの近くでマウスを動かしたときだけ出して、
+     2 秒動かさなければ消す (下のスクリプトが scrolling を付け外しする) */
+  #scroller::-webkit-scrollbar { width: 6px; }
+  #scroller::-webkit-scrollbar-track { background: transparent; }
+  #scroller::-webkit-scrollbar-thumb { background: transparent; border-radius: 3px; }
+  #scroller.scrolling::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--color-border) 75%, transparent); }
+  #scroller.scrolling::-webkit-scrollbar-thumb:hover,
+  #scroller.scrolling::-webkit-scrollbar-thumb:active { background: color-mix(in srgb, var(--color-text-muted) 75%, transparent); }
+  #scroller::-webkit-scrollbar-button { display: none; height: 0; }
   #scroller.frozen #score { pointer-events: none; }
   #score { position: relative; }
   #cursor { position: absolute; width: 3px; border-radius: 2px; background: var(--color-accent);
@@ -58,6 +68,27 @@
   }
 
   const scroller = document.getElementById("scroller");
+
+  // スクロールバーを出すのは、使う人が動かしたときだけ (再生中の自動スクロールでは出さない)。2 秒動かさなければ消す
+  let scrollbarTimer = 0;
+  // Chromium は、クラスを変えただけではスクロールバーを描き直さないことがあるので、同じ瞬間に作り直させる
+  // (スクロールの位置は変わらない。画面にも出ない)
+  function setScrollbarShown(shown) {
+    if (scroller.classList.contains("scrolling") === shown) return;
+    scroller.classList.toggle("scrolling", shown);
+    scroller.style.overflowY = "hidden";
+    void scroller.offsetWidth;
+    scroller.style.overflowY = "";
+  }
+  function showScrollbar() {
+    setScrollbarShown(true);
+    clearTimeout(scrollbarTimer);
+    scrollbarTimer = setTimeout(function () { setScrollbarShown(false); }, 2000);
+  }
+  function nearScrollbar(e) { return e.clientX >= scroller.getBoundingClientRect().right - 16; }
+  scroller.addEventListener("wheel", showScrollbar, { passive: true });
+  scroller.addEventListener("pointermove", function (e) { if (nearScrollbar(e) || e.buttons) showScrollbar(); });
+  scroller.addEventListener("pointerdown", function (e) { if (nearScrollbar(e)) showScrollbar(); });
   const scoreElement = document.getElementById("score");
   const cursor = document.createElement("div"); cursor.id = "cursor";
   const barHighlight = document.createElement("div"); barHighlight.id = "barHighlight";

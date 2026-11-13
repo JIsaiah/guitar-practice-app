@@ -13,6 +13,13 @@ public:
     static inline float textScale = 1.0f;
     static juce::FontOptions scaled (juce::FontOptions font) { return font.withHeight (font.getHeight() * textScale); }
 
+    // 一覧の選んでいる行 (・マウスを乗せた行) の塗り。ボタンと同じ角の丸みにする (四角だと浮いて見える。作者の指示)
+    static void fillListHighlight (juce::Graphics& g, juce::Rectangle<int> row, juce::Colour colour)
+    {
+        g.setColour (colour);
+        g.fillRoundedRectangle (row.toFloat().reduced (4.0f, 1.5f), 6.0f);
+    }
+
     // Font が覚えている書体を捨てた写し (テーマを切り替えたあと、新しい書体で描かせるため)
     static juce::Font withoutCachedTypeface (const juce::Font& font);
 
@@ -39,6 +46,9 @@ public:
                        int buttonX, int buttonY, int buttonW, int buttonH, juce::ComboBox&) override;
     void fillTextEditorBackground (juce::Graphics&, int width, int height, juce::TextEditor&) override;
     void drawTextEditorOutline (juce::Graphics&, int width, int height, juce::TextEditor&) override;
+
+    // ポップアップ (確認・お知らせ): アイコン (「？」「！」) を描かず、角の丸い面と細い枠だけにする (作者の指示)
+    void drawAlertBox (juce::Graphics&, juce::AlertWindow&, const juce::Rectangle<int>& textArea, juce::TextLayout&) override;
 };
 
 // 通常モードの LookAndFeel。デザイントークンのテーマ (ライト／ダーク) の色で描く。文字は「Yu Gothic UI」

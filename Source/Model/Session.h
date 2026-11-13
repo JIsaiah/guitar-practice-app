@@ -71,6 +71,7 @@ struct Session
     int syncOffsetMs = 0;    // 拍の位置: メトロノームとタブ譜を、音源に対してずらす
     int scoreOffsetMs = 0;   // タブ譜だけをずらす (タブ譜の再生開始の位置合わせ)
     int metronomeStartMs = 0;   // 動画モードで、メトロノームを始める位置 (「ここから開始」)。0 = 指定なし
+    int scoreStartMs = 0;       // タブ譜の1小節目を合わせる、音源の位置 (「ここから流す」)。0 = 音源の頭から
 
     bool videoInMainArea = false;   // タブ譜と動画を入れ替えて、動画を大きく表示する (タブ譜つきの動画で練習するとき)
 

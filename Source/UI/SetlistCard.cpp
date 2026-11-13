@@ -20,11 +20,6 @@ SetlistCard::SetlistCard (Setlist s, SessionLibrary& l, SetlistStore& st, ThemeM
     };
     addAndMakeVisible (playButton);
 
-    addButton.setButtonText ("＋ 追加"_jp);
-    addButton.setClickingTogglesState (false);
-    addButton.onClick = [this] { if (onRequestAdd != nullptr) onRequestAdd(); };
-    addChildComponent (addButton);
-
     entryList.onPlay = [this] (int index) { if (onPlay != nullptr) onPlay (index); };
     entryList.onOpenSession = [this] (const juce::String& id) { if (onOpenSession != nullptr) onOpenSession (id); };
     entryList.onChanged = [this] { changed(); };
@@ -47,7 +42,6 @@ void SetlistCard::setExpanded (bool shouldBeExpanded)
 
     expanded = shouldBeExpanded;
     entryList.setVisible (expanded);
-    addButton.setVisible (expanded);
     repaint();
 
     if (onLayoutChanged != nullptr)
@@ -69,13 +63,21 @@ void SetlistCard::addSession (const juce::String& sessionId)
 
 void SetlistCard::setAdding (bool isAdding)
 {
-    addButton.setToggleState (isAdding, juce::dontSendNotification);
+    adding = isAdding;
+    repaint();
+}
+
+juce::Rectangle<int> SetlistCard::getAddRowArea() const
+{
+    if (! expanded)
+        return {};
+    return { 0, headerHeight + entryList.getPreferredHeight(), getWidth(), addRowHeight };
 }
 
 void SetlistCard::save()
 {
     if (! store.save (setlist))
-        juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon,
+        juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::NoIcon,
                                                 "保存できませんでした"_jp,
                                                 store.getDirectory().getFullPathName());
 }
@@ -131,15 +133,16 @@ void SetlistCard::paint (juce::Graphics& g)
     auto header = getLocalBounds().removeFromTop (headerHeight).reduced (16, 0);
     header.removeFromRight (playButton.getWidth() + 16);
 
-    // 展開の印
-    const auto arrowArea = header.removeFromLeft (20).toFloat();
+    // 開閉の印 (作者のレイアウト): 開いているとき ▲、閉じているとき ▼
+    const auto arrowArea = header.removeFromLeft (24).toFloat();
     juce::Path arrow;
-    arrow.addTriangle (0.0f, 0.0f, 10.0f, 0.0f, 5.0f, 6.0f);
-    if (! expanded)
-        arrow.applyTransform (juce::AffineTransform::rotation (-juce::MathConstants<float>::halfPi, 5.0f, 3.0f));
-    g.setColour (findColour (ThemeColourIds::textMuted));
-    g.fillPath (arrow, juce::AffineTransform::translation (arrowArea.getX(), arrowArea.getCentreY() - 3.0f));
-    header.removeFromLeft (6);
+    if (expanded)
+        arrow.addTriangle (0.0f, 9.0f, 14.0f, 9.0f, 7.0f, 0.0f);
+    else
+        arrow.addTriangle (0.0f, 0.0f, 14.0f, 0.0f, 7.0f, 9.0f);
+    g.setColour (findColour (juce::Label::textColourId));
+    g.fillPath (arrow, juce::AffineTransform::translation (arrowArea.getX(), arrowArea.getCentreY() - 4.5f));
+    header.removeFromLeft (24);
 
     g.setColour (findColour (juce::Label::textColourId));
     g.setFont (AppLookAndFeel::scaled (juce::FontOptions (18.0f, juce::Font::bold)));
@@ -148,8 +151,30 @@ void SetlistCard::paint (juce::Graphics& g)
 
     g.setColour (findColour (ThemeColourIds::textMuted));
     g.setFont (AppLookAndFeel::scaled (juce::FontOptions (13.0f)));
-    g.drawText (setlist.entries.empty() ? "曲がありません。開いて「＋ 追加」から追加できます"_jp : describeSummary(),
+    g.drawText (setlist.entries.empty() ? "曲がありません。開いて「＋ 曲を追加」から追加できます"_jp : describeSummary(),
                 header.withTrimmedTop (headerHeight / 2 + 4), juce::Justification::topLeft, true);
+
+    if (! expanded)
+        return;
+
+    // 見出しと曲順の境目 (カードの幅いっぱいに近い線)
+    g.setColour (findColour (ThemeColourIds::border));
+    g.fillRect (16, headerHeight - 1, getWidth() - 32, 1);
+
+    // 「＋ 曲を追加」の行。曲の行と同じ列 (番号の列に「＋」、曲名の列に文字) に置く
+    auto row = getAddRowArea();
+    if (addHover)
+        AppLookAndFeel::fillListHighlight (g, row.withTrimmedLeft (12).withTrimmedRight (12),
+                                           findColour (ThemeColourIds::listSelection));
+    g.setColour (findColour (ThemeColourIds::border));
+    g.fillRect (row.getX() + 24, row.getY(), row.getWidth() - 48, 1);
+
+    row = row.reduced (24, 0);
+    g.setColour (adding ? findColour (ThemeColourIds::accent) : findColour (juce::Label::textColourId));
+    g.setFont (AppLookAndFeel::scaled (juce::FontOptions (18.0f, juce::Font::bold)));
+    g.drawText ("+", row.removeFromLeft (SetlistEntryList::numberWidth), juce::Justification::centredLeft);
+    g.setFont (AppLookAndFeel::scaled (juce::FontOptions (15.0f, juce::Font::bold)));
+    g.drawText ("曲を追加"_jp, row, juce::Justification::centredLeft);
 }
 
 void SetlistCard::resized()
@@ -159,12 +184,41 @@ void SetlistCard::resized()
     playButton.setBounds (header.removeFromRight (200).reduced (16, 12));
 
     entryList.setBounds (area.removeFromTop (entryList.getPreferredHeight()));
-    addButton.setBounds (area.removeFromTop (addRowHeight).reduced (16, 8).removeFromLeft (160));
+}
+
+void SetlistCard::mouseMove (const juce::MouseEvent& e)
+{
+    const auto hover = getAddRowArea().contains (e.getPosition());
+    if (hover != addHover)
+    {
+        addHover = hover;
+        repaint();
+    }
+}
+
+void SetlistCard::mouseExit (const juce::MouseEvent&)
+{
+    if (addHover)
+    {
+        addHover = false;
+        repaint();
+    }
 }
 
 void SetlistCard::mouseUp (const juce::MouseEvent& e)
 {
-    if (e.y >= headerHeight || e.mouseWasDraggedSinceMouseDown())
+    if (e.mouseWasDraggedSinceMouseDown())
+        return;
+
+    // 「＋ 曲を追加」の行
+    if (getAddRowArea().contains (e.getPosition()))
+    {
+        if (! e.mods.isPopupMenu() && onRequestAdd != nullptr)
+            onRequestAdd();
+        return;
+    }
+
+    if (e.y >= headerHeight)
         return;
 
     if (e.mods.isPopupMenu())
@@ -228,7 +282,7 @@ void SetlistCard::rename()
 void SetlistCard::requestDelete()
 {
     auto options = juce::MessageBoxOptions()
-                       .withIconType (juce::MessageBoxIconType::QuestionIcon)
+                       .withIconType (juce::MessageBoxIconType::NoIcon)
                        .withTitle ("セットリストの削除"_jp)
                        .withMessage ("「"_jp + setlist.name + "」を削除しますか？\n中のセッションは削除されません。"_jp)
                        .withButton ("削除"_jp)

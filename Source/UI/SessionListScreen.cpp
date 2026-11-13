@@ -19,6 +19,7 @@ SessionListScreen::SessionListScreen (SessionLibrary& l, SetlistStore& sl, Theme
     {
         tab->setClickingTogglesState (true);
         tab->setRadioGroupId (tabRadioGroup);
+        tab->getProperties().set ("segmentedTab", true);   // 1本の帯にした見た目 (LookAndFeel が描き分ける)
         addAndMakeVisible (tab);
     }
     sessionsTab.onClick = [this] { if (sessionsTab.getToggleState()) showTab (Tab::sessions); };
@@ -47,7 +48,8 @@ SessionListScreen::SessionListScreen (SessionLibrary& l, SetlistStore& sl, Theme
 
     newButton.setTooltip ("新しいセッション"_jp);   // 「＋」のアイコン (作者のアイコン)
     settingsButton.setTooltip ("設定"_jp);
-    settingsButton.setIconScale (0.45f);
+    settingsButton.setIconScale (0.5f);
+    settingsButton.setFrameless (true);   // 作者のレイアウト: 歯車は枠なし
 
     newButton.onClick = [this] { if (onNewSession != nullptr) onNewSession(); };
     settingsButton.onClick = [this] { if (onOpenSettings != nullptr) onOpenSettings(); };
@@ -225,7 +227,7 @@ void SessionListScreen::createFolder (std::function<void (juce::String)> then)
         auto names = getFolderNames();
         if (const auto problem = SessionFolders::checkName (name, names); problem.isNotEmpty())
         {
-            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "フォルダを作れませんでした"_jp, problem);
+            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::NoIcon, "フォルダを作れませんでした"_jp, problem);
             return;
         }
 
@@ -256,7 +258,7 @@ void SessionListScreen::renameFolder (const juce::String& oldName)
         names.removeString (oldName);
         if (const auto problem = SessionFolders::checkName (newName, names); problem.isNotEmpty())
         {
-            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "名前を変えられませんでした"_jp, problem);
+            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::NoIcon, "名前を変えられませんでした"_jp, problem);
             return;
         }
 
@@ -286,7 +288,7 @@ void SessionListScreen::deleteFolder (const juce::String& name)
             ++count;
 
     auto options = juce::MessageBoxOptions()
-                       .withIconType (juce::MessageBoxIconType::QuestionIcon)
+                       .withIconType (juce::MessageBoxIconType::NoIcon)
                        .withTitle ("フォルダの削除"_jp)
                        .withMessage ("フォルダ「"_jp + name + "」を削除しますか？"_jp
                                      + (count > 0 ? "\n中の "_jp + juce::String (count) + " 件のセッションは消さずに、「フォルダなし」に移します。"_jp
@@ -377,7 +379,7 @@ void SessionListScreen::deleteSelected()
                 << "\nセットリストの中では「見つかりません」と表示されます。"_jp;
 
     auto options = juce::MessageBoxOptions()
-                       .withIconType (juce::MessageBoxIconType::QuestionIcon)
+                       .withIconType (juce::MessageBoxIconType::NoIcon)
                        .withTitle ("セッションの削除"_jp)
                        .withMessage (message)
                        .withButton ("削除"_jp)
@@ -479,7 +481,7 @@ void SessionListScreen::paintListBoxItem (int row, juce::Graphics& g, int width,
     const auto columns = layoutColumns (width, height);
 
     if (selected)
-        g.fillAll (listBox.findColour (ThemeColourIds::listSelection));
+        AppLookAndFeel::fillListHighlight (g, { 0, 0, width, height }, listBox.findColour (ThemeColourIds::listSelection));
 
     const auto textColour = listBox.findColour (juce::ListBox::textColourId);
     const auto muted = textColour.withAlpha (0.6f);
@@ -640,7 +642,7 @@ void SessionListScreen::editDetails (int row)
         const auto bpm = bpmText.getDoubleValue();
         if (bpm < 20.0 || bpm > 400.0)
         {
-            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "BPM の値"_jp,
+            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::NoIcon, "BPM の値"_jp,
                                                     "BPM は 20〜400 の数で入力してください。変更は保存していません。"_jp);
             return;
         }
@@ -659,7 +661,7 @@ void SessionListScreen::editDetails (int row)
 
         if (! updated.has_value())
         {
-            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "保存できませんでした"_jp, {});
+            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::NoIcon, "保存できませんでした"_jp, {});
             return;
         }
 
@@ -675,6 +677,16 @@ void SessionListScreen::editDetails (int row)
 void SessionListScreen::paint (juce::Graphics& g)
 {
     g.fillAll (getLookAndFeel().findColour (juce::ResizableWindow::backgroundColourId));
+
+    // タブの帯: 「セッション｜セットリスト」を1本の帯にし、真ん中に区切りの線 (作者のレイアウト)
+    {
+        const auto bar = tabBar.toFloat();
+        g.setColour (findColour (ThemeColourIds::panel));
+        g.fillRoundedRectangle (bar, 8.0f);
+        g.setColour (findColour (ThemeColourIds::border));
+        g.drawRoundedRectangle (bar.reduced (0.5f), 8.0f, 1.0f);
+        g.fillRect (juce::Rectangle<float> (bar.getCentreX() - 0.5f, bar.getY() + 12.0f, 1.0f, bar.getHeight() - 24.0f));
+    }
 
     if (currentTab != Tab::sessions)
         return;
@@ -796,9 +808,10 @@ void SessionListScreen::resized()
     auto tabs = area.removeFromTop (56);
     settingsButton.setBounds (tabs.removeFromRight (56));   // 正方形 (タブと同じ高さ)
     tabs.removeFromRight (12);
-    const auto tabWidth = (tabs.getWidth() - 12) / 2;
+    tabBar = tabs;   // 1本の帯。左半分が「セッション」、右半分が「セットリスト」
+    const auto tabWidth = tabs.getWidth() / 2;
     sessionsTab.setBounds (tabs.removeFromLeft (tabWidth));
-    setlistsTab.setBounds (tabs.removeFromRight (tabWidth));
+    setlistsTab.setBounds (tabs);
 
     area.removeFromTop (12);
 

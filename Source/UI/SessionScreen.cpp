@@ -36,7 +36,7 @@ SessionScreen::SessionScreen (AudioEngine& e, SessionStore& s, ThemeManager& t, 
                               SessionOpenContext context, PlaybackSettingsResolver resolver)
     : engine (e), store (s), theme (t), youtube (yt), scoreViewer (sv), settings (appSettings),
       session (std::move (sessionToOpen)), openContext (std::move (context)), settingsResolver (std::move (resolver)),
-      backButton (t), saveButton (t),
+      saveButton (t),
       tapButton (t), tunerButton (t), metronomeButton (t), loopButton (t)
 {
     // 音源の音量は 100% まで (作者の指示。YouTube はプレイヤーの音量が 100 までなので、全部の音源で揃える)。
@@ -48,7 +48,9 @@ SessionScreen::SessionScreen (AudioEngine& e, SessionStore& s, ThemeManager& t, 
     savedTempoOrigin = session.tempoOrigin;
 
     //==== 上部 ====
-    backButton.setFixedText (FixedTextId::BackToList, "<");
+    backButton.setFrameless (true);
+    backButton.setIconScale (0.5f);
+    backButton.setMouseCursor (juce::MouseCursor::PointingHandCursor);
     backButton.setTooltip ("一覧に戻る"_jp);
     saveButton.setFixedText (FixedTextId::Save, "保存"_jp);
     settingsButton.setTooltip ("設定"_jp);
@@ -116,7 +118,6 @@ SessionScreen::SessionScreen (AudioEngine& e, SessionStore& s, ThemeManager& t, 
     artistLabel.setInterceptsMouseClicks (false, false);
 
     //==== 左: タブ譜 ====
-    scoreNameLabel.setFont (juce::FontOptions (14.0f));
     positionLabel.setFont (juce::FontOptions (15.0f, juce::Font::bold));
     positionLabel.setJustificationType (juce::Justification::centredRight);
     scoreChooseButton.setButtonText ("タブ譜を選択"_jp);
@@ -350,6 +351,26 @@ SessionScreen::SessionScreen (AudioEngine& e, SessionStore& s, ThemeManager& t, 
     scoreOffsetLabel.setText ("タブ譜だけ"_jp, juce::dontSendNotification);
     scoreOffsetLabel.setTooltip ("タブ譜のカーソルだけをずらします (メトロノームと音源は合っているのに、タブ譜がずれるとき)"_jp);
     offsetLabel.setText ("拍の位置"_jp, juce::dontSendNotification);
+    scoreStartButton.onClick = [this] { setScoreStartHere(); };
+    scoreStartButton.onRightClick = [this]
+    {
+        if (session.scoreStartMs <= 0)
+            return;
+
+        juce::PopupMenu menu;
+        menu.addItem (1, "開始位置を解除 (音源の頭から流す)"_jp);
+        menu.addItem (2, "開始位置へ移動"_jp);
+        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&scoreStartButton),
+                            [safe = juce::Component::SafePointer (this)] (int result)
+        {
+            if (safe == nullptr)
+                return;
+            if (result == 1)
+                safe->clearScoreStart();
+            if (result == 2 && safe->sourceReady)
+                safe->seekTo (safe->session.scoreStartMs / 1000.0);
+        });
+    };
     offsetLabel.setTooltip ("メトロノームとタブ譜を、音源に対してずらします"_jp);
     tapButton.setFixedText (FixedTextId::Tap, "TAP");
     tapButton.setTooltip ("曲に合わせて数回押すと、BPM になります (Enter キーでも押せます)"_jp);
@@ -452,7 +473,7 @@ SessionScreen::SessionScreen (AudioEngine& e, SessionStore& s, ThemeManager& t, 
     for (auto* c : std::initializer_list<juce::Component*> {
              &backButton, &saveButton, &settingsButton, &titleLabel, &artistLabel, &statusLabel, &helpButton,
              &leadButton, &backingButton,
-             &scoreNameLabel, &positionLabel, &scoreChooseButton, &scoreRemoveButton, &swapButton, &scoreView, &timeline,
+             &positionLabel, &scoreChooseButton, &scoreRemoveButton, &swapButton, &scoreView, &timeline,
              &splitter, &sidePanelButton,
              &sourceHeading, &toneHeading, &mixerHeading, &offsetHeading,
              &videoView, &sourceInfoLabel, &sourceRemoveButton, &chooseFileButton, &pasteUrlButton,
@@ -462,6 +483,7 @@ SessionScreen::SessionScreen (AudioEngine& e, SessionStore& s, ThemeManager& t, 
              &sourceGainSlider, &guitarGainSlider, &metronomeGainSlider, &sourceMuteButton, &guitarMuteButton,
              &leadTabLabel, &backingTabLabel, &leadTabSlider, &backingTabSlider, &leadTabMuteButton, &backingTabMuteButton,
              &bpmLabel, &bpmSlider, &tapButton, &scoreOffsetLabel, &scoreOffsetControl, &offsetLabel, &offsetControl,
+             &scoreStartButton,
              &sideScroll, &tunerButton,
              &playHeading, &speedHeading, &metronomeHeading, &loopHeading,
              &toStartButton, &rewindButton, &playButton, &forwardButton, &speedSlider, &equalBarsButton,
@@ -603,6 +625,7 @@ void SessionScreen::applySessionToEngine()
     engine.setMetronomeEnabled (false);
     setSyncOffset (session.syncOffsetMs);
     setScoreOffset (session.scoreOffsetMs);
+    updateScoreStartButton();   // 「ここから流す」の文字 (以後はタイマーで合わせる)
     updateLoop();
     updateSwapUi();
 }
@@ -746,7 +769,7 @@ void SessionScreen::requestRemoveSource()
     const auto what = isYouTube() ? "YouTube のリンク"_jp : "音源ファイル"_jp;
 
     auto options = juce::MessageBoxOptions()
-                       .withIconType (juce::MessageBoxIconType::QuestionIcon)
+                       .withIconType (juce::MessageBoxIconType::NoIcon)
                        .withTitle ("音源を外す"_jp)
                        .withMessage (what + "を外しますか？\n外したあと、ファイルか YouTube の URL を選び直せます。\n(保存するまで、セッションのファイルは変わりません)"_jp)
                        .withButton ("外す"_jp)
@@ -813,7 +836,7 @@ void SessionScreen::pasteYouTubeUrl()
 
     if (YouTubeUrl::extractVideoId (text).isEmpty())
     {
-        juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon,
+        juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::NoIcon,
                                                 "YouTube の URL ではありません"_jp,
                                                 "YouTube の動画ページの URL をコピーしてから、もう一度押してください。"_jp);
         return;
@@ -940,8 +963,6 @@ void SessionScreen::removeScore()
 void SessionScreen::updateScoreUi()
 {
     const juce::File file (session.scorePath);
-    scoreNameLabel.setText ("タブ譜: "_jp + (session.scorePath.isEmpty() ? "なし"_jp : file.getFileName()),
-                            juce::dontSendNotification);
     scoreRemoveButton.setEnabled (session.scorePath.isNotEmpty());
 
     if (session.scorePath.isNotEmpty() && ! file.existsAsFile())
@@ -1156,7 +1177,7 @@ void SessionScreen::requestBackToList()
     }
 
     auto options = juce::MessageBoxOptions()
-                       .withIconType (juce::MessageBoxIconType::QuestionIcon)
+                       .withIconType (juce::MessageBoxIconType::NoIcon)
                        .withTitle ("変更が保存されていません"_jp)
                        .withMessage ("一覧に戻る前に保存しますか？"_jp)
                        .withButton ("保存して戻る"_jp)
@@ -1733,7 +1754,10 @@ bool SessionScreen::isMetronomeStartActive() const
 
 double SessionScreen::getMetronomeOffsetSeconds() const
 {
-    return (session.syncOffsetMs + (isMetronomeStartActive() ? session.metronomeStartMs : 0)) / 1000.0;
+    // 動画モード: メトロノームの開始位置から数える。タブ譜モード: タブ譜の開始位置から数える (タブ譜の小節と合うように)
+    const auto start = isMetronomeStartActive() ? session.metronomeStartMs
+                                                : (isBarMode() ? getScoreStartMs() : 0);
+    return (session.syncOffsetMs + start) / 1000.0;
 }
 
 void SessionScreen::setMetronomeStartHere()
@@ -1772,6 +1796,42 @@ void SessionScreen::updateMetronomeStart()
         : "動画モード (タブ譜がないとき・動画と入れ替えたとき) で使えます。タブ譜モードでは、タブ譜の小節に合わせて鳴ります"_jp);
 
     // 再生バーには開始位置の印を出さない (作者の指示)。位置はボタンの「開始 01:23.4」で分かる
+}
+
+//==============================================================================
+// タブ譜の開始位置 (「ここから流す」)
+//   再生バーで、タブ譜の1小節目が始まる位置 (前奏の後など) を選んでボタンを押すと、そこにタブ譜の頭を合わせる。
+//   タブ譜のカーソル・タブ譜の音・小節のクリック・ループは、getScoreOffsetSeconds() を通して付いてくる。
+//   それより前は、カーソルは1小節目で待ち、タブ譜の音は鳴らない。音源が無い (タブ譜だけ) ときは使わない
+void SessionScreen::setScoreStartHere()
+{
+    if (! sourceReady || ! hasSource())
+        return;
+
+    // 0 は「指定なし (音源の頭)」と同じ意味なので、そのまま 0 を入れてよい
+    session.scoreStartMs = juce::jmax (0, juce::roundToInt (getPosition() * 1000.0));
+    setStatus ("タブ譜を "_jp + formatTime (session.scoreStartMs / 1000.0) + " から流します"_jp);
+    updateScoreStartButton();
+    updateMetronomeStart();   // タブ譜モードでは、メトロノームの起点も変わる
+}
+
+void SessionScreen::clearScoreStart()
+{
+    session.scoreStartMs = 0;
+    setStatus ("タブ譜の開始位置を解除しました (音源の頭から流します)"_jp);
+    updateScoreStartButton();
+    updateMetronomeStart();
+}
+
+void SessionScreen::updateScoreStartButton()
+{
+    const bool hasScore = ! scoreViewer.getBarStartBeats().empty();
+    scoreStartButton.setEnabled (hasSource() && sourceReady && hasScore);
+    scoreStartButton.setButtonText (session.scoreStartMs > 0 ? formatTime (session.scoreStartMs / 1000.0) + " から"_jp
+                                                             : "ここから流す"_jp);
+    scoreStartButton.setTooltip (hasSource()
+        ? "再生バーで、タブ譜の1小節目が始まる位置を選んでから押すと、そこからタブ譜が流れます。右クリックで解除・移動"_jp
+        : "音源があるときに使えます"_jp);
 }
 
 void SessionScreen::setScoreOffset (int ms)
@@ -1819,7 +1879,7 @@ void SessionScreen::toggleSwap()
 void SessionScreen::updateSwapUi()
 {
     swapButton.setEnabled (hasSource());
-    swapButton.setToggleState (isSwapped(), juce::dontSendNotification);
+    // 入れ替えは「オン・オフ」ではなく「切り替え」なので、押したあともアクセントの色にしない (作者の指示)
     swapButton.setTooltip (isYouTube()       ? "タブ譜と動画の場所を入れ替えます (タブ譜つきの動画で練習するとき)"_jp
                            : isLocalSource() ? "タブ譜と音源の場所を入れ替えます。ループ・戻る・進むが秒単位になります"_jp
                                              : "音源があるときに使えます"_jp);
@@ -2731,6 +2791,7 @@ void SessionScreen::timerCallback()
     }
 
     updateMetronomeStart();
+    updateScoreStartButton();
 
     // 小節・拍 (一定テンポ + ずらし。設計書 3.1)。動画モードでメトロノームの開始位置があれば、そこが 1小節目
     const auto beats = (position - getMetronomeOffsetSeconds()) * session.bpm / 60.0;
@@ -2801,7 +2862,7 @@ void SessionScreen::applyAppSettings()
 void SessionScreen::lookAndFeelChanged()
 {
     // テーマが変わったら、補助の文字の色を取り直し、タブ譜の色も合わせる
-    for (auto* label : { &statusLabel, &sourceInfoLabel, &scoreNameLabel, &artistLabel })
+    for (auto* label : { &statusLabel, &sourceInfoLabel, &artistLabel })
         label->setColour (juce::Label::textColourId, findColour (ThemeColourIds::textMuted));
 
     scoreViewer.setColours (theme.getPalette());
@@ -3021,7 +3082,7 @@ void SessionScreen::resized()
         const int tabRows = (hasLeadTab() ? 1 : 0) + (hasBackingTab() ? 1 : 0);   // タブ譜の音 (MIDI) の行
         const int mixerHeight = headingHeight + (3 + tabRows) * rowHeight;
         tabRowsShown = tabRows > 0;
-        constexpr int tempoHeight = headingHeight + 3 * rowHeight + 2 * 4;
+        constexpr int tempoHeight = headingHeight + 3 * rowHeight + 2 * 4;   // BPM・タブ譜だけ・拍の位置
         const int sourceExtra = headingHeight + 30 + (hasSource() ? 0 : 40);
         constexpr int cardChrome = 16 + 8;   // カードの内側の余白と、カードの間
         constexpr int labelWidth = 84;       // 行の名前の列。狭くして、スライダーを長くする
@@ -3185,6 +3246,7 @@ void SessionScreen::resized()
                 control->setBounds (row.reduced (0, 1));
             }
 
+
             return column.getY() - 8;   // 最後のカードの下の間は数えない
         };
 
@@ -3231,9 +3293,11 @@ void SessionScreen::resized()
     swapButton.setBounds (scoreHeader.removeFromRight (120).reduced (0, 2));
     scoreHeader.removeFromRight (6);
     equalBarsButton.setBounds (scoreHeader.removeFromRight (120).reduced (0, 2));
+    scoreHeader.removeFromRight (6);
+    scoreStartButton.setBounds (scoreHeader.removeFromRight (120).reduced (0, 2));   // 「ここから流す」(作者のレイアウト)
     scoreHeader.removeFromRight (12);
     positionLabel.setVisible (false);   // 「小節 ○ 拍 ○」は、作者のレイアウトに無いので出さない (タブ譜のカーソルと再生バーで分かる)
-    scoreNameLabel.setBounds (scoreHeader);
+    // タブ譜のファイル名は出さない (作者の指示)。残りの幅は空けておく
     area.removeFromTop (6);
 
     // セットリスト用メニュー (Setlist で開いたときだけ)。右のパネルの高さを減らさないよう、左の列の下に置く

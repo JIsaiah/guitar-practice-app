@@ -1,4 +1,5 @@
 #include "Icons.h"
+#include "../Theme/Palette.h"   // ThemeColourIds (アクセントの色)
 #include <BinaryData.h>
 #include <map>
 
@@ -104,10 +105,22 @@ void IconButton::setIcon (const char* iconFile)
 void IconButton::paintButton (juce::Graphics& g, bool highlighted, bool down)
 {
     auto& lf = getLookAndFeel();
-    const auto background = findColour (getToggleState() ? buttonOnColourId : buttonColourId);
-    lf.drawButtonBackground (g, *this, background, highlighted, down);
-
     auto colour = findColour (getToggleState() ? textColourOnId : textColourOffId);
+
+    if (frameless)
+    {
+        // 枠なし: アイコンの色だけで、マウスを乗せた・押したことを示す
+        if (isEnabled() && (highlighted || down))
+            colour = findColour (ThemeColourIds::accent);
+        if (down)
+            colour = colour.darker (0.2f);
+    }
+    else
+    {
+        const auto background = findColour (getToggleState() ? buttonOnColourId : buttonColourId);
+        lf.drawButtonBackground (g, *this, background, highlighted, down);
+    }
+
     if (! isEnabled())
         colour = colour.withMultipliedAlpha (0.5f);
 

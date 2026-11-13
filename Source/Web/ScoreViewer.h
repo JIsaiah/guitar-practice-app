@@ -84,6 +84,9 @@ private:
 
     juce::CriticalSection fileLock;   // 読み込みの要求は、別のスレッドから来ることがあるため
     juce::File scoreFile;
+    juce::File cachedFile;            // ページに渡したデータの元のファイル (fileLock の中で使う)
+    juce::Time cachedModified;
+    juce::MemoryBlock cachedData;     // ページに渡すデータ (音声入りの .gp は音声を抜いたもの)
     int loadCount = 0;
     double scoreTempo = 0.0;
     std::vector<double> barStartBeats;

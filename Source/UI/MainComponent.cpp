@@ -109,7 +109,7 @@ void MainComponent::openSessionLater (std::function<std::optional<Session> (Main
             m.sessionOpenedAtMs = clickedAt;
         }
         else
-            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon,
+            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::NoIcon,
                                                     "開けませんでした"_jp,
                                                     "セッションファイルが壊れているか、見つかりません。"_jp);
     });
@@ -152,7 +152,7 @@ void MainComponent::openSetlistEntryLater (const juce::String& setlistId, int en
             }
         }
 
-        juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon,
+        juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::NoIcon,
                                                 "開けませんでした"_jp,
                                                 "セットリストか、その曲のセッションが見つかりません。"_jp);
     });
@@ -269,7 +269,7 @@ void MainComponent::showSetup()
             // 作った時点で保存し、一覧に出るようにする (作ってそのまま練習画面を開くので、最後に開いた日時も今)
             session.lastOpened = juce::Time::getCurrentTime();
             if (! m.store.save (session))
-                juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon,
+                juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::NoIcon,
                                                         "保存できませんでした"_jp,
                                                         m.store.getDirectory().getFullPathName());
             m.showSession (std::move (session));

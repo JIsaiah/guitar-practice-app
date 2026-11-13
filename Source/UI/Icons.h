@@ -8,6 +8,7 @@ namespace Icons
 {
     // `svg icons/` の中のファイル名
     inline constexpr const char* help         = "help-circle-svgrepo-com.svg";
+    inline constexpr const char* back         = "back-arrow-direction-down-right-left-up-svgrepo-com.svg";
     inline constexpr const char* toStart      = "media-backward-end-svgrepo-com.svg";
     inline constexpr const char* backward     = "media-backward-svgrepo-com.svg";
     inline constexpr const char* forward      = "media-forward-svgrepo-com.svg";
@@ -35,6 +36,8 @@ public:
     void setIcon (const char* iconFile);               // nullptr: アイコンなし (文字だけ)
     void setIconAfterText (bool after) { iconAfterText = after; repaint(); }   // 「1小節 ▶▶」のように、アイコンを文字の右に
     void setIconScale (float scale) { iconScale = scale; repaint(); }          // ボタンの高さに対するアイコンの大きさ
+    // 枠と背景を描かず、アイコンだけにする (練習画面の「戻る」)。マウスを乗せるとアクセントの色になる
+    void setFrameless (bool shouldBeFrameless) { frameless = shouldBeFrameless; repaint(); }
 
     void paintButton (juce::Graphics& g, bool highlighted, bool down) override;
 
@@ -42,4 +45,5 @@ private:
     const char* icon = nullptr;
     bool iconAfterText = false;
     float iconScale = 0.45f;
+    bool frameless = false;
 };

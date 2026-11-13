@@ -145,6 +145,23 @@ juce::String DevSnapshots::renderAll (const juce::File& folder)
                 log << "wrote " << file.getFullPathName() << "\n";
         }
 
+        // ポップアップ (確認): 「？」の無い、シンプルな見た目になっているか (ライト・ダーク)
+        theme.setMode (ThemeMode::Normal);
+        for (auto colour : { ColourTheme::Light, ColourTheme::Dark })
+        {
+            theme.setColourTheme (colour);
+            juce::AlertWindow alert ("フォルダの削除"_jp,
+                                     "フォルダ「ライブ」を削除しますか？\n中の 2 件のセッションは消さずに、「フォルダなし」に移します。"_jp,
+                                     juce::MessageBoxIconType::NoIcon);
+            alert.addButton ("削除"_jp, 1);
+            alert.addButton ("キャンセル"_jp, 0);
+            alert.setVisible (true);
+
+            const auto file = folder.getChildFile (colour == ColourTheme::Light ? "dialog_light.png" : "dialog_dark.png");
+            if (savePng (alert.createComponentSnapshot (alert.getLocalBounds(), true, 1.0f), file))
+                log << "wrote " << file.getFullPathName() << "\n";
+        }
+
         // ライト・ダークで、一覧・練習画面・チューナー・設定画面
         {
             theme.setMode (ThemeMode::Normal);

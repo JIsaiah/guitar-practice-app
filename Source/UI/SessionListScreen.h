@@ -98,7 +98,7 @@ private:
     FixedTextButton sessionsTab, setlistsTab;
     juce::ListBox listBox { {}, this };
     SessionFolderList folderList;
-    IconButton settingsButton { Icons::settings };   // 「セットリスト」のタブの右の、歯車の正方形のボタン (作者の指示)
+    IconButton settingsButton { Icons::settings };   // タブの帯の右の歯車 (枠なし。作者のレイアウト)
     IconButton newButton { Icons::plus };   // 一覧の枠の右下の「＋」(新しいセッション)。開く・削除は、行のダブルクリックと右クリックのメニューで
 
     SetlistPanel setlistPanel;
@@ -106,6 +106,7 @@ private:
     juce::String pickerTargetId;   // 追加先のセットリスト (カードは読み直しで作り直されるので ID で持つ)
 
     juce::Rectangle<int> headerArea;    // 一覧の列の見出し (曲名・アーティスト…)。一覧の枠の中の上
+    juce::Rectangle<int> tabBar;        // 「セッション｜セットリスト」のつながった帯 (paint で面・枠・区切りの線を描く)
     juce::Rectangle<int> listPanel;     // 一覧の枠 (見出し・一覧・「＋」を囲む面)
     std::unique_ptr<juce::AlertWindow> detailsWindow;   // 「詳細を編集…」のダイアログ
     std::unique_ptr<juce::AlertWindow> folderNameWindow;   // フォルダの名前を入れるダイアログ

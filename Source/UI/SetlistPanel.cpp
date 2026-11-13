@@ -4,7 +4,7 @@
 namespace
 {
     constexpr int cardGap = 12;
-    constexpr int newButtonHeight = 56;
+    constexpr int newButtonSize = 44;   // 右下の「＋」(正方形)
 }
 
 SetlistPanel::SetlistPanel (SessionLibrary& l, SetlistStore& s, ThemeManager& t, AppSettings& a)
@@ -13,13 +13,13 @@ SetlistPanel::SetlistPanel (SessionLibrary& l, SetlistStore& s, ThemeManager& t,
     for (const auto& id : settings.getExpandedSetlists())
         expandedIds.insert (id);
 
-    newButton.setButtonText ("＋ 新しいセットリスト"_jp);
+    newButton.setTooltip ("新しいセットリスト"_jp);
     newButton.onClick = [this] { createSetlist(); };
-    content.addAndMakeVisible (newButton);
 
     viewport.setViewedComponent (&content, false);
     viewport.setScrollBarsShown (true, false);
     addAndMakeVisible (viewport);
+    addAndMakeVisible (newButton);   // カードの上に重ねて、右下に置く (スクロールしても動かない)
 
     refresh();
 }
@@ -61,7 +61,7 @@ void SetlistPanel::createSetlist()
     auto setlist = store.createNew();
     if (! store.save (setlist))
     {
-        juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon,
+        juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::NoIcon,
                                                 "保存できませんでした"_jp,
                                                 store.getDirectory().getFullPathName());
         return;
@@ -113,9 +113,6 @@ void SetlistPanel::layoutCards()
     const auto width = viewport.getMaximumVisibleWidth();
     int y = 0;
 
-    newButton.setBounds (0, y, width, newButtonHeight);
-    y += newButtonHeight + cardGap;
-
     for (const auto& card : cards)
     {
         const auto height = card->getPreferredHeight();
@@ -123,7 +120,8 @@ void SetlistPanel::layoutCards()
         y += height + cardGap;
     }
 
-    content.setSize (width, juce::jmax (y, viewport.getHeight()));
+    // いちばん下のカードが「＋」に隠れないよう、下に「＋」の分の余白を足す
+    content.setSize (width, juce::jmax (y + newButtonSize + 8, viewport.getHeight()));
 }
 
 void SetlistPanel::paint (juce::Graphics& g)
@@ -133,13 +131,14 @@ void SetlistPanel::paint (juce::Graphics& g)
 
     g.setColour (findColour (ThemeColourIds::textMuted));
     g.setFont (AppLookAndFeel::scaled (juce::FontOptions (16.0f)));
-    g.drawFittedText ("セットリストがありません。\n「＋ 新しいセットリスト」から作成してください。"_jp,
-                      getLocalBounds().withTrimmedTop (newButtonHeight + cardGap).withHeight (120),
-                      juce::Justification::centred, 2);
+    g.drawFittedText ("セットリストがありません。\n右下の「＋」から作成してください。"_jp,
+                      getLocalBounds().withHeight (160), juce::Justification::centred, 2);
 }
 
 void SetlistPanel::resized()
 {
     viewport.setBounds (getLocalBounds());
+    newButton.setBounds (getLocalBounds().removeFromBottom (newButtonSize + 8).removeFromRight (newButtonSize + 8)
+                             .removeFromTop (newButtonSize).removeFromLeft (newButtonSize));
     layoutCards();
 }

@@ -2,6 +2,7 @@
 #include "Audio/AudioEngine.h"
 #include "AppLog.h"
 #include "Platform/CrashLog.h"
+#include "Platform/TitleBar.h"
 #include "AppSettings.h"
 #include "DevAudioCheck.h"
 #include "DevSnapshots.h"
@@ -134,7 +135,8 @@ public:
     void anotherInstanceStarted (const juce::String&) override {}
 
 private:
-    class MainWindow final : public juce::DocumentWindow
+    class MainWindow final : public juce::DocumentWindow,
+                             private juce::ChangeListener
     {
     public:
         MainWindow (const juce::String& name, AudioEngine& engine, SessionLibrary& library, SetlistStore& setlists,
@@ -142,7 +144,8 @@ private:
             : DocumentWindow (name,
                               juce::Desktop::getInstance().getDefaultLookAndFeel()
                                   .findColour (juce::ResizableWindow::backgroundColourId),
-                              DocumentWindow::allButtons)
+                              DocumentWindow::allButtons),
+              themeManager (theme)
         {
             setUsingNativeTitleBar (true);
             setContentOwned (new MainComponent (engine, library, setlists, theme, settings), true);
@@ -150,6 +153,15 @@ private:
             setResizeLimits (1200, 700, 10000, 10000);
             centreWithSize (getWidth(), getHeight());
             setVisible (true);
+
+            applyThemeToTitleBar();
+            TitleBar::hideIconAndTitle (getWindowHandle());
+            themeManager.addChangeListener (this);
+        }
+
+        ~MainWindow() override
+        {
+            themeManager.removeChangeListener (this);
         }
 
         void closeButtonPressed() override
@@ -159,6 +171,19 @@ private:
         }
 
     private:
+        // 題名の帯 (Windows が描く帯) を、アプリの背景・文字の色にそろえる。テーマ・デスメタルモードを変えたときも
+        void applyThemeToTitleBar()
+        {
+            const auto& palette = themeManager.getPalette();
+            setBackgroundColour (palette.background);
+            TitleBar::setColours (getWindowHandle(), palette.background.getARGB(), palette.text.getARGB(),
+                                  palette.background.getPerceivedBrightness() < 0.5f);
+        }
+
+        void changeListenerCallback (juce::ChangeBroadcaster*) override { applyThemeToTitleBar(); }
+
+        ThemeManager& themeManager;
+
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MainWindow)
     };
 

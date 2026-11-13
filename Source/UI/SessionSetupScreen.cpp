@@ -106,7 +106,7 @@ void SessionSetupScreen::pasteYouTubeUrl()
 
     if (! looksLikeYouTubeUrl (text))
     {
-        juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon,
+        juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::NoIcon,
                                                 "YouTube の URL ではありません"_jp,
                                                 "YouTube の動画ページの URL をコピーしてから、もう一度押してください。"_jp);
         return;

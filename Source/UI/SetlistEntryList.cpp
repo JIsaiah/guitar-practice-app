@@ -34,6 +34,11 @@ int SetlistEntryList::rowAt (int y) const
     return y >= 0 && juce::isPositiveAndBelow (row, (int) setlist.entries.size()) ? row : -1;
 }
 
+juce::Rectangle<int> SetlistEntryList::playButtonArea (int row) const
+{
+    return { getWidth() - 24 - 120, row * rowHeight + 8, 120, rowHeight - 16 };
+}
+
 int SetlistEntryList::insertIndexAt (int y) const
 {
     return juce::jlimit (0, (int) setlist.entries.size(), juce::roundToInt ((float) y / (float) rowHeight));
@@ -53,25 +58,39 @@ void SetlistEntryList::paint (juce::Graphics& g)
 
         if (dragging && i == pressedRow)
         {
-            g.setColour (findColour (ThemeColourIds::listSelection).withMultipliedAlpha (0.5f));
-            g.fillRect (row);
+            AppLookAndFeel::fillListHighlight (g, row, findColour (ThemeColourIds::listSelection).withMultipliedAlpha (0.5f));
         }
         else if (i == hoverRow && ! dragging)
         {
-            g.setColour (findColour (ThemeColourIds::listSelection));
-            g.fillRect (row);
+            AppLookAndFeel::fillListHighlight (g, row, findColour (ThemeColourIds::listSelection));
         }
 
-        // 区切り線 (最初の行の上は、カードの見出しとの境目として引く)
+        // 区切り線 (行の間。最初の行の上は、カードが見出しとの境目を引く)
         g.setColour (findColour (ThemeColourIds::border));
-        g.fillRect (row.getX() + 12, row.getY(), row.getWidth() - 24, 1);
+        if (i > 0)
+            g.fillRect (row.getX() + 24, row.getY(), row.getWidth() - 48, 1);
 
-        row = row.reduced (12, 0);
+        row = row.reduced (24, 0);
         const auto found = library.contains (entry.sessionId);
 
-        g.setColour (muted);
-        g.setFont (AppLookAndFeel::scaled (juce::FontOptions ("Segoe UI", 14.0f, juce::Font::plain)));
-        g.drawText (juce::String (i + 1), row.removeFromLeft (32), juce::Justification::centredLeft);
+        g.setColour (text);
+        g.setFont (AppLookAndFeel::scaled (juce::FontOptions ("Segoe UI", 16.0f, juce::Font::bold)));
+        g.drawText (juce::String (i + 1), row.removeFromLeft (numberWidth), juce::Justification::centredLeft);
+
+        // 右の「▶ ここから再生」(作者のレイアウト。見つからない曲には出さない)
+        if (found)
+        {
+            const auto button = playButtonArea (i).toFloat();
+            const bool hot = i == hoverRow && hoverOnPlay && ! dragging;
+            g.setColour (findColour (juce::TextButton::buttonColourId));
+            g.fillRoundedRectangle (button, 6.0f);
+            g.setColour (hot ? accent : findColour (ThemeColourIds::border));
+            g.drawRoundedRectangle (button.reduced (0.5f), 6.0f, hot ? 1.5f : 1.0f);
+            g.setColour (findColour (juce::TextButton::textColourOffId));
+            g.setFont (AppLookAndFeel::scaled (juce::FontOptions (13.0f, juce::Font::bold)));
+            g.drawText ("▶ ここから再生"_jp, button, juce::Justification::centred);
+        }
+        row.removeFromRight (120 + 12);
 
         if (! found)
         {
@@ -97,7 +116,7 @@ void SetlistEntryList::paint (juce::Graphics& g)
 
         const auto title = library.getTitle (entry.sessionId);
         g.setColour (text);
-        g.setFont (AppLookAndFeel::scaled (juce::FontOptions (15.0f)));
+        g.setFont (AppLookAndFeel::scaled (juce::FontOptions (16.0f, juce::Font::bold)));
         g.drawText (title.isEmpty() ? "(無題)"_jp : title, row.withTrimmedRight (8), juce::Justification::centredLeft, true);
     }
 
@@ -112,9 +131,11 @@ void SetlistEntryList::paint (juce::Graphics& g)
 void SetlistEntryList::mouseMove (const juce::MouseEvent& e)
 {
     const auto row = rowAt (e.y);
-    if (row != hoverRow)
+    const auto onPlayButton = row >= 0 && playButtonArea (row).contains (e.getPosition());
+    if (row != hoverRow || onPlayButton != hoverOnPlay)
     {
         hoverRow = row;
+        hoverOnPlay = onPlayButton;
         repaint();
     }
 }
@@ -173,9 +194,19 @@ void SetlistEntryList::mouseUp (const juce::MouseEvent& e)
         return;
     }
 
-    if (rowAt (e.y) == row && ! e.mods.isPopupMenu() && onOpenSession != nullptr
-        && library.contains (setlist.entries[(size_t) row].sessionId))
+    if (rowAt (e.y) != row || e.mods.isPopupMenu() || ! library.contains (setlist.entries[(size_t) row].sessionId))
+        return;
+
+    // 「▶ ここから再生」: この曲から通しで再生。それ以外の場所: この曲のセッションを単体で開く
+    if (playButtonArea (row).contains (e.getPosition()))
+    {
+        if (onPlay != nullptr)
+            onPlay (row);
+    }
+    else if (onOpenSession != nullptr)
+    {
         onOpenSession (setlist.entries[(size_t) row].sessionId);
+    }
 }
 
 void SetlistEntryList::showRowMenu (int row)

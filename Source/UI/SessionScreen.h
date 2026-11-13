@@ -149,7 +149,9 @@ private:
     double barStartSeconds (int index) const;   // 小節の頭の位置 (秒)
     void setSyncOffset (int ms);    // 拍の位置 (メトロノームとタブ譜)
     void setScoreOffset (int ms);   // タブ譜だけ
-    double getScoreOffsetSeconds() const noexcept { return (session.syncOffsetMs + session.scoreOffsetMs) / 1000.0; }
+    // タブ譜の拍の起点 = 拍の位置 + タブ譜だけ + タブ譜の開始位置 (「ここから流す」。音源があるときだけ)
+    double getScoreOffsetSeconds() const noexcept { return (session.syncOffsetMs + session.scoreOffsetMs + getScoreStartMs()) / 1000.0; }
+    int getScoreStartMs() const noexcept { return hasSource() ? session.scoreStartMs : 0; }
     void seekToBar (double barStartBeats);
     void handlePageKey (const juce::String& key);   // WebView (タブ譜・動画) の上で押されたキー
     void toggleSwap();
@@ -252,13 +254,14 @@ private:
     TempoOrigin savedTempoOrigin = TempoOrigin::manual;
 
     // 上部
-    FixedTextButton backButton, saveButton;
+    IconButton backButton { Icons::back };   // 一覧に戻る (枠のない矢印のアイコン。作者の指示)
+    FixedTextButton saveButton;
     IconButton settingsButton { Icons::settings };   // 設定 (歯車の正方形のボタン。一覧画面と同じ。作者の指示)
     juce::Label titleLabel, statusLabel;
     juce::Label artistLabel;   // 曲名の右に「—  アーティスト名」(作者のレイアウト)
 
     // 左: タブ譜と再生位置
-    juce::Label scoreNameLabel, positionLabel;
+    juce::Label positionLabel;
     juce::TextButton scoreChooseButton, scoreRemoveButton;
     juce::TextButton swapButton;        // タブ譜と動画の入れ替え
     juce::TextButton equalBarsButton;   // 小節を同じ幅で並べる
@@ -342,6 +345,13 @@ private:
     void setMetronomeStartHere();
     void clearMetronomeStart();
     void updateMetronomeStart();                  // エンジンへの起点・ボタン・再生バーの目印を合わせる (タイマーから)
+
+    // タブ譜の開始位置 (「ここから流す」。タブ譜の上の「小節を同じ幅に」の左。作者のレイアウト)。
+    // 再生バーで選んだ位置に、タブ譜の1小節目を合わせる。右クリックで解除
+    RightClickableButton scoreStartButton;
+    void setScoreStartHere();
+    void clearScoreStart();
+    void updateScoreStartButton();                // ボタンの文字・押せるか (タイマーから)
     double sentMetronomeOffset = -1.0e9;
     void logMetronomeState (const juce::String& event);   // 動作ログに、メトロノームの状態を書く
     void toggleBigMetronome();

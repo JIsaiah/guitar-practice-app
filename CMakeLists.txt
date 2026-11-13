@@ -93,6 +93,7 @@ target_sources(GuitarPractice PRIVATE
     Source/Audio/PluginTone.cpp
     Source/UI/PluginToneCard.cpp
     Source/Platform/WindowOwner.cpp
+    Source/Platform/TitleBar.cpp
     Source/Platform/CrashLog.cpp
     Source/Platform/MouseState.cpp
     Source/UI/RadialMenu.cpp
@@ -148,6 +149,7 @@ juce_add_binary_data(GuitarPracticeData
         Resources/Tones/drive-cab.wav
         # アイコン (作者が置いた SVG。Source/UI/Icons で描く)
         "svg icons/help-circle-svgrepo-com.svg"
+        "svg icons/back-arrow-direction-down-right-left-up-svgrepo-com.svg"
         "svg icons/media-backward-end-svgrepo-com.svg"
         "svg icons/media-backward-svgrepo-com.svg"
         "svg icons/media-forward-svgrepo-com.svg"
@@ -210,6 +212,7 @@ target_sources(GuitarPracticeTests PRIVATE
     Tests/SessionSortTests.cpp
     Tests/ScorePartsTests.cpp
     Tests/ScoreClockTests.cpp
+    Tests/ScoreFileDataTests.cpp
     Source/Model/Session.cpp
     Source/Model/SessionStore.cpp
     Source/Library/SessionLibrary.cpp

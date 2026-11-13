@@ -3,9 +3,10 @@
 #include <set>
 #include "../AppSettings.h"
 #include "SetlistCard.h"
+#include "Icons.h"
 
 // 一覧画面の「セットリスト」タブの中身 (setlist-mode.md 4.2、4.5)
-// 先頭に「新しいセットリスト」、その下にセットリストのカードを縦に並べる (スクロールできる)
+// セットリストのカードを縦に並べる (スクロールできる)。右下に「＋」(新しいセットリスト。作者のレイアウト)
 class SetlistPanel final : public juce::Component
 {
 public:
@@ -35,7 +36,7 @@ private:
 
     juce::Viewport viewport;
     juce::Component content;
-    juce::TextButton newButton;
+    IconButton newButton { Icons::plus };   // 右下の「＋」(セッションの一覧の「＋」と同じ見た目)
     std::vector<std::unique_ptr<SetlistCard>> cards;
     std::set<juce::String> expandedIds;   // 開いていたカード。設定に保存し、練習画面から戻ったときや次の起動でも開いたままにする
 };

@@ -96,6 +96,24 @@ void AppLookAndFeel::drawButtonBackground (juce::Graphics& g, juce::Button& butt
     auto bounds = button.getLocalBounds().toFloat().reduced (0.5f);
     auto fill = backgroundColour;
 
+    // つながったタブ (一覧の「セッション｜セットリスト」)。帯と区切りの線は画面が描くので、ここでは枠を描かず、
+    // 選んでいるほうだけを、帯の内側に少し小さくアクセントで塗る。マウスを乗せたほうは薄く塗る
+    if (button.getProperties()["segmentedTab"])
+    {
+        const auto inner = bounds.reduced (5.0f);
+        if (button.getToggleState())
+        {
+            g.setColour (down ? fill.contrasting (0.12f) : fill);
+            g.fillRoundedRectangle (inner, cornerRadius);
+        }
+        else if (highlighted || down)
+        {
+            g.setColour (findColour (ThemeColourIds::listSelection));
+            g.fillRoundedRectangle (inner, cornerRadius);
+        }
+        return;
+    }
+
     if (! button.isEnabled())
         fill = fill.withMultipliedAlpha (0.5f);
     else if (down)
@@ -188,6 +206,26 @@ void AppLookAndFeel::drawTextEditorOutline (juce::Graphics& g, int width, int he
                      ? editor.findColour (juce::TextEditor::focusedOutlineColourId)
                      : editor.findColour (juce::TextEditor::outlineColourId));
     g.drawRoundedRectangle (juce::Rectangle<int> (width, height).toFloat().reduced (0.5f), cornerRadius, 1.0f);
+}
+
+//==============================================================================
+// ポップアップ: JUCE の標準は、左上に大きな「？」(確認) や「！」(注意) を薄く描く。それを描かず、
+// 面と細い枠だけにする。文字の位置は標準と同じ (アイコンなしのときの位置)
+void AppLookAndFeel::drawAlertBox (juce::Graphics& g, juce::AlertWindow& alert,
+                                   const juce::Rectangle<int>&, juce::TextLayout& textLayout)
+{
+    const auto bounds = alert.getLocalBounds().toFloat();
+
+    g.setColour (alert.findColour (juce::AlertWindow::backgroundColourId));
+    g.fillRoundedRectangle (bounds, cornerRadius);
+
+    g.setColour (alert.findColour (ThemeColourIds::border));
+    g.drawRoundedRectangle (bounds.reduced (0.5f), cornerRadius, 1.0f);
+
+    g.setColour (alert.findColour (juce::AlertWindow::textColourId));
+    const auto inner = alert.getLocalBounds().reduced (1);
+    textLayout.draw (g, juce::Rectangle<int> (inner.getX(), 30, inner.getWidth(),
+                                              inner.getHeight() - getAlertWindowButtonHeight() - 20).toFloat());
 }
 
 //==============================================================================

@@ -105,7 +105,8 @@ juce::var Session::toVar() const
         { "tempo",    makeObject ({ { "bpm", bpm }, { "origin", toString (tempoOrigin) } }) },
         { "playback", makeObject ({ { "speed_percent", speedPercent } }) },
         { "sync",     makeObject ({ { "offset_ms", syncOffsetMs }, { "score_offset_ms", scoreOffsetMs },
-                                    { "metronome_start_ms", metronomeStartMs }, { "points", emptyArray() } }) },
+                                    { "metronome_start_ms", metronomeStartMs }, { "score_start_ms", scoreStartMs },
+                                    { "points", emptyArray() } }) },
         { "layout",   makeObject ({ { "video_in_main_area", videoInMainArea } }) },
         { "loop",     makeObject ({ { "a_ms", loopStartMs }, { "b_ms", loopEndMs }, { "enabled", loopEnabled } }) },
         { "mixer",    makeObject ({ { "source", mixSource }, { "guitar", mixGuitar }, { "metronome", mixMetronome },
@@ -159,6 +160,7 @@ Session Session::fromVar (const juce::var& value)
     s.syncOffsetMs = getOr<int> (value["sync"]["offset_ms"], 0);
     s.scoreOffsetMs = getOr<int> (value["sync"]["score_offset_ms"], 0);
     s.metronomeStartMs = juce::jmax (0, getOr<int> (value["sync"]["metronome_start_ms"], 0));
+    s.scoreStartMs = juce::jmax (0, getOr<int> (value["sync"]["score_start_ms"], 0));
     s.videoInMainArea = getOr<bool> (value["layout"]["video_in_main_area"], false);
 
     const auto& loop = value["loop"];

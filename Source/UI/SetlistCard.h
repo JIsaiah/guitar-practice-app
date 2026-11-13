@@ -6,7 +6,7 @@
 
 // セットリストのカード (setlist-mode.md 4.2〜4.5)
 // - 見出し: 名前、曲数、合計時間、「通しで再生」(1曲目から)
-// - 見出しのクリックで展開し、曲順 (SetlistEntryList) と「＋ 追加」を出す
+// - 見出しのクリックで展開し (▲ 開いている / ▼ 閉じている)、曲順 (SetlistEntryList) と「＋ 曲を追加」の行を出す
 // - 見出しの右クリック: 名前の変更、削除 (中のセッションは消さない)
 // 変更はすぐにファイルへ保存する
 class SetlistCard final : public juce::Component
@@ -22,20 +22,22 @@ public:
 
     // 末尾に1曲追加して保存する (追加パネルから)
     void addSession (const juce::String& sessionId);
-    void setAdding (bool isAdding);   // 追加パネルを開いている間、「＋ 追加」を押した状態にする
+    void setAdding (bool isAdding);   // 追加パネルを開いている間、「＋ 曲を追加」をアクセントの色にする
 
     std::function<void()> onLayoutChanged;                            // 高さが変わった
     std::function<void (int entryIndex)> onPlay;                      // その曲から始める
     std::function<void (const juce::String& sessionId)> onOpenSession; // 単体で開く
-    std::function<void()> onRequestAdd;                               // 「＋ 追加」
+    std::function<void()> onRequestAdd;                               // 「＋ 曲を追加」
     std::function<void()> onDeleted;                                  // セットリストを削除した
 
     void paint (juce::Graphics& g) override;
     void resized() override;
     void mouseUp (const juce::MouseEvent& e) override;
     void mouseDoubleClick (const juce::MouseEvent& e) override;
+    void mouseMove (const juce::MouseEvent& e) override;
+    void mouseExit (const juce::MouseEvent& e) override;
 
-    static constexpr int headerHeight = 72, addRowHeight = 52;
+    static constexpr int headerHeight = 72, addRowHeight = 46;
 
 private:
     void save();
@@ -50,8 +52,9 @@ private:
     SessionLibrary& library;
     SetlistStore& store;
 
-    bool expanded = false;
+    juce::Rectangle<int> getAddRowArea() const;   // 「＋ 曲を追加」の行 (開いているときだけ)
+
+    bool expanded = false, adding = false, addHover = false;
     FixedTextButton playButton;
-    juce::TextButton addButton;
     SetlistEntryList entryList;
 };
