@@ -1,10 +1,9 @@
 #include "SessionStore.h"
 #include "../Text.h"
+#include "../AppPaths.h"
 
 SessionStore::SessionStore()
-    : SessionStore (juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
-                        .getChildFile ("GuitarPractice")
-                        .getChildFile ("Sessions"))
+    : SessionStore (AppPaths::documentsFolder().getChildFile ("Sessions"))
 {
 }
 

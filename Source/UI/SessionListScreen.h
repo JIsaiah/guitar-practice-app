@@ -16,7 +16,8 @@
 // 上部のタブで「セッション」と「セットリスト」を切り替える (setlist-mode.md 4.1)
 class SessionListScreen final : public juce::Component,
                                 private juce::ListBoxModel,
-                                private juce::ChangeListener
+                                private juce::ChangeListener,
+                                private juce::Timer
 {
 public:
     SessionListScreen (SessionLibrary& library, SetlistStore& setlists, ThemeManager& theme, AppSettings& settings);
@@ -107,6 +108,11 @@ private:
 
     juce::Rectangle<int> headerArea;    // 一覧の列の見出し (曲名・アーティスト…)。一覧の枠の中の上
     juce::Rectangle<int> tabBar;        // 「セッション｜セットリスト」のつながった帯 (paint で面・枠・区切りの線を描く)
+
+    // タブの帯の、選んでいるほうの塗り。0 = 左 (セッション)、1 = 右 (セットリスト)。押すと、なめらかに左右に動く
+    float tabHighlight = 0.0f, tabHighlightTarget = 0.0f;
+    void timerCallback() override;
+    void updateTabTextColours();   // 塗りが重なっているほうの文字を白に (動いている間は、重なり具合で混ぜる)
     juce::Rectangle<int> listPanel;     // 一覧の枠 (見出し・一覧・「＋」を囲む面)
     std::unique_ptr<juce::AlertWindow> detailsWindow;   // 「詳細を編集…」のダイアログ
     std::unique_ptr<juce::AlertWindow> folderNameWindow;   // フォルダの名前を入れるダイアログ

@@ -33,6 +33,9 @@ public:
 private:
     int rowAt (int y) const;
     juce::Rectangle<int> playButtonArea (int row) const;   // 行の右の「▶ ここから再生」
+public:
+    static juce::Rectangle<int> highlightArea (juce::Rectangle<int> row);   // 行の塗りの範囲 (カードの「＋ 曲を追加」も同じ)
+private:
     int insertIndexAt (int y) const;   // ドラッグ中、離したら入る位置 (行の境目。0〜行数)
     void showRowMenu (int row);
 

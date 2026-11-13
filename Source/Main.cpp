@@ -4,6 +4,7 @@
 #include "Platform/CrashLog.h"
 #include "Platform/TitleBar.h"
 #include "AppSettings.h"
+#include "AppPaths.h"
 #include "DevAudioCheck.h"
 #include "DevSnapshots.h"
 #include "Library/SessionLibrary.h"
@@ -96,6 +97,19 @@ public:
 
         audioEngine = std::make_unique<AudioEngine>();
         audioEngine->initialise (properties.getUserSettings()->getXmlValue (audioDeviceKey).get());
+
+        // ドキュメントの保存先の名前を「GuitarPractice」から「suguhiku」に変える (前のフォルダしか無いときだけ。AppPaths.h)
+        switch (AppPaths::migrateDocumentsFolder())
+        {
+            case AppPaths::MigrationResult::moved:
+                AppLog::write ("保存先のフォルダの名前を変えました: ドキュメント\\GuitarPractice → ドキュメント\\suguhiku"_jp);
+                break;
+            case AppPaths::MigrationResult::failed:
+                AppLog::write ("保存先のフォルダの名前を変えられませんでした (前の GuitarPractice をそのまま使います)"_jp);
+                break;
+            case AppPaths::MigrationResult::nothingToDo:
+                break;
+        }
 
         sessionStore = std::make_unique<SessionStore>();
         sessionLibrary = std::make_unique<SessionLibrary> (*sessionStore);   // 走査は一覧画面を出すときに行う

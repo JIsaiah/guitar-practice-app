@@ -164,8 +164,7 @@ void SetlistCard::paint (juce::Graphics& g)
     // 「＋ 曲を追加」の行。曲の行と同じ列 (番号の列に「＋」、曲名の列に文字) に置く
     auto row = getAddRowArea();
     if (addHover)
-        AppLookAndFeel::fillListHighlight (g, row.withTrimmedLeft (12).withTrimmedRight (12),
-                                           findColour (ThemeColourIds::listSelection));
+        AppLookAndFeel::fillListHighlight (g, SetlistEntryList::highlightArea (row), findColour (ThemeColourIds::listSelection));
     g.setColour (findColour (ThemeColourIds::border));
     g.fillRect (row.getX() + 24, row.getY(), row.getWidth() - 48, 1);
 

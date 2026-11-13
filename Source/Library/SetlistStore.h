@@ -3,7 +3,7 @@
 #include "Setlist.h"
 
 // セットリストファイル (.gpsetlist) の一覧・読み書き (setlist-mode.md 3.3)
-// 保存先: ドキュメント\GuitarPractice\Setlists。ファイル名は setlistId
+// 保存先: ドキュメント\suguhiku\Setlists (AppPaths.h。前は ドキュメント\GuitarPractice)。ファイル名は setlistId
 // セットリストを消しても、中のセッションは消さない
 class SetlistStore
 {

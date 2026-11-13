@@ -73,8 +73,12 @@ juce::Font AppLookAndFeel::withoutCachedTypeface (const juce::Font& font)
     return font.withHorizontalScale (font.getHorizontalScale());
 }
 
-juce::Font AppLookAndFeel::getTextButtonFont (juce::TextButton&, int buttonHeight)
+juce::Font AppLookAndFeel::getTextButtonFont (juce::TextButton& button, int buttonHeight)
 {
+    // 一覧のタブ (「セッション｜セットリスト」) は大きく太く (作者の指示)
+    if (button.getProperties()["segmentedTab"])
+        return scaledFont (juce::jmin (18.0f, (float) buttonHeight * 0.5f), juce::Font::bold);
+
     return scaledFont (juce::jmin (15.0f, (float) buttonHeight * 0.6f));
 }
 
@@ -96,20 +100,14 @@ void AppLookAndFeel::drawButtonBackground (juce::Graphics& g, juce::Button& butt
     auto bounds = button.getLocalBounds().toFloat().reduced (0.5f);
     auto fill = backgroundColour;
 
-    // つながったタブ (一覧の「セッション｜セットリスト」)。帯と区切りの線は画面が描くので、ここでは枠を描かず、
-    // 選んでいるほうだけを、帯の内側に少し小さくアクセントで塗る。マウスを乗せたほうは薄く塗る
+    // つながったタブ (一覧の「セッション｜セットリスト」)。帯・区切りの線・選んでいるほうの塗り (左右に動く) は
+    // 画面 (SessionListScreen) が描くので、ここでは、選んでいないほうにマウスを乗せたときだけ薄く塗る
     if (button.getProperties()["segmentedTab"])
     {
-        const auto inner = bounds.reduced (5.0f);
-        if (button.getToggleState())
-        {
-            g.setColour (down ? fill.contrasting (0.12f) : fill);
-            g.fillRoundedRectangle (inner, cornerRadius);
-        }
-        else if (highlighted || down)
+        if (! button.getToggleState() && (highlighted || down))
         {
             g.setColour (findColour (ThemeColourIds::listSelection));
-            g.fillRoundedRectangle (inner, cornerRadius);
+            g.fillRoundedRectangle (bounds, 8.0f);
         }
         return;
     }

@@ -25,10 +25,10 @@ cmake --build build --config Debug
 
 実行ファイル: `build\GuitarPractice_artefacts\Debug\suguhiku.exe`
 
-アプリの名前は **suguhiku** です (2026年11月に決定)。ビルドのターゲット名 (`GuitarPractice`)、保存先のフォルダ名 (`ドキュメント\GuitarPractice`、`%APPDATA%\GuitarPractice`) は、前からのセッションと設定をそのまま使えるよう、変えていません
+アプリの名前は **suguhiku** です (2026年11月に決定)。ビルドのターゲット名 (`GuitarPractice`)、設定のフォルダ名 (`%APPDATA%\GuitarPractice`) は、前からの設定をそのまま使えるよう、変えていません。セッション・セットリストの保存先は `ドキュメント\suguhiku` です (v1.0.13 から。前の `ドキュメント\GuitarPractice` は、起動時に名前を変えて引き継ぎます)
 
-- セッションの保存先: `ドキュメント\GuitarPractice\Sessions\*.gppractice`
-- セットリストの保存先: `ドキュメント\GuitarPractice\Setlists\*.gpsetlist`
+- セッションの保存先: `ドキュメント\suguhiku\Sessions\*.gppractice`
+- セットリストの保存先: `ドキュメント\suguhiku\Setlists\*.gpsetlist`
 - 自動テスト: `cmake --build build --config Debug --target GuitarPracticeTests` のあと `ctest --test-dir build -C Debug --output-on-failure`
 - アプリの設定の保存先: `%APPDATA%\GuitarPractice\GuitarPractice.settings` (オーディオ設定、デスメタルモード)
 - 時間の計測の記録: `%APPDATA%\GuitarPractice\timing.log`。WebView のデータ: `%APPDATA%\GuitarPractice\WebView2\`

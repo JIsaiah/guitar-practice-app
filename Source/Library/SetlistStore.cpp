@@ -1,10 +1,9 @@
 #include "SetlistStore.h"
 #include "../Text.h"
+#include "../AppPaths.h"
 
 SetlistStore::SetlistStore()
-    : SetlistStore (juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
-                        .getChildFile ("GuitarPractice")
-                        .getChildFile ("Setlists"))
+    : SetlistStore (AppPaths::documentsFolder().getChildFile ("Setlists"))
 {
 }
 

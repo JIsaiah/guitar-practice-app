@@ -34,6 +34,12 @@ int SetlistEntryList::rowAt (int y) const
     return y >= 0 && juce::isPositiveAndBelow (row, (int) setlist.entries.size()) ? row : -1;
 }
 
+juce::Rectangle<int> SetlistEntryList::highlightArea (juce::Rectangle<int> row)
+{
+    // 行の塗りは、区切りの線と同じ幅にする (カードの端まで塗らない。作者の指示)
+    return row.reduced (16, 0);
+}
+
 juce::Rectangle<int> SetlistEntryList::playButtonArea (int row) const
 {
     return { getWidth() - 24 - 120, row * rowHeight + 8, 120, rowHeight - 16 };
@@ -58,11 +64,11 @@ void SetlistEntryList::paint (juce::Graphics& g)
 
         if (dragging && i == pressedRow)
         {
-            AppLookAndFeel::fillListHighlight (g, row, findColour (ThemeColourIds::listSelection).withMultipliedAlpha (0.5f));
+            AppLookAndFeel::fillListHighlight (g, highlightArea (row), findColour (ThemeColourIds::listSelection).withMultipliedAlpha (0.5f));
         }
         else if (i == hoverRow && ! dragging)
         {
-            AppLookAndFeel::fillListHighlight (g, row, findColour (ThemeColourIds::listSelection));
+            AppLookAndFeel::fillListHighlight (g, highlightArea (row), findColour (ThemeColourIds::listSelection));
         }
 
         // 区切り線 (行の間。最初の行の上は、カードが見出しとの境目を引く)

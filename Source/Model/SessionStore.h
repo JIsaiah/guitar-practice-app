@@ -5,7 +5,7 @@
 #include "Session.h"
 
 // セッションファイル (.gppractice) の一覧・読み書き
-// 保存先: ドキュメント\GuitarPractice\Sessions
+// 保存先: ドキュメント\suguhiku\Sessions (AppPaths.h。前は ドキュメント\GuitarPractice)
 //
 // ファイル名 (= id) は「曲名 - アーティスト名 (作った日時).gppractice」(作者の指示)。
 //   - 何の曲のファイルか、見て分かるように。ほかの PC へ手でコピーして使えるように

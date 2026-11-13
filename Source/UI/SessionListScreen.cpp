@@ -92,6 +92,7 @@ SessionListScreen::~SessionListScreen()
 
 void SessionListScreen::changeListenerCallback (juce::ChangeBroadcaster*)
 {
+    updateTabTextColours();   // テーマが変わったら、タブの文字の色を取り直す
     // 設定画面でテーマを変えたときに、見出しや枠の色を描き直す
     repaint();
 }
@@ -105,6 +106,18 @@ void SessionListScreen::showTab (Tab tab)
     sessionsTab.setToggleState (sessions, juce::dontSendNotification);
     setlistsTab.setToggleState (! sessions, juce::dontSendNotification);
 
+    // 選んでいるほうの塗りを、なめらかに動かす (画面が出ていないとき (起動時など) は、すぐにその位置へ)
+    tabHighlightTarget = sessions ? 0.0f : 1.0f;
+    if (isShowing())
+    {
+        startTimerHz (60);
+    }
+    else
+    {
+        tabHighlight = tabHighlightTarget;
+        updateTabTextColours();
+    }
+
     for (auto* c : std::initializer_list<juce::Component*> { &listBox, &folderList, &newButton })
         c->setVisible (sessions);
 
@@ -114,6 +127,37 @@ void SessionListScreen::showTab (Tab tab)
 
     resized();
     repaint();
+}
+
+void SessionListScreen::timerCallback()
+{
+    // 目標に向かって、残りの距離の 3 割ずつ近づく (はじめ速く、終わりはゆっくり。0.2 秒ほどで着く)
+    tabHighlight += (tabHighlightTarget - tabHighlight) * 0.3f;
+    if (std::abs (tabHighlightTarget - tabHighlight) < 0.004f)
+    {
+        tabHighlight = tabHighlightTarget;
+        stopTimer();
+    }
+
+    updateTabTextColours();
+    repaint (tabBar.expanded (2));
+}
+
+void SessionListScreen::updateTabTextColours()
+{
+    // 文字の色: 塗りが重なっていない = ふつうの文字の色、重なっている = 塗りの上の文字の色 (白)
+    auto& lf = getLookAndFeel();
+    const auto normal = lf.findColour (juce::TextButton::textColourOffId);
+    const auto onFill = lf.findColour (juce::TextButton::textColourOnId);
+
+    const auto apply = [&] (juce::TextButton& tab, float coverage)
+    {
+        const auto colour = normal.interpolatedWith (onFill, juce::jlimit (0.0f, 1.0f, coverage));
+        tab.setColour (juce::TextButton::textColourOffId, colour);
+        tab.setColour (juce::TextButton::textColourOnId, colour);
+    };
+    apply (sessionsTab, 1.0f - tabHighlight);
+    apply (setlistsTab, tabHighlight);
 }
 
 void SessionListScreen::openFirstSetlistForSnapshot()
@@ -678,14 +722,21 @@ void SessionListScreen::paint (juce::Graphics& g)
 {
     g.fillAll (getLookAndFeel().findColour (juce::ResizableWindow::backgroundColourId));
 
-    // タブの帯: 「セッション｜セットリスト」を1本の帯にし、真ん中に区切りの線 (作者のレイアウト)
+    // タブの帯: 「セッション｜セットリスト」を1本の帯にし、真ん中に区切りの線 (作者のレイアウト)。
+    // 選んでいるほうは、帯の半分をすき間なく塗る (帯と同じ角の丸み)。押すと左右になめらかに動く
     {
         const auto bar = tabBar.toFloat();
         g.setColour (findColour (ThemeColourIds::panel));
         g.fillRoundedRectangle (bar, 8.0f);
         g.setColour (findColour (ThemeColourIds::border));
-        g.drawRoundedRectangle (bar.reduced (0.5f), 8.0f, 1.0f);
         g.fillRect (juce::Rectangle<float> (bar.getCentreX() - 0.5f, bar.getY() + 12.0f, 1.0f, bar.getHeight() - 24.0f));
+
+        const auto half = bar.getWidth() / 2.0f;
+        g.setColour (sessionsTab.findColour (juce::TextButton::buttonOnColourId));
+        g.fillRoundedRectangle (bar.withWidth (half).withX (bar.getX() + half * tabHighlight), 8.0f);
+
+        g.setColour (findColour (ThemeColourIds::border));
+        g.drawRoundedRectangle (bar.reduced (0.5f), 8.0f, 1.0f);
     }
 
     if (currentTab != Tab::sessions)
