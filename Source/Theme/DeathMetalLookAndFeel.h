@@ -49,6 +49,12 @@ public:
 
     // ポップアップ (確認・お知らせ): アイコン (「？」「！」) を描かず、角の丸い面と細い枠だけにする (作者の指示)
     void drawAlertBox (juce::Graphics&, juce::AlertWindow&, const juce::Rectangle<int>& textArea, juce::TextLayout&) override;
+
+    // スクロールバー: ふだんは細く、マウスを乗せる・つまむと太くなる (作者の指示: 引っ張りやすく)。
+    // 太さの分の場所はいつも取っておき (ずれないように)、描く幅だけを変える
+    int getDefaultScrollbarWidth() override { return 14; }
+    void drawScrollbar (juce::Graphics&, juce::ScrollBar&, int x, int y, int width, int height, bool vertical,
+                        int thumbStart, int thumbSize, bool isMouseOver, bool isMouseDown) override;
 };
 
 // 通常モードの LookAndFeel。デザイントークンのテーマ (ライト／ダーク) の色で描く。文字は「Yu Gothic UI」

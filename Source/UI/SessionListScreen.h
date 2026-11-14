@@ -41,7 +41,8 @@ public:
 
 private:
     // ListBoxModel
-    int getNumRows() override { return (int) entries.size(); }
+    // 最後に空の行を1つ足す: 一覧の右下に重ねた「＋」で、いちばん下のセッションが隠れないように (作者の指示)
+    int getNumRows() override { return entries.empty() ? 0 : (int) entries.size() + 1; }
     void paintListBoxItem (int row, juce::Graphics& g, int width, int height, bool selected) override;
     void listBoxItemDoubleClicked (int row, const juce::MouseEvent&) override;
     void listBoxItemClicked (int row, const juce::MouseEvent&) override;   // 星 (難易度) と右クリックのメニュー

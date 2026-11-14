@@ -254,6 +254,8 @@ juce::String DevSnapshots::renderAll (const juce::File& folder)
                 SessionListScreen list (library, setlistStore, theme, listSettings);
                 list.showTab (SessionListScreen::Tab::sessions);
                 snap (list, 1280, 800, "list" + suffix);
+                snap (list, 1920, 1080, "list_wide" + suffix);   // 大きな画面: 列が左に寄り、右に余白が残るか
+                list.setSize (1280, 800);
 
                 // セットリストのタブ: 1つ目を開き、曲の追加パネルを出した状態
                 list.showTab (SessionListScreen::Tab::setlists);

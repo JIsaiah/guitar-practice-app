@@ -2,6 +2,28 @@
 
 namespace
 {
+    // PDF の繰り返しは [始め, 終わり, 回数] の並びで保存する
+    juce::var repeatsToVar (const std::vector<Session::PdfRepeat>& repeats)
+    {
+        juce::Array<juce::var> list;
+        for (const auto& r : repeats)
+            list.add (juce::Array<juce::var> { r.start, r.end, r.count });
+        return list;
+    }
+
+    std::vector<Session::PdfRepeat> repeatsFromVar (const juce::var& value)
+    {
+        std::vector<Session::PdfRepeat> repeats;
+        if (const auto* list = value.getArray())
+            for (const auto& item : *list)
+                if (const auto* r = item.getArray(); r != nullptr && r->size() >= 3)
+                    Session::addPdfRepeat (repeats, { (double) (*r)[0], (double) (*r)[1], (int) (*r)[2] });
+        return repeats;
+    }
+}
+
+namespace
+{
     juce::String toString (SourceType type)
     {
         switch (type)
@@ -86,8 +108,10 @@ juce::var Session::toVar() const
         { "created",     created.toMilliseconds() > 0 ? created.toISO8601 (true) : juce::String() },
         { "source",   source },
         { "score",    makeObject ({ { "path", scorePath }, { "track_index", scoreTrackIndex },
-                                    { "pdf_bars_per_page", pdfBarsPerPage },
+                                    { "pdf_bars_per_screen", pdfBarsPerScreen },
                                     { "pdf_backing_path", pdfBackingPath },
+                                    { "pdf_repeats", repeatsToVar (pdfRepeats) },
+                                    { "pdf_backing_repeats", repeatsToVar (pdfBackingRepeats) },
                                     // リード・バッキング
                                     { "lead_track", leadTrack }, { "backing_track", backingTrack },
                                     { "active", backingActive ? "backing" : "lead" },
@@ -153,7 +177,9 @@ Session Session::fromVar (const juce::var& value)
     const auto& score = value["score"];
     s.scorePath = getOr<juce::String> (score["path"], {});
     s.scoreTrackIndex = getOr<int> (score["track_index"], 0);
-    s.pdfBarsPerPage = juce::jlimit (1, maxPdfBarsPerPage, getOr<int> (score["pdf_bars_per_page"], 24));
+    s.pdfBarsPerScreen = juce::jlimit (1, maxPdfBarsPerScreen, getOr<int> (score["pdf_bars_per_screen"], 12));
+    s.pdfRepeats = repeatsFromVar (score["pdf_repeats"]);
+    s.pdfBackingRepeats = repeatsFromVar (score["pdf_backing_repeats"]);
     s.pdfBackingPath = getOr<juce::String> (score["pdf_backing_path"], {});
 
     const auto& tempo = value["tempo"];
@@ -239,5 +265,22 @@ bool Session::setScoreFiles (juce::Array<juce::File> files)
     scorePath = files[0].getFullPathName();
     pdfBackingPath = files.size() >= 2 && isPdf (files[0]) && isPdf (files[1]) ? files[1].getFullPathName() : juce::String();
     backingActive = false;
+    pdfRepeats.clear();
+    pdfBackingRepeats.clear();
     return pdfBackingPath.isNotEmpty();
+}
+
+bool Session::addPdfRepeat (std::vector<PdfRepeat>& repeats, PdfRepeat repeat)
+{
+    if (! (repeat.end > repeat.start))
+        return false;
+
+    repeat.count = juce::jlimit (2, maxPdfRepeatCount, repeat.count);
+    // 重なる繰り返しは消す (繰り返しの中の繰り返しは扱わない)
+    repeats.erase (std::remove_if (repeats.begin(), repeats.end(), [&repeat] (const PdfRepeat& r)
+                                   { return r.start < repeat.end && repeat.start < r.end; }),
+                   repeats.end());
+    repeats.push_back (repeat);
+    std::sort (repeats.begin(), repeats.end(), [] (const PdfRepeat& a, const PdfRepeat& b) { return a.start < b.start; });
+    return true;
 }

@@ -197,6 +197,9 @@ private:
     juce::File currentScoreFile() const { return juce::File (session.currentScorePath()); }   // 今表示するタブ譜
     void choosePdfPart (bool backing);        // PDF のリード・バッキングの PDF を選ぶ
     void showPdfPartMenu (bool backing);      // PDF のリード・バッキングのボタンの右クリック
+    void sendPdfRepeats();                    // 今の PDF の繰り返しをページに送る
+    void showPdfRepeatMenu (double position, int repeat);   // PDF の右クリック: 繰り返しを置く・消す
+    double pdfPendingRepeatStart = -1.0;      // 「ここから繰り返し」だけ置いた始め (-1 = なし。保存しない)
     void resetParts();                         // 別のタブ譜にしたとき
     int activePartTrack() const;               // 今のパートのトラック (-1 = なし)
     void updatePartButtons();
@@ -327,7 +330,7 @@ private:
 
     // タブ譜の上の左: リード・バッキングの切り替え (作者のレイアウト。機能はまだ)
     RightClickableButton leadButton, backingButton;   // 右クリックで「トラックを選び直す」
-    // PDF のタブ譜のとき、リード・バッキングの代わりに出す: 1ページで何小節進むか (針の流れる速さ)
+    // PDF のタブ譜のとき、リード・バッキングの右に出す: 画面1つ分を何小節で流すか (流れる速さ)
     juce::Label pdfBarsLabel;
     juce::Slider pdfBarsSlider { juce::Slider::IncDecButtons, juce::Slider::TextBoxLeft };
     void updatePdfUi();

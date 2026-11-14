@@ -144,6 +144,7 @@ SessionScreen::SessionScreen (AudioEngine& e, SessionStore& s, ThemeManager& t, 
     // タブ譜の小節をクリックしたら、その小節の頭から再生する
     scoreViewer.onBarClicked = [this] (double barStartBeats) { seekToBar (barStartBeats); };
     scoreViewer.onKey = [this] (const juce::String& key) { handlePageKey (key); };
+    scoreViewer.onPdfContext = [this] (double position, int repeat) { showPdfRepeatMenu (position, repeat); };
     youtube.onKey = [this] (const juce::String& key) { handlePageKey (key); };
     // 動画表示 (入れ替え中) で、動画を押すと再生・停止 (作者の指示)。再生ボタンと同じ (1回目はカウントダウン)
     youtube.onClicked = [this] { if (isSwapped()) perform (Command::togglePlay); grabKeyboardFocus(); };
@@ -351,21 +352,21 @@ SessionScreen::SessionScreen (AudioEngine& e, SessionStore& s, ThemeManager& t, 
     scoreOffsetLabel.setText ("タブ譜だけ"_jp, juce::dontSendNotification);
     scoreOffsetLabel.setTooltip ("タブ譜のカーソルだけをずらします (メトロノームと音源は合っているのに、タブ譜がずれるとき)"_jp);
     offsetLabel.setText ("拍の位置"_jp, juce::dontSendNotification);
-    // PDF のタブ譜: 1ページで何小節進むか (作者の指示: 針は BPM に合わせて上から下へ流れる)
-    pdfBarsLabel.setText ("1ページ"_jp, juce::dontSendNotification);
+    // PDF のタブ譜: 画面1つ分を何小節で流すか (作者の指示: 流れる速さは画面の高さで測る)
+    pdfBarsLabel.setText ("1画面"_jp, juce::dontSendNotification);
     pdfBarsLabel.setJustificationType (juce::Justification::centredRight);
-    pdfBarsLabel.setTooltip ("PDF のタブ譜で、針が1ページを何小節で進むか (4/4 とみなします)。針が速すぎたら増やし、遅すぎたら減らします"_jp);
-    pdfBarsSlider.setRange (1.0, (double) Session::maxPdfBarsPerPage, 1.0);
+    pdfBarsLabel.setTooltip ("PDF のタブ譜で、画面1つ分を何小節で流すか (4/4 とみなします)。速すぎたら増やし、遅すぎたら減らします。PDF の上の右クリックで繰り返しを置けます"_jp);
+    pdfBarsSlider.setRange (1.0, (double) Session::maxPdfBarsPerScreen, 1.0);
     pdfBarsSlider.setTextValueSuffix (" 小節"_jp);
     pdfBarsSlider.setTextBoxStyle (juce::Slider::TextBoxLeft, false, 70, 24);
     pdfBarsSlider.setIncDecButtonsMode (juce::Slider::incDecButtonsNotDraggable);
-    pdfBarsSlider.setValue (session.pdfBarsPerPage, juce::dontSendNotification);
+    pdfBarsSlider.setValue (session.pdfBarsPerScreen, juce::dontSendNotification);
     pdfBarsSlider.setTooltip (pdfBarsLabel.getTooltip());
     pdfBarsSlider.setMouseClickGrabsKeyboardFocus (false);
     pdfBarsSlider.onValueChange = [this]
     {
-        session.pdfBarsPerPage = juce::roundToInt (pdfBarsSlider.getValue());
-        scoreViewer.setPdfBarsPerPage (session.pdfBarsPerPage);
+        session.pdfBarsPerScreen = juce::roundToInt (pdfBarsSlider.getValue());
+        scoreViewer.setPdfBarsPerScreen (session.pdfBarsPerScreen);
     };
     addChildComponent (pdfBarsLabel);
     addChildComponent (pdfBarsSlider);
@@ -616,6 +617,7 @@ SessionScreen::~SessionScreen()
     scoreViewer.onError = nullptr;
     scoreViewer.onBarClicked = nullptr;
     scoreViewer.onKey = nullptr;
+    scoreViewer.onPdfContext = nullptr;
     scoreViewer.hide();
 
     engine.setPlaying (false);
@@ -934,6 +936,7 @@ void SessionScreen::chooseScoreFile()
             return;
 
         const auto twoPdfs = safe->session.setScoreFiles (files);
+        safe->pdfPendingRepeatStart = -1.0;
         safe->session.scoreTrackIndex = 0;
         safe->resetParts();   // 別のタブ譜なので、リード・バッキングは決め直す
 
@@ -975,6 +978,100 @@ void SessionScreen::chooseScoreFile()
     });
 }
 
+// PDF の繰り返し (作者の指示: 繰り返し記号を手で置き、決めた回数だけ戻って流す)。
+// PDF の上で右クリック → 「ここから繰り返し」を置き、終わりで右クリック → 「ここまで繰り返し」で回数を選ぶ
+void SessionScreen::sendPdfRepeats()
+{
+    juce::Array<juce::var> list;
+    for (const auto& r : session.currentPdfRepeats())
+    {
+        auto* object = new juce::DynamicObject();
+        object->setProperty ("start", r.start);
+        object->setProperty ("end", r.end);
+        object->setProperty ("count", r.count);
+        list.add (juce::var (object));
+    }
+    scoreViewer.setPdfRepeats (list, pdfPendingRepeatStart);
+}
+
+void SessionScreen::showPdfRepeatMenu (double position, int repeat)
+{
+    if (! session.isPdfScore())
+        return;
+
+    auto& repeats = session.currentPdfRepeats();
+    const auto onRepeat = juce::isPositiveAndBelow (repeat, (int) repeats.size());
+    enum { startId = 1, cancelStartId = 2, removeId = 3, removeAllId = 4, endBase = 100, countBase = 200 };
+
+    juce::PopupMenu menu;
+    menu.addItem (startId, "ここから繰り返し"_jp);
+
+    juce::PopupMenu endMenu;
+    for (int n = 2; n <= Session::maxPdfRepeatCount; ++n)
+        endMenu.addItem (endBase + n, juce::String (n) + " 回弾く"_jp);
+    const auto canEnd = pdfPendingRepeatStart >= 0.0 && position > pdfPendingRepeatStart;
+    menu.addSubMenu (canEnd ? "ここまで繰り返し"_jp : "ここまで繰り返し (先に「ここから繰り返し」)"_jp, endMenu, canEnd);
+
+    if (pdfPendingRepeatStart >= 0.0)
+        menu.addItem (cancelStartId, "置きかけの「ここから」を消す"_jp);
+
+    if (onRepeat)
+    {
+        menu.addSeparator();
+        juce::PopupMenu countMenu;
+        for (int n = 2; n <= Session::maxPdfRepeatCount; ++n)
+            countMenu.addItem (countBase + n, juce::String (n) + " 回弾く"_jp, true, repeats[(size_t) repeat].count == n);
+        menu.addSubMenu ("この繰り返しの回数"_jp, countMenu);
+        menu.addItem (removeId, "この繰り返しを消す"_jp);
+    }
+
+    menu.addSeparator();
+    menu.addItem (removeAllId, "繰り返しをすべて消す"_jp, ! repeats.empty() || pdfPendingRepeatStart >= 0.0);
+
+    menu.showMenuAsync (juce::PopupMenu::Options().withMousePosition(),
+                        [safe = juce::Component::SafePointer (this), position, repeat,
+                         file = session.currentScorePath()] (int result)
+    {
+        // メニューを出している間に、表示する PDF が変わっていたら何もしない
+        if (safe == nullptr || result == 0 || safe->session.currentScorePath() != file)
+            return;
+
+        auto& list = safe->session.currentPdfRepeats();
+        if (result == startId)
+        {
+            safe->pdfPendingRepeatStart = position;
+            safe->setStatus ("繰り返しの始めを置きました。終わりの場所で右クリックし「ここまで繰り返し」を選んでください"_jp);
+        }
+        else if (result == cancelStartId)
+        {
+            safe->pdfPendingRepeatStart = -1.0;
+        }
+        else if (result > endBase && result <= endBase + Session::maxPdfRepeatCount)
+        {
+            if (Session::addPdfRepeat (list, { safe->pdfPendingRepeatStart, position, result - endBase }))
+                safe->setStatus ("繰り返しを置きました ("_jp + juce::String (result - endBase) + " 回弾く)"_jp);
+            safe->pdfPendingRepeatStart = -1.0;
+        }
+        else if (result > countBase && result <= countBase + Session::maxPdfRepeatCount)
+        {
+            if (juce::isPositiveAndBelow (repeat, (int) list.size()))
+                list[(size_t) repeat].count = result - countBase;
+        }
+        else if (result == removeId)
+        {
+            if (juce::isPositiveAndBelow (repeat, (int) list.size()))
+                list.erase (list.begin() + repeat);
+        }
+        else if (result == removeAllId)
+        {
+            list.clear();
+            safe->pdfPendingRepeatStart = -1.0;
+        }
+
+        safe->sendPdfRepeats();
+    });
+}
+
 // PDF のリード (1つ目)・バッキング (2つ目) の PDF を選ぶ。表示もそのパートに切り替える
 void SessionScreen::choosePdfPart (bool backing)
 {
@@ -989,6 +1086,8 @@ void SessionScreen::choosePdfPart (bool backing)
 
         // 選んだ PDF を読み込んで表示し、そのパートに切り替える (プリセットの音色・知らせは switchPart)
         (backing ? safe->session.pdfBackingPath : safe->session.scorePath) = file.getFullPathName();
+        (backing ? safe->session.pdfBackingRepeats : safe->session.pdfRepeats).clear();   // 別の PDF なので
+        safe->pdfPendingRepeatStart = -1.0;
         safe->session.backingActive = backing;
         safe->scoreViewer.load (safe->currentScoreFile(), 0);
         safe->updateScoreUi();
@@ -1021,6 +1120,8 @@ void SessionScreen::showPdfPartMenu (bool backing)
         if (result == 2)
         {
             safe->session.pdfBackingPath = {};
+            safe->session.pdfBackingRepeats.clear();
+            safe->pdfPendingRepeatStart = -1.0;
             safe->session.backingActive = false;
             safe->scoreViewer.load (safe->currentScoreFile(), 0);
             safe->updateScoreUi();
@@ -1033,6 +1134,9 @@ void SessionScreen::removeScore()
 {
     session.scorePath = {};
     session.pdfBackingPath = {};
+    session.pdfRepeats.clear();
+    session.pdfBackingRepeats.clear();
+    pdfPendingRepeatStart = -1.0;
     session.scoreTrackIndex = 0;
     resetParts();
     scoreViewer.load ({}, 0);
@@ -1058,7 +1162,7 @@ void SessionScreen::updateScoreUi()
 }
 
 // PDF のタブ譜のとき: 「小節を同じ幅に」は使えない (小節の情報が無い)。リード・バッキングは PDF の1つ目・2つ目を切り替える。
-// リード・バッキングの右に「1ページ ○ 小節」(流れる速さ) を出す。小節の操作 (ループ・戻る・進む) は、小節が無いので自動で秒単位になる
+// リード・バッキングの右に「1画面 ○ 小節」(流れる速さ) を出す。小節の操作 (ループ・戻る・進む) は、小節が無いので自動で秒単位になる
 void SessionScreen::updatePdfUi()
 {
     const auto pdf = session.isPdfScore();
@@ -1068,7 +1172,10 @@ void SessionScreen::updatePdfUi()
     equalBarsButton.setEnabled (! pdf);
 
     if (pdf)
-        scoreViewer.setPdfBarsPerPage (session.pdfBarsPerPage);
+    {
+        scoreViewer.setPdfBarsPerScreen (session.pdfBarsPerScreen);
+        sendPdfRepeats();
+    }
 
     updatePartButtons();
     if (layoutChanged)
@@ -2207,6 +2314,7 @@ void SessionScreen::switchPart (bool backing, bool fromUser)
         session.backingActive = backing;
         if (session.currentScorePath() != before)
         {
+            pdfPendingRepeatStart = -1.0;
             scoreViewer.load (currentScoreFile(), 0);
             updateScoreUi();
         }
@@ -3439,7 +3547,7 @@ void SessionScreen::resized()
         partsArea.removeFromLeft (6);
         backingButton.setBounds (partsArea.removeFromLeft (90).reduced (0, 2));
 
-        // PDF のときは、リード・バッキングの右に「1ページ ○ 小節」(流れる速さ)
+        // PDF のときは、リード・バッキングの右に「1画面 ○ 小節」(流れる速さ)
         if (session.isPdfScore())
         {
             scoreHeader.removeFromLeft (12);

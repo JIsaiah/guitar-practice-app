@@ -16,6 +16,9 @@
      つまみは薄い色 (75%)。ふだんは隠し、ホイールを回したとき・スクロールバーの近くでマウスを動かしたときだけ出して、
      2 秒動かさなければ消す (下のスクリプトが scrolling を付け外しする) */
   #scroller::-webkit-scrollbar { width: 6px; }
+  /* スクロールバーの上にマウスを乗せると太くなる (作者の指示: 引っ張りやすく) */
+  #scroller.wide::-webkit-scrollbar { width: 14px; }
+  #scroller.wide::-webkit-scrollbar-thumb { border-radius: 7px; }
   #scroller::-webkit-scrollbar-track { background: transparent; }
   #scroller::-webkit-scrollbar-thumb { background: transparent; border-radius: 3px; }
   #scroller.scrolling::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--color-border) 75%, transparent); }
@@ -27,6 +30,12 @@
   /* PDF のタブ譜 (作者の指示)。ページを横幅いっぱいの画像にして縦に並べ、再生中は画面を上から下へ流す (針は出さない) */
   #pdf { position: relative; display: none; padding: 8px 0 40vh; }
   #pdf canvas { display: block; margin: 0 auto 12px; background: #fff; box-shadow: 0 0 0 1px var(--color-border); }
+  /* PDF の繰り返しの印 (作者が右クリックで置く)。始め・終わりの横線と、回数の札 */
+  .pdfRepeat { position: absolute; left: 0; right: 0; height: 0; border-top: 2px dashed var(--color-accent);
+               pointer-events: none; z-index: 5; }
+  .pdfRepeat span { position: absolute; right: 16px; top: -24px; padding: 2px 8px; border-radius: 4px;
+                    background: var(--color-accent); color: #fff; font-size: 12px; font-weight: 700; white-space: nowrap; }
+  .pdfRepeat.pending { opacity: 0.6; }
   #cursor { position: absolute; width: 3px; border-radius: 2px; background: var(--color-accent);
             opacity: 0; transition: opacity 0.15s; pointer-events: none; z-index: 5; }
   #barHighlight { position: absolute; background: var(--color-accent); opacity: 0; pointer-events: none; z-index: 4; }
@@ -89,9 +98,25 @@
     scrollbarTimer = setTimeout(function () { setScrollbarShown(false); }, 2000);
   }
   function nearScrollbar(e) { return e.clientX >= scroller.getBoundingClientRect().right - 16; }
+  // マウスがスクロールバーの上にある間 (つまんで動かしている間も) は太くする
+  let draggingScrollbar = false;
+  function setScrollbarWide(wide) {
+    if (scroller.classList.contains("wide") === wide) return;
+    scroller.classList.toggle("wide", wide);
+    scroller.style.overflowY = "hidden";   // 描き直させる (setScrollbarShown と同じ)
+    void scroller.offsetWidth;
+    scroller.style.overflowY = "";
+  }
   scroller.addEventListener("wheel", showScrollbar, { passive: true });
-  scroller.addEventListener("pointermove", function (e) { if (nearScrollbar(e) || e.buttons) showScrollbar(); });
-  scroller.addEventListener("pointerdown", function (e) { if (nearScrollbar(e)) showScrollbar(); });
+  scroller.addEventListener("pointermove", function (e) {
+    if (nearScrollbar(e) || e.buttons) showScrollbar();
+    setScrollbarWide(draggingScrollbar || (nearScrollbar(e) && scroller.scrollHeight > scroller.clientHeight));
+  });
+  scroller.addEventListener("pointerdown", function (e) {
+    if (nearScrollbar(e)) { showScrollbar(); draggingScrollbar = true; setScrollbarWide(true); }
+  });
+  document.addEventListener("pointerup", function () { draggingScrollbar = false; }, true);
+  scroller.addEventListener("pointerleave", function () { if (!draggingScrollbar) setScrollbarWide(false); });
   const scoreElement = document.getElementById("score");
   const cursor = document.createElement("div"); cursor.id = "cursor";
   const barHighlight = document.createElement("div"); barHighlight.id = "barHighlight";
@@ -218,8 +243,16 @@
       case "countdown": showCountdown(cmd.number, cmd.caption); break;
       case "freeze": scroller.classList.toggle("frozen", !!cmd.on); break;   // ラジアルメニューを出している間
       case "position": receivePosition(cmd); break;
-      case "pdfBarsPerPage":
-        pdfBarsPerPage = Math.max(1, cmd.bars | 0);
+      case "pdfBarsPerScreen":
+        pdfBarsPerScreen = Math.max(1, cmd.bars | 0);
+        setPosition(currentSeconds(performance.now()), timing.bpm, timing.offset);
+        break;
+      case "pdfRepeats":
+        pdfRepeats = (cmd.repeats || []).map(function (r) { return { start: +r.start, end: +r.end, count: Math.max(2, r.count | 0) }; })
+                                       .filter(function (r) { return r.end > r.start; })
+                                       .sort(function (a, b) { return a.start - b.start; });
+        pdfPendingStart = typeof cmd.pending === "number" && cmd.pending >= 0 ? cmd.pending : -1;
+        drawPdfRepeats();
         setPosition(currentSeconds(performance.now()), timing.bpm, timing.offset);
         break;
       case "layout":
@@ -309,16 +342,21 @@
 
   // ---- PDF のタブ譜 (作者の指示) ----
   // PDF には「どこに何小節目があるか」の情報が無いので、小節に合わせた針・タブ譜の音 (MIDI)・小節のクリックは使わない。
-  // 再生すると、画面が BPM に合わせて一定の速さで上から下へ流れる (針は出さない。作者の指示):
-  //   1ページで (pdfBarsPerPage × 4) 小節 (4/4 とみなす) 進む。「×4」は、作者の指示で流れる速さを前の 1/4 にしたため。
-  //   今の位置 = ページの上端 + (そのページの中の拍 ÷ 1ページの拍) × ページの高さ。この位置が画面の上から 3 割に来るように流す
+  // 再生すると、画面が BPM に合わせて一定の速さで上から下へ流れる (針は出さない。作者の指示)。
+  //   速さは「画面の高さ」で測る (作者の指示): 画面1つ分を pdfBarsPerScreen 小節 (4/4 とみなす) で流す。
+  //   ページの数・大きさには関係しないので、縦に長い1枚の PDF でも同じように流れる。
+  //   画面の上から 3 割のところを「読んでいる線」(見えない) とし、この線が PDF の上を進む。
+  //   作者が置いた繰り返し (pdfRepeats) の終わりに線が来たら、始めへ戻り、決めた回数だけ繰り返す
   // 位置は、ほかのタブ譜と同じく、アプリの時計 (動画・音源) から届く「位置・BPM・起点」で決める。
   // ページの絵は pdf.js (Mozilla、Apache License 2.0。pdfjs/pdfjs-LICENSE.txt) で描く。
   // pdf.js は、ふつうは別のスレッド (Worker) で PDF を読むが、アプリのファイルの渡し方 (WebView のリソース) で
   // Worker が使えるか分からないので、読み込みの部品をこのページで直接読み込んで使う (globalThis.pdfjsWorker)
   const pdfElement = document.getElementById("pdf");
-  const pdfSlowdown = 4;   // 流れる速さを 1/4 にする (作者の指示)
-  let pdfDoc = null, pdfPages = [], pdfBarsPerPage = 24, pdfLoadCount = 0, pdfLib = null;
+  let pdfDoc = null, pdfPages = [], pdfBarsPerScreen = 12, pdfLoadCount = 0, pdfLib = null;
+  // 繰り返し: 位置は「ページの番号 (0 から) + ページの中の割合 (0〜1)」で持つ (ウィンドウの幅が変わっても同じ場所)。
+  // count は弾く回数 (2 = 2回弾く = 1回戻る)。pdfPendingStart は「ここから繰り返し」だけ置いた始め (-1 = なし)
+  let pdfRepeats = [], pdfPendingStart = -1;
+  const pdfReadingLine = 0.3;   // 読んでいる線: 画面の上から 3 割
 
   function isPdf(bytes) {
     return bytes.length > 4 && bytes[0] === 0x25 && bytes[1] === 0x50 && bytes[2] === 0x44 && bytes[3] === 0x46;   // "%PDF"
@@ -327,7 +365,7 @@
   function clearPdf() {
     if (pdfDoc) { pdfDoc.destroy(); pdfDoc = null; }
     pdfPages = [];
-    pdfElement.querySelectorAll("canvas").forEach(function (c) { c.remove(); });
+    pdfElement.querySelectorAll("canvas, .pdfRepeat").forEach(function (c) { c.remove(); });
     pdfElement.style.display = "none";
   }
 
@@ -393,8 +431,64 @@
       pdfElement.appendChild(canvas);
       pdfPages.push(canvas);
       await page.render({ canvasContext: canvas.getContext("2d"), viewport: viewport, canvas: canvas }).promise;
+      drawPdfRepeats();
     }
     setPosition(currentSeconds(performance.now()), timing.bpm, timing.offset);
+  }
+
+  // 「ページ + 割合」と、PDF の中の高さ (px) の変換
+  function pdfPosToY(pos) {
+    if (pdfPages.length === 0) return 0;
+    const index = Math.max(0, Math.min(pdfPages.length - 1, Math.floor(pos)));
+    const page = pdfPages[index];
+    return page.offsetTop + Math.max(0, Math.min(1, pos - index)) * page.offsetHeight;
+  }
+  function pdfYToPos(y) {
+    for (let i = 0; i < pdfPages.length; i++) {
+      const page = pdfPages[i];
+      if (y < page.offsetTop + page.offsetHeight || i === pdfPages.length - 1)
+        return i + Math.max(0, Math.min(1, (y - page.offsetTop) / page.offsetHeight));
+    }
+    return 0;
+  }
+
+  // 繰り返しの印を描く (描けたページの分だけ)
+  function drawPdfRepeats() {
+    pdfElement.querySelectorAll(".pdfRepeat").forEach(function (c) { c.remove(); });
+    if (pdfPages.length === 0) return;
+    const mark = function (pos, text, pending) {
+      if (Math.floor(pos) >= pdfPages.length) return;   // まだ描いていないページ
+      const line = document.createElement("div");
+      line.className = "pdfRepeat" + (pending ? " pending" : "");
+      line.style.top = pdfPosToY(pos) + "px";
+      const label = document.createElement("span");
+      label.textContent = text;
+      line.appendChild(label);
+      pdfElement.appendChild(line);
+    };
+    pdfRepeats.forEach(function (r) {
+      mark(r.start, "繰り返し ここから", false);
+      mark(r.end, "ここまで ×" + r.count, false);
+    });
+    if (pdfPendingStart >= 0) mark(pdfPendingStart, "繰り返し ここから (終わりを右クリックで)", true);
+  }
+
+  // 読んでいる線が、流した距離 (px) でどこにいるか。繰り返しの終わりに来たら始めへ戻る
+  function pdfLineY(distance) {
+    let y = scroller.clientHeight * pdfReadingLine;
+    let left = distance;
+    for (const r of pdfRepeats) {
+      const s = pdfPosToY(r.start), e = pdfPosToY(r.end);
+      if (e <= y) continue;                       // もう過ぎた (読んでいる線より上にある) 繰り返し
+      if (left <= e - y) return y + left;
+      left -= e - y;
+      const length = e - Math.min(s, e - 1);
+      const extra = (r.count - 1) * length;       // 戻ってもう一度弾く分
+      if (left < extra) return e - length + (left % length);
+      left -= extra;
+      y = e;
+    }
+    return y + left;
   }
 
   let pdfResizeTimer = 0;
@@ -408,17 +502,14 @@
 
   function setPdfPosition(seconds, bpm, offset) {
     if (!pdfDoc || pdfPages.length === 0 || bpm <= 0) return;
-    const beatsPerPage = Math.max(1, pdfBarsPerPage) * 4 * pdfSlowdown;
-    const beats = (seconds - offset) * bpm / 60;
-    const pageFloat = Math.max(0, beats) / beatsPerPage;
-    const index = Math.min(pdfPages.length - 1, Math.floor(pageFloat));
-    const fraction = Math.min(1, pageFloat - index);
-    const page = pdfPages[index];
-    const y = page.offsetTop + fraction * page.offsetHeight;
+    // 流した距離 = 拍 ÷ (画面1つ分の拍) × 画面の高さ
+    const beats = Math.max(0, (seconds - offset) * bpm / 60);
+    const distance = beats / (Math.max(1, pdfBarsPerScreen) * 4) * scroller.clientHeight;
+    const y = pdfLineY(distance);
 
-    // 再生中は、今の位置が画面の上から 3 割のところに来るように流す (止まっているときは、作者がスクロールしたままにする)
+    // 再生中は、読んでいる線が画面の上から 3 割のところに来るように流す (止まっているときは、作者がスクロールしたままにする)
     if (clock.playing)
-      scroller.scrollTop = Math.max(0, y - scroller.clientHeight * 0.3);
+      scroller.scrollTop = Math.max(0, y - scroller.clientHeight * pdfReadingLine);
   }
 
   // 再生位置 (秒) から、今の小節と小節の中の位置を求めて、カーソルを動かす
@@ -645,6 +736,17 @@
         best = i;
     if (best >= 0)
       send("barClicked", { bar: best, beats: barStartBeats[best] });
+  });
+
+  // PDF の右クリック: 繰り返しを置くメニューをアプリに出してもらう (ラジアルメニューの操作のときは出さない)。
+  // 押した場所 (ページ + 割合) と、そこを含む繰り返しの番号 (無ければ -1) を送る
+  pdfElement.addEventListener("contextmenu", function (e) {
+    e.preventDefault();
+    if (twoButtons || (e.buttons & 1) || pdfPages.length === 0) return;
+    const pos = pdfYToPos(e.clientY - pdfElement.getBoundingClientRect().top);
+    let repeat = -1;
+    pdfRepeats.forEach(function (r, i) { if (pos >= r.start && pos <= r.end) repeat = i; });
+    send("pdfContext", { pos: pos, repeat: repeat });
   });
 
   // 再生の操作キーは、タブ譜の上で押してもアプリに渡す (WebView がキーを受け取ってしまうため)

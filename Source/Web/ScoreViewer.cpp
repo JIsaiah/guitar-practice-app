@@ -198,9 +198,17 @@ void ScoreViewer::setMidiTracks (const std::vector<MidiTrack>& midiTracks)
     send (makeCommand ("midiTracks", { { "tracks", list } }));
 }
 
-void ScoreViewer::setPdfBarsPerPage (int bars)
+void ScoreViewer::setPdfBarsPerScreen (int bars)
 {
-    send (makeCommand ("pdfBarsPerPage", { { "bars", bars } }));
+    send (makeCommand ("pdfBarsPerScreen", { { "bars", bars } }));
+}
+
+void ScoreViewer::setPdfRepeats (const juce::var& repeats, double pendingStart)
+{
+    pending.erase (std::remove_if (pending.begin(), pending.end(),
+                                   [] (const juce::var& c) { return c["type"] == "pdfRepeats"; }),
+                   pending.end());
+    send (makeCommand ("pdfRepeats", { { "repeats", repeats }, { "pending", pendingStart } }));
 }
 
 void ScoreViewer::showTrack (int trackIndex)
@@ -279,6 +287,13 @@ void ScoreViewer::handleEvent (const juce::var& event)
     {
         if (onBarClicked != nullptr)
             onBarClicked ((double) event["beats"]);
+        return;
+    }
+
+    if (type == "pdfContext")
+    {
+        if (onPdfContext != nullptr)
+            onPdfContext ((double) event["pos"], (int) event["repeat"]);
         return;
     }
 

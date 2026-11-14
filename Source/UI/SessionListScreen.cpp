@@ -52,6 +52,9 @@ SessionListScreen::SessionListScreen (SessionLibrary& l, SetlistStore& sl, Theme
     settingsButton.setFrameless (true);   // 作者のレイアウト: 歯車は枠なし
 
     newButton.onClick = [this] { if (onNewSession != nullptr) onNewSession(); };
+    // 「＋」は一覧の上に重ねる。ふだんは 60% の濃さ、マウスを乗せると 100% (作者の指示)
+    newButton.setAlpha (0.6f);
+    newButton.onStateChange = [this] { newButton.setAlpha (newButton.isOver() || newButton.isDown() ? 1.0f : 0.6f); };
     settingsButton.onClick = [this] { if (onOpenSettings != nullptr) onOpenSettings(); };
 
     for (auto* button : std::initializer_list<juce::Button*> { &newButton, &settingsButton })
@@ -483,27 +486,35 @@ namespace
 
 SessionListScreen::Columns SessionListScreen::layoutColumns (int width, int height)
 {
-    auto area = juce::Rectangle<int> (0, 0, width, height).reduced (12, 0);
+    // 作者の指示: 右に詰めすぎていたので、列の間を空けて左から並べる。
+    // 曲名・アーティストは広すぎないように上限を決め、余った幅はいちばん右に残す
+    auto area = juce::Rectangle<int> (0, 0, width, height).reduced (16, 0);
     Columns c;
 
-    const auto take = [&area] (int w)
+    constexpr int bpmWidth = 48, tuningWidth = 110, lengthWidth = 52, lastWidth = 96;
+    constexpr int starsWidth = starSize * Session::maxDifficulty;
+    constexpr int fixedWidth = bpmWidth + starsWidth + tuningWidth + lengthWidth + lastWidth;
+
+    // 列の間: 広ければ 36px、狭いときは縮める (曲名・アーティストに最低 340px は残す)
+    const auto gap = juce::jlimit (16, 36, (area.getWidth() - fixedWidth - 340) / 6);
+    const auto flexible = juce::jmax (160, area.getWidth() - fixedWidth - gap * 6);
+    const auto titleWidth = juce::jmin (440, flexible * 6 / 10);
+    const auto artistWidth = juce::jmin (280, flexible - titleWidth);
+
+    const auto take = [&area, gap] (int w)
     {
-        auto r = area.removeFromRight (w);
-        area.removeFromRight (12);
+        auto r = area.removeFromLeft (w);
+        area.removeFromLeft (gap);
         return r;
     };
 
-    c.lastPracticed = take (128);
-    c.length = take (72);
-    c.tuning = take (130);
-    c.difficulty = take (starSize * Session::maxDifficulty);
-    c.bpm = take (48);
-
-    // 残りを曲名 6 : アーティスト 4 で分ける
-    const auto titleWidth = area.getWidth() * 6 / 10;
-    c.title = area.removeFromLeft (titleWidth);
-    area.removeFromLeft (12);
-    c.artist = area;
+    c.title = take (titleWidth);
+    c.artist = take (artistWidth);
+    c.bpm = take (bpmWidth);
+    c.difficulty = take (starsWidth);
+    c.tuning = take (tuningWidth);
+    c.length = take (lengthWidth);
+    c.lastPracticed = take (lastWidth);
     return c;
 }
 
@@ -881,11 +892,14 @@ void SessionListScreen::resized()
     folderList.setBounds (area.removeFromLeft (juce::jlimit (200, 320, area.getWidth() * 23 / 100)));
     area.removeFromLeft (16);
 
-    // 右: 一覧の枠。上に列の見出し、下の帯の右に「＋」
+    // 右: 一覧の枠。上に列の見出し、その下は枠のいちばん下まで一覧 (作者の指示)。
+    // 「＋」は一覧の右下に重ねる (一覧より前。スクロールバーにはかからない位置)
     listPanel = area;
     auto inner = area.reduced (8);
     headerArea = inner.removeFromTop (headerHeight + 8).withTrimmedTop (4);
-    auto bottom = inner.removeFromBottom (52);
-    newButton.setBounds (bottom.removeFromRight (44).withSizeKeepingCentre (44, 44));
     listBox.setBounds (inner);
+    const auto scrollbar = listBox.getVerticalScrollBar().getWidth() > 0 ? listBox.getVerticalScrollBar().getWidth()
+                                                                          : getLookAndFeel().getDefaultScrollbarWidth();
+    newButton.setBounds (juce::Rectangle<int> (44, 44).withPosition (inner.getRight() - scrollbar - 8 - 44, inner.getBottom() - 8 - 44));
+    newButton.toFront (false);
 }

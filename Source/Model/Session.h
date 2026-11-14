@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <vector>
 #include <juce_core/juce_core.h>
 
 enum class SourceType
@@ -55,14 +56,23 @@ struct Session
 
     juce::String scorePath;
     int scoreTrackIndex = 0;   // 今表示しているトラック (リード・バッキングのどちらか)
-    int pdfBarsPerPage = 24;   // PDF のタブ譜: 流れる速さ (1ページで この数 × 4 小節進む。4/4 とみなす)
-    static constexpr int maxPdfBarsPerPage = 200;
+    int pdfBarsPerScreen = 12;   // PDF のタブ譜: 流れる速さ (画面1つ分の高さを この数の小節で流す。4/4 とみなす)
+    static constexpr int maxPdfBarsPerScreen = 200;
     juce::String pdfBackingPath;   // PDF のタブ譜の2枚目 (バッキング)。scorePath の PDF がリード。空 = なし
     bool isPdfScore() const { return scorePath.endsWithIgnoreCase (".pdf"); }
     bool hasPdfBacking() const { return isPdfScore() && pdfBackingPath.isNotEmpty(); }
+
+    // PDF の繰り返し (作者が右クリックで置く)。位置は「ページの番号 (0 から) + ページの中の割合」。
+    // count は弾く回数 (2 = 2回弾く)。リード (1つ目の PDF) とバッキング (2つ目) で別々に持つ
+    struct PdfRepeat { double start = 0.0, end = 0.0; int count = 2; };
+    static constexpr int maxPdfRepeatCount = 8;
+    std::vector<PdfRepeat> pdfRepeats, pdfBackingRepeats;
+    std::vector<PdfRepeat>& currentPdfRepeats() { return hasPdfBacking() && backingActive ? pdfBackingRepeats : pdfRepeats; }
+    // 繰り返しを足す。重なる繰り返しは消し、始めの順に並べる。始めが終わりより後なら何もしない (false)
+    static bool addPdfRepeat (std::vector<PdfRepeat>& repeats, PdfRepeat repeat);
     // 今表示するタブ譜のファイル (PDF でバッキングを表示しているときは2枚目)
     juce::String currentScorePath() const { return hasPdfBacking() && backingActive ? pdfBackingPath : scorePath; }
-    // 「タブ譜を選択」で選んだファイルを入れる。PDF を2つ選んだら、名前の順で1つ目をリード・2つ目をバッキングにする
+    // 「タブ譜を選択」で選んだファイルを入れる (繰り返しは消す)。PDF を2つ選んだら、名前の順で1つ目をリード・2つ目をバッキングにする
     // (作者の指示: PDF は2枚まで)。それ以外は1つ目だけを使う。PDF を2つ入れたら true
     bool setScoreFiles (juce::Array<juce::File> files);
 

@@ -46,8 +46,10 @@ public:
     // 再生前のカウントダウンを、タブ譜の上に大きく出す。number が 0 なら消す (setlist-mode.md 7.2)
     void showCountdown (int number, const juce::String& caption = {});
 
-    // PDF のタブ譜: 1ページで何小節進むか (針が上から下へ流れる速さ)
-    void setPdfBarsPerPage (int bars);
+    // PDF のタブ譜: 画面1つ分を何小節で流すか (流れる速さ)
+    void setPdfBarsPerScreen (int bars);
+    // PDF のタブ譜の繰り返し ([{start, end, count}] の並び) と、「ここから繰り返し」だけ置いた始め (-1 = なし)
+    void setPdfRepeats (const juce::var& repeats, double pendingStart);
 
     bool hasScore() const noexcept { return scoreFile.existsAsFile(); }
     bool isRendered() const noexcept { return rendered; }   // 今のタブ譜を描き終えたか (練習画面の「読み込み中…」を消すのに使う)
@@ -73,6 +75,7 @@ public:
     std::function<void (const juce::String& message)> onError;
     std::function<void (double barStartBeats)> onBarClicked;   // 小節をクリックした (その小節が曲の頭から何拍目で始まるか)
     std::function<void (const juce::String& key)> onKey;      // タブ譜の上で押されたキー ("Space"、"ArrowLeft" など)
+    std::function<void (double position, int repeat)> onPdfContext;   // PDF の右クリック (場所と、そこを含む繰り返しの番号。-1 = なし)
 
     void resized() override;
 

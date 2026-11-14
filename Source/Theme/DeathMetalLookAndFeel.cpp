@@ -127,6 +127,24 @@ void AppLookAndFeel::drawButtonBackground (juce::Graphics& g, juce::Button& butt
     g.drawRoundedRectangle (bounds, cornerRadius, highlighted && ! on ? 1.5f : 1.0f);
 }
 
+void AppLookAndFeel::drawScrollbar (juce::Graphics& g, juce::ScrollBar& bar, int x, int y, int width, int height, bool vertical,
+                                    int thumbStart, int thumbSize, bool isMouseOver, bool isMouseDown)
+{
+    // マウスが乗っている・つまんでいるときは太さいっぱい、ふだんは右 (下) 寄せの細い棒
+    const bool wide = isMouseOver || isMouseDown;
+    const auto thickness = wide ? (float) (vertical ? width : height) - 2.0f : 6.0f;
+
+    juce::Rectangle<float> thumb;
+    if (vertical)
+        thumb = { (float) (x + width) - 1.0f - thickness, (float) thumbStart, thickness, (float) thumbSize };
+    else
+        thumb = { (float) thumbStart, (float) (y + height) - 1.0f - thickness, (float) thumbSize, thickness };
+
+    const auto colour = bar.findColour (juce::ScrollBar::thumbColourId);
+    g.setColour (wide ? colour.brighter (0.25f) : colour);
+    g.fillRoundedRectangle (thumb.reduced (vertical ? 0.0f : 1.0f, vertical ? 1.0f : 0.0f), thickness / 2.0f);
+}
+
 void AppLookAndFeel::drawToggleButton (juce::Graphics& g, juce::ToggleButton& button, bool highlighted, bool down)
 {
     const auto fontSize = juce::jmin (15.0f, (float) button.getHeight() * 0.75f);
