@@ -194,6 +194,9 @@ private:
     // false: リード・バッキングのボタンの右クリックの「選び直す」
     void chooseParts (bool required);
     void switchPart (bool backing, bool fromUser);
+    juce::File currentScoreFile() const { return juce::File (session.currentScorePath()); }   // 今表示するタブ譜
+    void choosePdfPart (bool backing);        // PDF のリード・バッキングの PDF を選ぶ
+    void showPdfPartMenu (bool backing);      // PDF のリード・バッキングのボタンの右クリック
     void resetParts();                         // 別のタブ譜にしたとき
     int activePartTrack() const;               // 今のパートのトラック (-1 = なし)
     void updatePartButtons();
@@ -255,7 +258,7 @@ private:
 
     // 上部
     IconButton backButton { Icons::back };   // 一覧に戻る (枠のない矢印のアイコン。作者の指示)
-    FixedTextButton saveButton;
+    IconButton saveButton { Icons::save };     // 保存 (アイコン。作者の指示。未保存の変更があると右上に印)
     IconButton settingsButton { Icons::settings };   // 設定 (歯車の正方形のボタン。一覧画面と同じ。作者の指示)
     juce::Label titleLabel, statusLabel;
     juce::Label artistLabel;   // 曲名の右に「—  アーティスト名」(作者のレイアウト)
@@ -319,11 +322,15 @@ private:
     OffsetControl scoreOffsetControl, offsetControl;
 
     // 上部: チューナー
-    FixedTextButton tunerButton;
+    IconButton tunerButton { Icons::tuner };   // チューナー (音叉のアイコン。作者の指示)
     IconButton helpButton { Icons::help };   // 「?」(画面の説明。機能はまだ)
 
     // タブ譜の上の左: リード・バッキングの切り替え (作者のレイアウト。機能はまだ)
     RightClickableButton leadButton, backingButton;   // 右クリックで「トラックを選び直す」
+    // PDF のタブ譜のとき、リード・バッキングの代わりに出す: 1ページで何小節進むか (針の流れる速さ)
+    juce::Label pdfBarsLabel;
+    juce::Slider pdfBarsSlider { juce::Slider::IncDecButtons, juce::Slider::TextBoxLeft };
+    void updatePdfUi();
 
     // 下部: 再生操作。「再生／速度／メトロノーム／ループ」のグループに分け、それぞれに見出しを付ける
     SectionHeading playHeading { "再生"_jp }, speedHeading { "速度"_jp },

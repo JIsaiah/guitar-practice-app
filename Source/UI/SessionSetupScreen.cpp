@@ -45,7 +45,7 @@ SessionSetupScreen::SessionSetupScreen (ScoreViewer& reader)
     sourceFileButton.onClick = [this] { chooseSourceFile(); };
     youtubeButton.onClick = [this] { pasteYouTubeUrl(); };
     scoreFileButton.onClick = [this] { chooseScoreFile(); };
-    scoreClearButton.onClick = [this] { session.scorePath = {}; bpmNote.setText ({}, juce::dontSendNotification); updateState(); };
+    scoreClearButton.onClick = [this] { session.scorePath = {}; session.pdfBackingPath = {}; bpmNote.setText ({}, juce::dontSendNotification); updateState(); };
     for (auto* button : { &sourceFileButton, &youtubeButton, &scoreFileButton, &scoreClearButton })
         addAndMakeVisible (button);
 
@@ -121,16 +121,18 @@ void SessionSetupScreen::pasteYouTubeUrl()
 void SessionSetupScreen::chooseScoreFile()
 {
     fileChooser = std::make_unique<juce::FileChooser> ("タブ譜ファイルを選ぶ"_jp, juce::File(),
-                                                       "*.gp;*.gpx;*.gp5;*.gp4;*.gp3;*.musicxml;*.xml");
+                                                       "*.gp;*.pdf;*.gpx;*.gp5;*.gp4;*.gp3;*.musicxml;*.xml");   // .pdf も
 
-    fileChooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+    // PDF は2つまで選べる (作者の指示: 名前の順で1つ目がリード、2つ目がバッキング)
+    fileChooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles
+                                  | juce::FileBrowserComponent::canSelectMultipleItems,
                               [this] (const juce::FileChooser& chooser)
                               {
-                                  const auto file = chooser.getResult();
-                                  if (file == juce::File())
+                                  const auto files = chooser.getResults();
+                                  if (files.isEmpty())
                                       return;
 
-                                  session.scorePath = file.getFullPathName();
+                                  session.setScoreFiles (files);
                                   updateState();
                                   readScoreDetails();
                               });
@@ -208,7 +210,10 @@ void SessionSetupScreen::updateState()
         case SourceType::none:    sourceValue.setText ("(なし)"_jp, juce::dontSendNotification); break;
     }
 
-    scoreValue.setText (session.scorePath.isEmpty() ? "(なし)"_jp : session.scorePath, juce::dontSendNotification);
+    scoreValue.setText (session.scorePath.isEmpty() ? "(なし)"_jp
+                        : session.hasPdfBacking() ? "リード: "_jp + juce::File (session.scorePath).getFileName()
+                                                    + "　バッキング: "_jp + juce::File (session.pdfBackingPath).getFileName()
+                        : session.scorePath, juce::dontSendNotification);
 
     // 必須は曲名だけ (作者の指示)。音源もタブ譜も無いまま作ると、練習画面のタブ譜の枠で選んでもらう
     startButton.setEnabled (session.title.isNotEmpty());

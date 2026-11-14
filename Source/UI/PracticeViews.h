@@ -133,7 +133,7 @@ public:
 
         g.setColour (findColour (ThemeColourIds::textMuted));
         g.setFont (AppLookAndFeel::scaled (juce::FontOptions (14.0f)));
-        g.drawText ("タブ譜がありません。上の「タブ譜を選択」から選べます (Guitar Pro、MusicXML)"_jp,
+        g.drawText ("タブ譜がありません。上の「タブ譜を選択」から選べます (Guitar Pro、PDF、MusicXML)"_jp,
                     bounds.withSizeKeepingCentre (bounds.getWidth(), 30).translated (0, 70), juce::Justification::centred);
     }
 

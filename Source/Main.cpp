@@ -11,6 +11,7 @@
 #include "Library/SetlistStore.h"
 #include "Theme/ThemeManager.h"
 #include "UI/MainComponent.h"
+#include "UI/Icons.h"
 
 class GuitarPracticeApplication final : public juce::JUCEApplication
 {
@@ -185,10 +186,16 @@ private:
         }
 
     private:
-        // 題名の帯 (Windows が描く帯) を、アプリの背景・文字の色にそろえる。テーマ・デスメタルモードを変えたときも
+        // 題名の帯 (Windows が描く帯) を、アプリの背景・文字の色にそろえる。テーマ・デスメタルモードを変えたときも。
+        // タスクバー・Alt+Tab のアイコン (作者の指示: app-logo-1.svg) も、テーマのアクセントの色にする (作者の指示)
         void applyThemeToTitleBar()
         {
             const auto& palette = themeManager.getPalette();
+            if (palette.accent != iconAccent)
+            {
+                iconAccent = palette.accent;
+                setIcon (Icons::renderAppIcon (256, iconAccent));
+            }
             setBackgroundColour (palette.background);
             TitleBar::setColours (getWindowHandle(), palette.background.getARGB(), palette.text.getARGB(),
                                   palette.background.getPerceivedBrightness() < 0.5f);
@@ -197,6 +204,7 @@ private:
         void changeListenerCallback (juce::ChangeBroadcaster*) override { applyThemeToTitleBar(); }
 
         ThemeManager& themeManager;
+        juce::Colour iconAccent;   // 今のアイコンの色 (同じ色なら作り直さない)
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MainWindow)
     };

@@ -77,6 +77,8 @@ endif()
 juce_add_gui_app(GuitarPractice
     PRODUCT_NAME "suguhiku"   # アプリの名前 (ウィンドウの題名・実行ファイル名)。保存先のフォルダ名 (GuitarPractice) は変えない
     COMPANY_NAME "GuitarPractice"
+    # アプリのアイコン (実行ファイル・エクスプローラー)。svg icons/app-logo-1.svg から、開発用の --render-logos で作った画像
+    ICON_BIG "${CMAKE_CURRENT_SOURCE_DIR}/Resources/AppIcon/app-icon.png"
     NEEDS_WEBVIEW2 TRUE)
 
 target_sources(GuitarPractice PRIVATE
@@ -143,6 +145,9 @@ juce_add_binary_data(GuitarPracticeData
         Resources/Web/alphatab/Bravura.woff2
         Resources/Web/alphatab/Bravura.woff
         Resources/Web/alphatab/sonivox.sf2
+        # PDF のタブ譜を描く pdf.js (Mozilla、Apache License 2.0)
+        Resources/Web/pdfjs/pdf.min.mjs
+        Resources/Web/pdfjs/pdf.worker.min.mjs
         design/generated/tokens.css
         # 「歪み」の音色 (作者が選んだ NAM のモデルとキャビネットの IR。元は 音色プリセット/ のファイル)
         Resources/Tones/drive-amp.nam
@@ -160,7 +165,10 @@ juce_add_binary_data(GuitarPracticeData
         "svg icons/trash-svgrepo-com.svg"
         "svg icons/sort-sortable-anchor-table-order-desc-asc-svgrepo-com.svg"
         "svg icons/sort-asc-sortable-anchor-table-order-desc-asc-svgrepo-com.svg"
-        "svg icons/sort-desc-sortable-anchor-table-order-desc-asc-svgrepo-com.svg")
+        "svg icons/sort-desc-sortable-anchor-table-order-desc-asc-svgrepo-com.svg"
+        "svg icons/diapason-tuner-svgrepo-com.svg"
+        "svg icons/save-01-svgrepo-com.svg"
+        "svg icons/app-logo-1.svg")
 
 target_compile_definitions(GuitarPractice PRIVATE
     JUCE_WEB_BROWSER=1
@@ -201,6 +209,7 @@ juce_add_console_app(GuitarPracticeTests
 target_sources(GuitarPracticeTests PRIVATE
     Tests/NoiseGateTests.cpp
     Tests/SessionFileNameTests.cpp
+    Tests/PdfScoreFilesTests.cpp
     Tests/TestMain.cpp
     Tests/SetlistTests.cpp
     Tests/PlaybackSettingsResolverTests.cpp

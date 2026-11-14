@@ -102,6 +102,18 @@ void IconButton::setIcon (const char* iconFile)
     repaint();
 }
 
+juce::Image Icons::renderAppIcon (int size, juce::Colour accent)
+{
+    juce::Image image (juce::Image::ARGB, size, size, true);
+    juce::Graphics g (image);
+    const auto bounds = juce::Rectangle<float> ((float) size, (float) size);
+
+    g.setColour (accent);   // テーマのアクセントの色 (作者の指示)
+    g.fillRoundedRectangle (bounds.reduced ((float) size * 0.04f), (float) size * 0.2f);
+    draw (g, appLogo, bounds.reduced ((float) size * 0.18f), juce::Colours::white);
+    return image;
+}
+
 void IconButton::paintButton (juce::Graphics& g, bool highlighted, bool down)
 {
     auto& lf = getLookAndFeel();
@@ -155,5 +167,11 @@ void IconButton::paintButton (juce::Graphics& g, bool highlighted, bool down)
         g.setColour (colour);
         g.setFont (font);
         g.drawText (label, area, juce::Justification::centred, true);
+    }
+
+    if (marked)
+    {
+        g.setColour (findColour (ThemeColourIds::accent));
+        g.fillEllipse (juce::Rectangle<float> (8.0f, 8.0f).withCentre ({ (float) getWidth() - 9.0f, 9.0f }));
     }
 }

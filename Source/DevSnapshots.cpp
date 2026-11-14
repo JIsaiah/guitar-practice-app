@@ -12,6 +12,7 @@
 #include "UI/SessionSetupScreen.h"
 #include "UI/SettingsPanel.h"
 #include "UI/RadialMenu.h"
+#include "UI/Icons.h"
 #include "UI/DebugLogPanel.h"
 #include "AppLog.h"
 #include "UI/TunerPanel.h"
@@ -187,6 +188,11 @@ juce::String DevSnapshots::renderAll (const juce::File& folder)
                     log << "wrote " << file.getFullPathName() << "\n";
             };
 
+            // アプリのアイコン (実行ファイルのアイコンは、これを Resources/AppIcon/app-icon.png に写して使う)。
+            // エクスプローラーで見える exe のアイコンは黒 (作者の指示)。ウィンドウのアイコンはテーマのアクセントの色 (Main.cpp)
+            if (savePng (Icons::renderAppIcon (512, juce::Colours::black), folder.getChildFile ("app-icon.png")))
+                log << "wrote app-icon.png\n";
+
             // 数字の入力の確かめ (画面ではなく、部品の動きをまねて、結果を log.txt に書く)
             {
                 // ずらし: 欄に「25」と入れて Enter → onChange に 25 が来る
@@ -259,6 +265,15 @@ juce::String DevSnapshots::renderAll (const juce::File& folder)
                 snap (practice, 1280, 800, "practice" + suffix);
                 snap (practice, 1920, 1080, "practice_wide" + suffix);   // 大きな画面: 下の帯の余白がグループの間に分かれるか
                 practice.setSize (1280, 800);
+
+                // PDF のタブ譜: リード・バッキング (PDF の1つ目・2つ目) の右に「1ページ ○ 小節」
+                {
+                    Session pdfSession = session;
+                    pdfSession.scorePath = "C:/Tabs/hotel-california.pdf";
+                    pdfSession.pdfBackingPath = "C:/Tabs/hotel-california-backing.pdf";
+                    SessionScreen pdfScreen (engine, store, theme, appSettings, youtube, scoreViewer, pdfSession);
+                    snap (pdfScreen, 1280, 800, "practice_pdf" + suffix);
+                }
 
                 // ローカル音源をタブ譜と入れ替えたとき: 左の大きな枠に時刻と音源の名前
                 {

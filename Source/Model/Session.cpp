@@ -86,6 +86,8 @@ juce::var Session::toVar() const
         { "created",     created.toMilliseconds() > 0 ? created.toISO8601 (true) : juce::String() },
         { "source",   source },
         { "score",    makeObject ({ { "path", scorePath }, { "track_index", scoreTrackIndex },
+                                    { "pdf_bars_per_page", pdfBarsPerPage },
+                                    { "pdf_backing_path", pdfBackingPath },
                                     // リード・バッキング
                                     { "lead_track", leadTrack }, { "backing_track", backingTrack },
                                     { "active", backingActive ? "backing" : "lead" },
@@ -151,6 +153,8 @@ Session Session::fromVar (const juce::var& value)
     const auto& score = value["score"];
     s.scorePath = getOr<juce::String> (score["path"], {});
     s.scoreTrackIndex = getOr<int> (score["track_index"], 0);
+    s.pdfBarsPerPage = juce::jlimit (1, maxPdfBarsPerPage, getOr<int> (score["pdf_bars_per_page"], 24));
+    s.pdfBackingPath = getOr<juce::String> (score["pdf_backing_path"], {});
 
     const auto& tempo = value["tempo"];
     s.bpm = getOr<double> (tempo["bpm"], 120.0);
@@ -219,4 +223,21 @@ Session Session::fromVar (const juce::var& value)
     }
 
     return s;
+}
+
+bool Session::setScoreFiles (juce::Array<juce::File> files)
+{
+    files.removeIf ([] (const juce::File& f) { return f == juce::File(); });
+    if (files.isEmpty())
+        return false;
+
+    // ファイルを選ぶ画面は、選んだ順に返すとは限らないので、名前の順にする (01.pdf → リード、02.pdf → バッキング)
+    std::sort (files.begin(), files.end(), [] (const juce::File& a, const juce::File& b)
+               { return a.getFileName().compareNatural (b.getFileName()) < 0; });
+
+    const auto isPdf = [] (const juce::File& f) { return f.hasFileExtension ("pdf"); };
+    scorePath = files[0].getFullPathName();
+    pdfBackingPath = files.size() >= 2 && isPdf (files[0]) && isPdf (files[1]) ? files[1].getFullPathName() : juce::String();
+    backingActive = false;
+    return pdfBackingPath.isNotEmpty();
 }

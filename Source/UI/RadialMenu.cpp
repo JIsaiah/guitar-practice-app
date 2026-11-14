@@ -285,7 +285,6 @@ void RadialMenu::Window::paint (juce::Graphics& g)
     const auto text = findColour (juce::Label::textColourId);
     const auto muted = findColour (ThemeColourIds::textMuted);
     const auto accent = findColour (ThemeColourIds::accent);
-    const auto onAccent = findColour (ThemeColourIds::onAccent);
     const auto step = juce::MathConstants<float>::twoPi / (float) items.size();
 
     g.saveState();
@@ -337,7 +336,8 @@ void RadialMenu::Window::paint (juce::Graphics& g)
         const auto angle = (float) i * step;
         const auto at = centre.getPointOnCircumference (radius * 0.62f + radius * 0.05f * amount, angle);
         const auto fontSize = 22.0f + 6.0f * amount;
-        const auto colour = ! enabled ? muted : text.interpolatedWith (onAccent, amount);
+        // 選んでいる操作の名前は白 (作者の指示。アクセントの色の扇形の上で読みやすく)。選ばれ具合に合わせて、なめらかに変わる
+        const auto colour = ! enabled ? muted : text.interpolatedWith (juce::Colours::white, amount);
         g.setColour (colour);
         g.setFont (AppLookAndFeel::scaled (juce::FontOptions (fontSize, amount > 0.5f && enabled ? juce::Font::bold : juce::Font::plain)));
         g.drawFittedText (items[(size_t) i].label,

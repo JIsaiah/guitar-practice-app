@@ -48,6 +48,7 @@ $copies = @(
     @('release\nlohmann-json-LICENSE.txt',                                     'nlohmann-json-LICENSE.txt'),
     @('build\_deps\juce-src\LICENSE.md',                                       'JUCE-LICENSE.md'),
     @('Resources\Web\alphatab\alphaTab-LICENSE.txt',                           'alphaTab-LICENSE.txt'),
+    @('Resources\Web\pdfjs\pdfjs-LICENSE.txt',                                 'pdfjs-LICENSE.txt'),
     @('Resources\Web\alphatab\Bravura-OFL.txt',                                'Bravura-OFL.txt'),
     @('Resources\Web\alphatab\sonivox-LICENSE.txt',                            'sonivox-LICENSE.txt'),
     @('Resources\Fonts\OFL.txt',                                               'DelaGothicOne-OFL.txt'),

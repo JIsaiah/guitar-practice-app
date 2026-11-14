@@ -15,6 +15,10 @@ std::optional<WebResources::Resource> WebResources::findBundled (const juce::Str
         { "/alphatab/font/Bravura.woff",    BinaryData::Bravura_woff,       BinaryData::Bravura_woffSize,       "font/woff" },
         // タブ譜の音 (MIDI) の音源。SONiVOX (Apache License 2.0。Resources/Web/alphatab/sonivox-LICENSE.txt)
         { "/alphatab/soundfont/sonivox.sf2", BinaryData::sonivox_sf2,       BinaryData::sonivox_sf2Size,        "application/octet-stream" },
+        // PDF のタブ譜を描く pdf.js (Apache License 2.0。Resources/Web/pdfjs/pdfjs-LICENSE.txt)。
+        // ページから import で読むので、種類は JavaScript にする (違うと、ブラウザーが読み込みを断る)
+        { "/pdfjs/pdf.min.mjs",              BinaryData::pdf_min_mjs,        BinaryData::pdf_min_mjsSize,        "text/javascript" },
+        { "/pdfjs/pdf.worker.min.mjs",       BinaryData::pdf_worker_min_mjs, BinaryData::pdf_worker_min_mjsSize, "text/javascript" },
     };
 
     const auto clean = path.upToFirstOccurrenceOf ("?", false, false);

@@ -17,6 +17,9 @@ public:
 
     static constexpr int rowHeight = 46;
     static constexpr int numberWidth = 44;   // 番号の列の幅 (カードの「＋ 曲を追加」もこの列にそろえる)
+    // 行の中身 (番号・曲名・長さ・「ここから再生」) の左右の余白。区切り線 (24) より少し内側にする (作者の指示)。
+    // マウスを乗せた行の塗り (highlightArea) は変えない
+    static constexpr int contentInset = 36;
     int getPreferredHeight() const { return (int) setlist.entries.size() * rowHeight; }
 
     std::function<void (int entryIndex)> onPlay;

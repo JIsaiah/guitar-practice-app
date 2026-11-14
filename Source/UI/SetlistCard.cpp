@@ -168,7 +168,7 @@ void SetlistCard::paint (juce::Graphics& g)
     g.setColour (findColour (ThemeColourIds::border));
     g.fillRect (row.getX() + 24, row.getY(), row.getWidth() - 48, 1);
 
-    row = row.reduced (24, 0);
+    row = row.reduced (SetlistEntryList::contentInset, 0);
     g.setColour (adding ? findColour (ThemeColourIds::accent) : findColour (juce::Label::textColourId));
     g.setFont (AppLookAndFeel::scaled (juce::FontOptions (18.0f, juce::Font::bold)));
     g.drawText ("+", row.removeFromLeft (SetlistEntryList::numberWidth), juce::Justification::centredLeft);

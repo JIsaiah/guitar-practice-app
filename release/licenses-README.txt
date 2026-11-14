@@ -8,6 +8,7 @@ suguhiku.exe には、次のものが含まれています。各ライセンス�
 |-------------------------------|------------------------------|-------------------------------------|--------------------------|
 | JUCE 8                        | アプリの土台（音・画面）     | AGPL v3                             | JUCE-LICENSE.md          |
 | alphaTab 1.8.4                | タブ譜の表示・再生           | Mozilla Public License 2.0          | alphaTab-LICENSE.txt     |
+| pdf.js 5.4.624 (Mozilla)      | PDF のタブ譜の表示           | Apache License 2.0                  | pdfjs-LICENSE.txt        |
 | Bravura（フォント）           | タブ譜の記号                 | SIL Open Font License 1.1           | Bravura-OFL.txt          |
 | SONiVOX SoundFont             | タブ譜の音                   | Apache License 2.0                  | sonivox-LICENSE.txt      |
 | Dela Gothic One（フォント）   | デスメタルモードの文字       | SIL Open Font License 1.1           | DelaGothicOne-OFL.txt    |

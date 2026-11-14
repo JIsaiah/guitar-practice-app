@@ -42,7 +42,7 @@ juce::Rectangle<int> SetlistEntryList::highlightArea (juce::Rectangle<int> row)
 
 juce::Rectangle<int> SetlistEntryList::playButtonArea (int row) const
 {
-    return { getWidth() - 24 - 120, row * rowHeight + 8, 120, rowHeight - 16 };
+    return { getWidth() - contentInset - 120, row * rowHeight + 8, 120, rowHeight - 16 };
 }
 
 int SetlistEntryList::insertIndexAt (int y) const
@@ -76,7 +76,7 @@ void SetlistEntryList::paint (juce::Graphics& g)
         if (i > 0)
             g.fillRect (row.getX() + 24, row.getY(), row.getWidth() - 48, 1);
 
-        row = row.reduced (24, 0);
+        row = row.reduced (contentInset, 0);
         const auto found = library.contains (entry.sessionId);
 
         g.setColour (text);

@@ -27,7 +27,7 @@ namespace
         slider.updateText();
     }
 
-    const char* const scoreFilePatterns = "*.gp;*.gpx;*.gp5;*.gp4;*.gp3;*.musicxml;*.xml";
+    const char* const scoreFilePatterns = "*.gp;*.pdf;*.gpx;*.gp5;*.gp4;*.gp3;*.musicxml;*.xml";   // .pdf も (作者の指示)
     const char* const audioFilePatterns = "*.mp3;*.wav;*.flac;*.ogg;*.aif;*.aiff";
 }
 
@@ -36,8 +36,7 @@ SessionScreen::SessionScreen (AudioEngine& e, SessionStore& s, ThemeManager& t, 
                               SessionOpenContext context, PlaybackSettingsResolver resolver)
     : engine (e), store (s), theme (t), youtube (yt), scoreViewer (sv), settings (appSettings),
       session (std::move (sessionToOpen)), openContext (std::move (context)), settingsResolver (std::move (resolver)),
-      saveButton (t),
-      tapButton (t), tunerButton (t), metronomeButton (t), loopButton (t)
+      tapButton (t), metronomeButton (t), loopButton (t)
 {
     // 音源の音量は 100% まで (作者の指示。YouTube はプレイヤーの音量が 100 までなので、全部の音源で揃える)。
     // 前に 100% より大きく保存したセッションは、ここで 100% にする (開いただけで「未保存」にならないよう、控えを取る前に)
@@ -52,7 +51,8 @@ SessionScreen::SessionScreen (AudioEngine& e, SessionStore& s, ThemeManager& t, 
     backButton.setIconScale (0.5f);
     backButton.setMouseCursor (juce::MouseCursor::PointingHandCursor);
     backButton.setTooltip ("一覧に戻る"_jp);
-    saveButton.setFixedText (FixedTextId::Save, "保存"_jp);
+    saveButton.setTooltip ("保存 (Ctrl+S)"_jp);
+    saveButton.setIconScale (0.5f);
     settingsButton.setTooltip ("設定"_jp);
     settingsButton.setIconScale (0.5f);
     backButton.onClick = [this] { perform (Command::backToList); };
@@ -80,7 +80,7 @@ SessionScreen::SessionScreen (AudioEngine& e, SessionStore& s, ThemeManager& t, 
     {
         b->setClickingTogglesState (true);
         b->setRadioGroupId (2);
-        b->onRightClick = [this] { chooseParts (false); };
+        b->onRightClick = [this, b] { if (session.isPdfScore()) showPdfPartMenu (b == &backingButton); else chooseParts (false); };
     }
     // ラジオボタンは「オフになった」ときにも onClick が来るので、オンになったときだけ切り替える (音色のボタンと同じ)
     leadButton.onClick = [this] { if (leadButton.getToggleState()) switchPart (false, true); };
@@ -351,6 +351,25 @@ SessionScreen::SessionScreen (AudioEngine& e, SessionStore& s, ThemeManager& t, 
     scoreOffsetLabel.setText ("タブ譜だけ"_jp, juce::dontSendNotification);
     scoreOffsetLabel.setTooltip ("タブ譜のカーソルだけをずらします (メトロノームと音源は合っているのに、タブ譜がずれるとき)"_jp);
     offsetLabel.setText ("拍の位置"_jp, juce::dontSendNotification);
+    // PDF のタブ譜: 1ページで何小節進むか (作者の指示: 針は BPM に合わせて上から下へ流れる)
+    pdfBarsLabel.setText ("1ページ"_jp, juce::dontSendNotification);
+    pdfBarsLabel.setJustificationType (juce::Justification::centredRight);
+    pdfBarsLabel.setTooltip ("PDF のタブ譜で、針が1ページを何小節で進むか (4/4 とみなします)。針が速すぎたら増やし、遅すぎたら減らします"_jp);
+    pdfBarsSlider.setRange (1.0, (double) Session::maxPdfBarsPerPage, 1.0);
+    pdfBarsSlider.setTextValueSuffix (" 小節"_jp);
+    pdfBarsSlider.setTextBoxStyle (juce::Slider::TextBoxLeft, false, 70, 24);
+    pdfBarsSlider.setIncDecButtonsMode (juce::Slider::incDecButtonsNotDraggable);
+    pdfBarsSlider.setValue (session.pdfBarsPerPage, juce::dontSendNotification);
+    pdfBarsSlider.setTooltip (pdfBarsLabel.getTooltip());
+    pdfBarsSlider.setMouseClickGrabsKeyboardFocus (false);
+    pdfBarsSlider.onValueChange = [this]
+    {
+        session.pdfBarsPerPage = juce::roundToInt (pdfBarsSlider.getValue());
+        scoreViewer.setPdfBarsPerPage (session.pdfBarsPerPage);
+    };
+    addChildComponent (pdfBarsLabel);
+    addChildComponent (pdfBarsSlider);
+
     scoreStartButton.onClick = [this] { setScoreStartHere(); };
     scoreStartButton.onRightClick = [this]
     {
@@ -397,7 +416,8 @@ SessionScreen::SessionScreen (AudioEngine& e, SessionStore& s, ThemeManager& t, 
     loopStartButton.setTooltip ("今の位置にいちばん近い小節の頭を、くり返しの始まり (A) にします"_jp);
     loopEndButton.setTooltip ("今弾いている小節を、くり返しの最後 (B) にします。その小節の終わりまで弾いてから A に戻ります"_jp);
     loopButton.setFixedText (FixedTextId::Loop, "繰り返す"_jp);
-    tunerButton.setFixedText (FixedTextId::Tuner, "チューナー"_jp);
+    tunerButton.setTooltip ("チューナー"_jp);
+    tunerButton.setIconScale (0.5f);
 
     toStartButton.setIconScale (0.45f);
     forwardButton.setIconAfterText (true);   // 「1小節 ▶▶」(作者のレイアウト)
@@ -897,21 +917,23 @@ void SessionScreen::loadScore()
     scoreViewer.onError = [this] (const juce::String& message) { setStatus ("タブ譜: "_jp + message); };
 
     scoreViewer.setColours (theme.getPalette());
-    scoreViewer.load (juce::File (session.scorePath), session.scoreTrackIndex);
+    scoreViewer.load (currentScoreFile(), session.scoreTrackIndex);
     updateScoreUi();
 }
 
 void SessionScreen::chooseScoreFile()
 {
     fileChooser = std::make_unique<juce::FileChooser> ("タブ譜ファイルを選ぶ"_jp, juce::File(), scoreFilePatterns);
-    fileChooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+    // PDF は2つまで選べる (作者の指示: 1つ目がリード、2つ目がバッキング)
+    fileChooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles
+                                  | juce::FileBrowserComponent::canSelectMultipleItems,
                               [safe = juce::Component::SafePointer (this)] (const juce::FileChooser& chooser)
     {
-        const auto file = chooser.getResult();
-        if (safe == nullptr || file == juce::File())
+        const auto files = chooser.getResults();
+        if (safe == nullptr || files.isEmpty())
             return;
 
-        safe->session.scorePath = file.getFullPathName();
+        const auto twoPdfs = safe->session.setScoreFiles (files);
         safe->session.scoreTrackIndex = 0;
         safe->resetParts();   // 別のタブ譜なので、リード・バッキングは決め直す
 
@@ -946,12 +968,71 @@ void SessionScreen::chooseScoreFile()
             safe->session.tempoOrigin = TempoOrigin::score;
             safe->setStatus ("タブ譜のテンポ (BPM "_jp + juce::String (juce::roundToInt (tempo)) + ") にしました"_jp);
         };
+
+        if (twoPdfs)
+            safe->setStatus ("PDF を2つ入れました (リード: "_jp + juce::File (safe->session.scorePath).getFileName()
+                             + "、バッキング: "_jp + juce::File (safe->session.pdfBackingPath).getFileName() + ")");
+    });
+}
+
+// PDF のリード (1つ目)・バッキング (2つ目) の PDF を選ぶ。表示もそのパートに切り替える
+void SessionScreen::choosePdfPart (bool backing)
+{
+    fileChooser = std::make_unique<juce::FileChooser> (backing ? "バッキングの PDF を選ぶ"_jp : "リードの PDF を選ぶ"_jp,
+                                                       juce::File (session.scorePath).getParentDirectory(), "*.pdf");
+    fileChooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+                              [safe = juce::Component::SafePointer (this), backing] (const juce::FileChooser& chooser)
+    {
+        const auto file = chooser.getResult();
+        if (safe == nullptr || file == juce::File() || ! file.hasFileExtension ("pdf") || ! safe->session.isPdfScore())
+            return;
+
+        // 選んだ PDF を読み込んで表示し、そのパートに切り替える (プリセットの音色・知らせは switchPart)
+        (backing ? safe->session.pdfBackingPath : safe->session.scorePath) = file.getFullPathName();
+        safe->session.backingActive = backing;
+        safe->scoreViewer.load (safe->currentScoreFile(), 0);
+        safe->updateScoreUi();
+        safe->switchPart (backing, true);
+    });
+}
+
+void SessionScreen::showPdfPartMenu (bool backing)
+{
+    juce::PopupMenu menu;
+    if (backing)
+    {
+        menu.addItem (1, session.hasPdfBacking() ? "バッキングの PDF を選び直す…"_jp : "バッキングの PDF を選ぶ…"_jp);
+        menu.addItem (2, "バッキングの PDF を外す"_jp, session.hasPdfBacking());
+    }
+    else
+    {
+        menu.addItem (1, "リードの PDF を選び直す…"_jp);
+    }
+
+    menu.showMenuAsync (juce::PopupMenu::Options().withMousePosition(),
+                        [safe = juce::Component::SafePointer (this), backing] (int result)
+    {
+        if (safe == nullptr)
+            return;
+
+        if (result == 1)
+            safe->choosePdfPart (backing);
+
+        if (result == 2)
+        {
+            safe->session.pdfBackingPath = {};
+            safe->session.backingActive = false;
+            safe->scoreViewer.load (safe->currentScoreFile(), 0);
+            safe->updateScoreUi();
+            safe->switchPart (false, true);
+        }
     });
 }
 
 void SessionScreen::removeScore()
 {
     session.scorePath = {};
+    session.pdfBackingPath = {};
     session.scoreTrackIndex = 0;
     resetParts();
     scoreViewer.load ({}, 0);
@@ -964,13 +1045,34 @@ void SessionScreen::updateScoreUi()
 {
     const juce::File file (session.scorePath);
     scoreRemoveButton.setEnabled (session.scorePath.isNotEmpty());
+    updatePdfUi();
 
     if (session.scorePath.isNotEmpty() && ! file.existsAsFile())
         setStatus ("タブ譜のファイルが見つかりません: "_jp + session.scorePath);
+    else if (session.hasPdfBacking() && ! juce::File (session.pdfBackingPath).existsAsFile())
+        setStatus ("バッキングの PDF が見つかりません: "_jp + session.pdfBackingPath);
 
     updateSwapUi();
     updateEmptyPrompt();
     placeWebViews();
+}
+
+// PDF のタブ譜のとき: 「小節を同じ幅に」は使えない (小節の情報が無い)。リード・バッキングは PDF の1つ目・2つ目を切り替える。
+// リード・バッキングの右に「1ページ ○ 小節」(流れる速さ) を出す。小節の操作 (ループ・戻る・進む) は、小節が無いので自動で秒単位になる
+void SessionScreen::updatePdfUi()
+{
+    const auto pdf = session.isPdfScore();
+    const auto layoutChanged = pdf != pdfBarsSlider.isVisible();
+    pdfBarsLabel.setVisible (pdf);
+    pdfBarsSlider.setVisible (pdf);
+    equalBarsButton.setEnabled (! pdf);
+
+    if (pdf)
+        scoreViewer.setPdfBarsPerPage (session.pdfBarsPerPage);
+
+    updatePartButtons();
+    if (layoutChanged)
+        resized();   // 見出しの並びが変わる
 }
 
 void SessionScreen::updateEmptyPrompt()
@@ -1291,7 +1393,7 @@ void SessionScreen::updateCountdownDisplay()
     const auto caption = waitingForSource ? "読み込み中…"_jp : number > 0 ? session.title : juce::String();
 
     // メインの枠 (左の大きな枠) に今あるものの上に出す
-    const bool scoreShown = session.scorePath.isNotEmpty() && juce::File (session.scorePath).existsAsFile();
+    const bool scoreShown = session.scorePath.isNotEmpty() && currentScoreFile().existsAsFile();
     const auto target = number == 0 && caption.isEmpty() ? CountdownTarget::none
                       : isSwapped()  ? (isYouTube() ? CountdownTarget::video : CountdownTarget::native)
                       : scoreShown   ? CountdownTarget::score
@@ -1955,6 +2057,16 @@ void SessionScreen::resetParts()
 
 void SessionScreen::setUpParts()
 {
+    // PDF: トラックは無い。リード・バッキングは PDF の1つ目・2つ目 (タブ譜の音も無いので、トラックの番号は使わない)
+    if (session.isPdfScore())
+    {
+        session.leadTrack = session.backingTrack = -1;
+        if (! session.hasPdfBacking())
+            session.backingActive = false;
+        updatePartButtons();
+        return;
+    }
+
     const auto& tracks = scoreViewer.getTracks();
     const auto valid = [&tracks] (int track) { return juce::isPositiveAndBelow (track, (int) tracks.size()); };
     const auto wasDirty = isDirty();
@@ -2079,17 +2191,40 @@ void SessionScreen::switchPart (bool backing, bool fromUser)
     // 切り替えるだけで「保存しますか？」と聞かれないよう、ほかに変更が無ければ「保存済み」のままにする
     const auto wasDirty = isDirty();
 
-    if (backing && session.backingTrack < 0)
-        backing = false;
-    if (! backing && session.leadTrack < 0 && session.backingTrack >= 0)
-        backing = true;   // バッキングだけ
-
-    session.backingActive = backing;
-
-    if (const auto track = activePartTrack(); track >= 0 && track != session.scoreTrackIndex)
+    if (session.isPdfScore())
     {
-        session.scoreTrackIndex = track;
-        scoreViewer.showTrack (track);
+        // PDF: バッキングの PDF がまだ無ければ、選んでもらう (選んだら、そのまま切り替わる)
+        if (backing && ! session.hasPdfBacking())
+        {
+            updatePartButtons();   // 押してオンになったボタンを戻す
+            if (fromUser)
+                choosePdfPart (true);
+            return;
+        }
+
+        // 表示する PDF が変わったら読み直す
+        const auto before = session.currentScorePath();
+        session.backingActive = backing;
+        if (session.currentScorePath() != before)
+        {
+            scoreViewer.load (currentScoreFile(), 0);
+            updateScoreUi();
+        }
+    }
+    else
+    {
+        if (backing && session.backingTrack < 0)
+            backing = false;
+        if (! backing && session.leadTrack < 0 && session.backingTrack >= 0)
+            backing = true;   // バッキングだけ
+
+        session.backingActive = backing;
+
+        if (const auto track = activePartTrack(); track >= 0 && track != session.scoreTrackIndex)
+        {
+            session.scoreTrackIndex = track;
+            scoreViewer.showTrack (track);
+        }
     }
 
     // そのパートに割り当てたプリセットの音色にする
@@ -2135,6 +2270,22 @@ void SessionScreen::updatePartButtons()
         resized();
 
     const auto& tracks = scoreViewer.getTracks();
+
+    // PDF: リードは1つ目の PDF、バッキングは2つ目の PDF。バッキングが無くても押せる (押すと PDF を選ぶ)
+    if (session.isPdfScore())
+    {
+        const auto showingBacking = session.hasPdfBacking() && session.backingActive;
+        leadButton.setEnabled (true);
+        backingButton.setEnabled (true);
+        leadButton.setToggleState (! showingBacking, juce::dontSendNotification);
+        backingButton.setToggleState (showingBacking, juce::dontSendNotification);
+        leadButton.setTooltip ("リード: "_jp + juce::File (session.scorePath).getFileName() + "。右クリックで PDF を選び直せます"_jp);
+        backingButton.setTooltip (session.hasPdfBacking()
+                                      ? "バッキング: "_jp + juce::File (session.pdfBackingPath).getFileName() + "。右クリックで選び直す・外す"_jp
+                                      : "バッキングの PDF がありません。押すと選べます"_jp);
+        return;
+    }
+
     // タブ譜が無ければどちらも選ばない。タブ譜があれば、どちらか (今のパート) が必ず選ばれている
     const auto hasScore = session.scorePath.isNotEmpty();
     const auto hasLead = hasScore && session.leadTrack >= 0;
@@ -2216,7 +2367,7 @@ void SessionScreen::stepPreset (int direction)
 std::vector<RadialMenu::Item> SessionScreen::makeRadialItems()
 {
     const bool hasLoop = session.loopEndMs > session.loopStartMs;
-    const bool hasTwoParts = session.leadTrack >= 0 && session.backingTrack >= 0;
+    const bool hasTwoParts = (session.leadTrack >= 0 && session.backingTrack >= 0) || session.hasPdfBacking();
     bool hasPresets = false;
     for (const auto& slot : session.toneSlots)
         hasPresets = hasPresets || ! slot.isEmpty();
@@ -2350,7 +2501,7 @@ void SessionScreen::updateLoading()
         return;
 
     // タブ譜: 描き終えた (ファイルが無い・タブ譜が無いなら待たない)
-    const auto scoreFile = juce::File (session.scorePath);
+    const auto scoreFile = currentScoreFile();
     const bool scoreReady = session.scorePath.isEmpty() || ! scoreFile.existsAsFile() || scoreViewer.isRendered();
 
     // 音源: 再生できる・読めなかった (音源が無いなら待たない)
@@ -2825,8 +2976,8 @@ void SessionScreen::timerCallback()
     }
 
     const auto dirty = isDirty();
-    saveButton.setFixedText (FixedTextId::Save, dirty ? "保存 *"_jp : "保存"_jp);
-    saveButton.setMarked (dirty);   // デスメタルモードでは * の代わりに印を出す
+    saveButton.setMarked (dirty);   // 未保存の変更があると、右上に印
+    saveButton.setTooltip (dirty ? "保存 (Ctrl+S)。保存していない変更があります"_jp : "保存 (Ctrl+S)"_jp);
 
     // キー操作 (Space・←→) を受け取れるようにしておく。
     // ダイアログを閉じたあとなどで、アプリのウィンドウにはフォーカスがあるのに、どの部品も持っていないときに取り戻す。
@@ -2926,7 +3077,7 @@ void SessionScreen::placeWebViews()
     else
         youtube.hide();
 
-    if (session.scorePath.isNotEmpty() && juce::File (session.scorePath).existsAsFile() && canShow && scoreTargetVisible)
+    if (session.scorePath.isNotEmpty() && currentScoreFile().existsAsFile() && canShow && scoreTargetVisible)
         scoreViewer.placeOver (scoreTarget);
     else
         scoreViewer.hide();
@@ -2945,9 +3096,9 @@ void SessionScreen::resized()
     top.removeFromLeft (16);
     settingsButton.setBounds (top.removeFromRight (44));   // 正方形 (上の帯の高さ)
     top.removeFromRight (8);
-    saveButton.setBounds (top.removeFromRight (100));
+    saveButton.setBounds (top.removeFromRight (44));    // 正方形のアイコン (設定と同じ。作者の指示)
     top.removeFromRight (8);
-    tunerButton.setBounds (top.removeFromRight (110));
+    tunerButton.setBounds (top.removeFromRight (44));
     top.removeFromRight (12);
     helpButton.setBounds (top.removeFromRight (40).withSizeKeepingCentre (40, 40));
     top.removeFromRight (12);
@@ -3282,9 +3433,20 @@ void SessionScreen::resized()
     // 右寄せで「小節を同じ幅に・動画と入れ替え・タブ譜を選択・タブ譜を外す」。左はタブ譜の名前
     // (作者のレイアウトの左の「リード」「バッキング」は、タブ譜の切り替えを作るときに置く)
     auto scoreHeader = area.removeFromTop (34);
-    leadButton.setBounds (scoreHeader.removeFromLeft (90).reduced (0, 2));
-    scoreHeader.removeFromLeft (6);
-    backingButton.setBounds (scoreHeader.removeFromLeft (90).reduced (0, 2));
+    {
+        auto partsArea = scoreHeader.removeFromLeft (90 + 6 + 90);
+        leadButton.setBounds (partsArea.removeFromLeft (90).reduced (0, 2));
+        partsArea.removeFromLeft (6);
+        backingButton.setBounds (partsArea.removeFromLeft (90).reduced (0, 2));
+
+        // PDF のときは、リード・バッキングの右に「1ページ ○ 小節」(流れる速さ)
+        if (session.isPdfScore())
+        {
+            scoreHeader.removeFromLeft (12);
+            pdfBarsLabel.setBounds (scoreHeader.removeFromLeft (56));
+            pdfBarsSlider.setBounds (scoreHeader.removeFromLeft (130).reduced (0, 3));
+        }
+    }
     scoreHeader.removeFromLeft (12);
     scoreRemoveButton.setBounds (scoreHeader.removeFromRight (110).reduced (0, 2));
     scoreHeader.removeFromRight (6);

@@ -55,6 +55,16 @@ struct Session
 
     juce::String scorePath;
     int scoreTrackIndex = 0;   // 今表示しているトラック (リード・バッキングのどちらか)
+    int pdfBarsPerPage = 24;   // PDF のタブ譜: 流れる速さ (1ページで この数 × 4 小節進む。4/4 とみなす)
+    static constexpr int maxPdfBarsPerPage = 200;
+    juce::String pdfBackingPath;   // PDF のタブ譜の2枚目 (バッキング)。scorePath の PDF がリード。空 = なし
+    bool isPdfScore() const { return scorePath.endsWithIgnoreCase (".pdf"); }
+    bool hasPdfBacking() const { return isPdfScore() && pdfBackingPath.isNotEmpty(); }
+    // 今表示するタブ譜のファイル (PDF でバッキングを表示しているときは2枚目)
+    juce::String currentScorePath() const { return hasPdfBacking() && backingActive ? pdfBackingPath : scorePath; }
+    // 「タブ譜を選択」で選んだファイルを入れる。PDF を2つ選んだら、名前の順で1つ目をリード・2つ目をバッキングにする
+    // (作者の指示: PDF は2枚まで)。それ以外は1つ目だけを使う。PDF を2つ入れたら true
+    bool setScoreFiles (juce::Array<juce::File> files);
 
     // リード・バッキング (タブ譜のトラックの番号。-1 = 決めていない・なし)
     int leadTrack = -1, backingTrack = -1;

@@ -198,6 +198,11 @@ void ScoreViewer::setMidiTracks (const std::vector<MidiTrack>& midiTracks)
     send (makeCommand ("midiTracks", { { "tracks", list } }));
 }
 
+void ScoreViewer::setPdfBarsPerPage (int bars)
+{
+    send (makeCommand ("pdfBarsPerPage", { { "bars", bars } }));
+}
+
 void ScoreViewer::showTrack (int trackIndex)
 {
     send (makeCommand ("track", { { "track", trackIndex } }));

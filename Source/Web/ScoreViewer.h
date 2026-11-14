@@ -46,6 +46,9 @@ public:
     // 再生前のカウントダウンを、タブ譜の上に大きく出す。number が 0 なら消す (setlist-mode.md 7.2)
     void showCountdown (int number, const juce::String& caption = {});
 
+    // PDF のタブ譜: 1ページで何小節進むか (針が上から下へ流れる速さ)
+    void setPdfBarsPerPage (int bars);
+
     bool hasScore() const noexcept { return scoreFile.existsAsFile(); }
     bool isRendered() const noexcept { return rendered; }   // 今のタブ譜を描き終えたか (練習画面の「読み込み中…」を消すのに使う)
     double getScoreTempo() const noexcept { return scoreTempo; }

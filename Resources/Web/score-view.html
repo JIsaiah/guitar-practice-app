@@ -24,6 +24,9 @@
   #scroller::-webkit-scrollbar-button { display: none; height: 0; }
   #scroller.frozen #score { pointer-events: none; }
   #score { position: relative; }
+  /* PDF のタブ譜 (作者の指示)。ページを横幅いっぱいの画像にして縦に並べ、再生中は画面を上から下へ流す (針は出さない) */
+  #pdf { position: relative; display: none; padding: 8px 0 40vh; }
+  #pdf canvas { display: block; margin: 0 auto 12px; background: #fff; box-shadow: 0 0 0 1px var(--color-border); }
   #cursor { position: absolute; width: 3px; border-radius: 2px; background: var(--color-accent);
             opacity: 0; transition: opacity 0.15s; pointer-events: none; z-index: 5; }
   #barHighlight { position: absolute; background: var(--color-accent); opacity: 0; pointer-events: none; z-index: 4; }
@@ -43,7 +46,7 @@
 </head>
 <body>
 <div id="message">タブ譜を準備しています…</div>
-<div id="scroller"><div id="score"></div></div>
+<div id="scroller"><div id="score"></div><div id="pdf"></div></div>
 <div id="countdown"><div class="number"></div><div class="caption"></div><div class="hint">▶ をもう一度押すと、すぐに始めます</div></div>
 <script src="alphatab/alphaTab.min.js"></script>
 <script>
@@ -215,6 +218,10 @@
       case "countdown": showCountdown(cmd.number, cmd.caption); break;
       case "freeze": scroller.classList.toggle("frozen", !!cmd.on); break;   // ラジアルメニューを出している間
       case "position": receivePosition(cmd); break;
+      case "pdfBarsPerPage":
+        pdfBarsPerPage = Math.max(1, cmd.bars | 0);
+        setPosition(currentSeconds(performance.now()), timing.bpm, timing.offset);
+        break;
       case "layout":
         equalBars = !!cmd.equalBars;
         applyLayout();
@@ -280,8 +287,12 @@
       if (!r.ok) throw new Error("HTTP " + r.status);
       return r.arrayBuffer();
     }).then(function (buffer) {
+      const bytes = new Uint8Array(buffer);
+      if (isPdf(bytes)) { loadPdf(bytes); return; }
+      clearPdf();
+      document.getElementById("score").style.display = "";
       if (!api) createApi();
-      api.load(new Uint8Array(buffer), [track]);
+      api.load(bytes, [track]);
     }).catch(function (e) {
       showMessage("タブ譜のファイルを開けませんでした");
       send("error", { message: String(e) });
@@ -292,7 +303,122 @@
     score = null; barStartBeats = []; barIndex = []; scoreEndBeats = 0;
     scoreElement.innerHTML = "";
     if (api) { api.destroy(); api = null; }
+    clearPdf();
     showMessage("");
+  }
+
+  // ---- PDF のタブ譜 (作者の指示) ----
+  // PDF には「どこに何小節目があるか」の情報が無いので、小節に合わせた針・タブ譜の音 (MIDI)・小節のクリックは使わない。
+  // 再生すると、画面が BPM に合わせて一定の速さで上から下へ流れる (針は出さない。作者の指示):
+  //   1ページで (pdfBarsPerPage × 4) 小節 (4/4 とみなす) 進む。「×4」は、作者の指示で流れる速さを前の 1/4 にしたため。
+  //   今の位置 = ページの上端 + (そのページの中の拍 ÷ 1ページの拍) × ページの高さ。この位置が画面の上から 3 割に来るように流す
+  // 位置は、ほかのタブ譜と同じく、アプリの時計 (動画・音源) から届く「位置・BPM・起点」で決める。
+  // ページの絵は pdf.js (Mozilla、Apache License 2.0。pdfjs/pdfjs-LICENSE.txt) で描く。
+  // pdf.js は、ふつうは別のスレッド (Worker) で PDF を読むが、アプリのファイルの渡し方 (WebView のリソース) で
+  // Worker が使えるか分からないので、読み込みの部品をこのページで直接読み込んで使う (globalThis.pdfjsWorker)
+  const pdfElement = document.getElementById("pdf");
+  const pdfSlowdown = 4;   // 流れる速さを 1/4 にする (作者の指示)
+  let pdfDoc = null, pdfPages = [], pdfBarsPerPage = 24, pdfLoadCount = 0, pdfLib = null;
+
+  function isPdf(bytes) {
+    return bytes.length > 4 && bytes[0] === 0x25 && bytes[1] === 0x50 && bytes[2] === 0x44 && bytes[3] === 0x46;   // "%PDF"
+  }
+
+  function clearPdf() {
+    if (pdfDoc) { pdfDoc.destroy(); pdfDoc = null; }
+    pdfPages = [];
+    pdfElement.querySelectorAll("canvas").forEach(function (c) { c.remove(); });
+    pdfElement.style.display = "none";
+  }
+
+  async function loadPdfLib() {
+    if (pdfLib) return pdfLib;
+    const worker = await import("/pdfjs/pdf.worker.min.mjs");
+    globalThis.pdfjsWorker = worker;   // 読み込みの部品を、このページで直接使う (Worker を作らない)
+    pdfLib = await import("/pdfjs/pdf.min.mjs");
+    pdfLib.GlobalWorkerOptions.workerSrc = "/pdfjs/pdf.worker.min.mjs";
+    return pdfLib;
+  }
+
+  async function loadPdf(bytes) {
+    const count = ++pdfLoadCount;
+    try {
+      // 前のタブ譜 (alphaTab) を片付ける
+      if (api) { if (midiReady && api.playerState === 1) api.pause(); api.destroy(); api = null; midiReady = false; }
+      score = null; barStartBeats = []; barIndex = []; scoreEndBeats = 0;
+      scoreElement.innerHTML = "";
+      document.getElementById("score").style.display = "none";
+      clearPdf();
+
+      const lib = await loadPdfLib();
+      const doc = await lib.getDocument({ data: bytes, isEvalSupported: false }).promise;
+      if (count !== pdfLoadCount) { doc.destroy(); return; }   // 読み込んでいる間に、別のファイルが選ばれた
+      pdfDoc = doc;
+      pdfElement.style.display = "block";
+
+      // アプリに知らせる。小節・トラックは無い (アプリは、小節の操作を秒単位にする)
+      send("loaded", { title: "", artist: "", tempo: 0, bars: [], barIndex: [], endBeats: 0, sigs: [],
+                       tuning: [], tracks: [], pdf: true, pages: doc.numPages });
+      await renderPdfPages();
+      if (count !== pdfLoadCount) return;
+      showMessage("");
+      send("rendered");
+    } catch (e) {
+      if (count !== pdfLoadCount) return;
+      showMessage("PDF を開けませんでした");
+      send("error", { message: String(e && e.message ? e.message : e) });
+    }
+  }
+
+  // ページを、今の横幅に合わせて描く (横幅が変わったら描き直す)
+  let pdfRenderedWidth = 0;
+  async function renderPdfPages() {
+    if (!pdfDoc) return;
+    const width = Math.max(200, scroller.clientWidth - 24);
+    pdfRenderedWidth = width;
+    const ratio = window.devicePixelRatio || 1;
+    pdfElement.querySelectorAll("canvas").forEach(function (c) { c.remove(); });
+    pdfPages = [];
+
+    for (let n = 1; n <= pdfDoc.numPages; n++) {
+      const page = await pdfDoc.getPage(n);
+      if (!pdfDoc || width !== pdfRenderedWidth) return;   // 描いている間に片付けた・幅が変わった
+      const base = page.getViewport({ scale: 1 });
+      const viewport = page.getViewport({ scale: width / base.width * ratio });
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.floor(viewport.width);
+      canvas.height = Math.floor(viewport.height);
+      canvas.style.width = width + "px";
+      canvas.style.height = Math.floor(viewport.height / ratio) + "px";
+      pdfElement.appendChild(canvas);
+      pdfPages.push(canvas);
+      await page.render({ canvasContext: canvas.getContext("2d"), viewport: viewport, canvas: canvas }).promise;
+    }
+    setPosition(currentSeconds(performance.now()), timing.bpm, timing.offset);
+  }
+
+  let pdfResizeTimer = 0;
+  window.addEventListener("resize", function () {
+    if (!pdfDoc) return;
+    clearTimeout(pdfResizeTimer);
+    pdfResizeTimer = setTimeout(function () {
+      if (Math.abs(scroller.clientWidth - 24 - pdfRenderedWidth) > 4) renderPdfPages();
+    }, 250);
+  });
+
+  function setPdfPosition(seconds, bpm, offset) {
+    if (!pdfDoc || pdfPages.length === 0 || bpm <= 0) return;
+    const beatsPerPage = Math.max(1, pdfBarsPerPage) * 4 * pdfSlowdown;
+    const beats = (seconds - offset) * bpm / 60;
+    const pageFloat = Math.max(0, beats) / beatsPerPage;
+    const index = Math.min(pdfPages.length - 1, Math.floor(pageFloat));
+    const fraction = Math.min(1, pageFloat - index);
+    const page = pdfPages[index];
+    const y = page.offsetTop + fraction * page.offsetHeight;
+
+    // 再生中は、今の位置が画面の上から 3 割のところに来るように流す (止まっているときは、作者がスクロールしたままにする)
+    if (clock.playing)
+      scroller.scrollTop = Math.max(0, y - scroller.clientHeight * 0.3);
   }
 
   // 再生位置 (秒) から、今の小節と小節の中の位置を求めて、カーソルを動かす
@@ -454,6 +580,7 @@
   let scrolledToLine = -1;
 
   function setPosition(seconds, bpm, offset) {
+    if (pdfDoc) { setPdfPosition(seconds, bpm, offset); return; }
     if (!api || !score || !api.renderer || !api.renderer.boundsLookup || barStartBeats.length === 0) return;
 
     const beats = Math.max(0, (seconds - offset) * bpm / 60);
