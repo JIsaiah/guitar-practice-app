@@ -24,6 +24,14 @@ public:
     void paint (juce::Graphics& g) override;
     void resized() override;
 
+    // キーボード操作 (一覧画面の矢印・Enter)
+    int getNumItems() const noexcept { return (int) sessions.size(); }
+    juce::Rectangle<int> getItemBounds (int index) const { return listBox.getRowPosition (index, true) + listBox.getPosition(); }
+    juce::Rectangle<int> getListArea() const { return listBox.getBounds(); }
+    void scrollToItem (int index) { listBox.scrollToEnsureRowIsOnscreen (index); }
+    void addItem (int index);   // クリックと同じ (末尾に追加する)
+    juce::Button& getCloseButton() noexcept { return closeButton; }
+
 private:
     int getNumRows() override { return (int) sessions.size(); }
     void paintListBoxItem (int row, juce::Graphics& g, int width, int height, bool selected) override;

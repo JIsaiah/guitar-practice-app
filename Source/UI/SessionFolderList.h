@@ -23,6 +23,15 @@ public:
     void paint (juce::Graphics& g) override;
     void resized() override;
 
+    // キーボード操作 (一覧画面の矢印・Enter。SessionListScreen が使う)
+    int getNumItems() const noexcept { return (int) items.size(); }
+    juce::String getItemKey (int index) const { return juce::isPositiveAndBelow (index, (int) items.size()) ? items[(size_t) index].getKey() : juce::String(); }
+    juce::Rectangle<int> getItemBounds (int index) const;   // このリストの中の座標
+    juce::Rectangle<int> getListArea() const { return list.getBounds(); }
+    void scrollToItem (int index) { list.scrollToEnsureRowIsOnscreen (index); }
+    void chooseItem (int index) { list.selectRow (index); }   // クリックと同じ (絞り込む)
+    juce::Button& getNewButton() noexcept { return newButton; }
+
 private:
     int getNumRows() override { return (int) items.size(); }
     void paintListBoxItem (int row, juce::Graphics& g, int width, int height, bool selected) override;

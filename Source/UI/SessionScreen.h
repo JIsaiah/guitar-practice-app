@@ -164,7 +164,8 @@ private:
 
     //==== タブ譜だけで再生する (音源が無いとき。作者の指示) ====
     // 音源の代わりに ScoreClock を再生位置にする。タブ譜の針・タブ譜の音 (MIDI)・メトロノームが付いてくる
-    bool isScoreOnly() const;            // 音源が無く、タブ譜を読み込んである
+    bool isScoreOnly() const;
+    double clampToLength (double seconds) const;   // 0〜曲の長さに収める (長さが分からない PDF だけのときは 0 以上だけ)            // 音源が無く、タブ譜を読み込んである
     double getScoreLengthSeconds() const;   // タブ譜の終わりの位置 (秒。ずらしを含む)
     void updateScoreOnly (double nowMs);   // タイマーから: 始まり・終わり・ループ・メトロノームの時計
     void pauseTransport();               // 再生を止める (音源・YouTube・タブ譜の時計のどれでも)
@@ -330,10 +331,15 @@ private:
 
     // タブ譜の上の左: リード・バッキングの切り替え (作者のレイアウト。機能はまだ)
     RightClickableButton leadButton, backingButton;   // 右クリックで「トラックを選び直す」
-    // PDF のタブ譜のとき、リード・バッキングの右に出す: 画面1つ分を何小節で流すか (流れる速さ)
-    juce::Label pdfBarsLabel;
-    juce::Slider pdfBarsSlider { juce::Slider::IncDecButtons, juce::Slider::TextBoxLeft };
+    // PDF のタブ譜のとき、リード・バッキングの右に出す: タブ譜が流れる速さ (ミキサーと同じ形のスライダー。作者の指示)
+    juce::Label pdfSpeedLabel;
+    WheelSlider pdfSpeedSlider;
     void updatePdfUi();
+
+    // 下の帯の「速度」は音源の速度。音源が無い PDF のセッションでは使えない (薄くする。作者の指示)
+    bool usesPracticeSpeed() const;
+    double practiceRate() const;   // 使えないときは 1.0 (原速)
+    void updateSpeedEnabled (double nowMs);
 
     // 下部: 再生操作。「再生／速度／メトロノーム／ループ」のグループに分け、それぞれに見出しを付ける
     SectionHeading playHeading { "再生"_jp }, speedHeading { "速度"_jp },

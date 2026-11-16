@@ -263,6 +263,11 @@ juce::String DevSnapshots::renderAll (const juce::File& folder)
                 list.openFirstSetlistForSnapshot();
                 snap (list, 1280, 800, "setlists_open" + suffix);
 
+                // キーボード操作の枠 (セッションの行を選んでいる状態)
+                list.showTab (SessionListScreen::Tab::sessions);
+                list.showKeyboardNavigationForSnapshot();
+                snap (list, 1280, 800, "list_keyboard" + suffix);
+
                 SessionScreen practice (engine, store, theme, appSettings, youtube, scoreViewer, session);
                 snap (practice, 1280, 800, "practice" + suffix);
                 snap (practice, 1920, 1080, "practice_wide" + suffix);   // 大きな画面: 下の帯の余白がグループの間に分かれるか

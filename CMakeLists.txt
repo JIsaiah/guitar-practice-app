@@ -113,6 +113,7 @@ target_sources(GuitarPractice PRIVATE
     Source/Setlist/SetlistPlayer.cpp
     Source/UI/MainComponent.cpp
     Source/UI/SessionListScreen.cpp
+    Source/UI/SessionListNavigation.cpp
     Source/UI/SetlistPanel.cpp
     Source/UI/SetlistCard.cpp
     Source/UI/SetlistEntryList.cpp
@@ -223,6 +224,8 @@ target_sources(GuitarPracticeTests PRIVATE
     Tests/ScoreClockTests.cpp
     Tests/ScoreFileDataTests.cpp
     Tests/AppPathsTests.cpp
+    Tests/SessionFormatTests.cpp
+    Tests/SpatialNavigationTests.cpp
     Source/Model/Session.cpp
     Source/Model/SessionStore.cpp
     Source/Library/SessionLibrary.cpp

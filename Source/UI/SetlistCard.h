@@ -39,6 +39,13 @@ public:
 
     static constexpr int headerHeight = 72, addRowHeight = 46;
 
+    // キーボード操作 (一覧画面の矢印・Enter)
+    juce::Rectangle<int> getHeaderArea() const { return getLocalBounds().withHeight (headerHeight); }
+    juce::Rectangle<int> getAddRowBounds() const { return getAddRowArea(); }   // 開いていないときは空
+    juce::Button& getPlayButton() noexcept { return playButton; }
+    SetlistEntryList& getEntryList() noexcept { return entryList; }
+    void requestAdd() { if (onRequestAdd != nullptr) onRequestAdd(); }
+
 private:
     void save();
     void changed();   // 曲の追加・削除・並び替えのあと

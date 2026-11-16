@@ -56,8 +56,11 @@ struct Session
 
     juce::String scorePath;
     int scoreTrackIndex = 0;   // 今表示しているトラック (リード・バッキングのどちらか)
-    int pdfBarsPerScreen = 12;   // PDF のタブ譜: 流れる速さ (画面1つ分の高さを この数の小節で流す。4/4 とみなす)
-    static constexpr int maxPdfBarsPerScreen = 200;
+    // PDF のタブ譜: 流れる速さ (%)。100% = 画面1つ分の高さを 12 小節 (4/4 とみなす) で流す (前の「1画面 12 小節」と同じ)。
+    // 作者の指示: 小節の数より % のほうが想像しやすい。200% で2倍の速さ
+    int pdfSpeedPercent = 100;
+    static constexpr int minPdfSpeedPercent = 10, maxPdfSpeedPercent = 400;
+    static constexpr int pdfBarsPerScreenAt100 = 12;
     juce::String pdfBackingPath;   // PDF のタブ譜の2枚目 (バッキング)。scorePath の PDF がリード。空 = なし
     bool isPdfScore() const { return scorePath.endsWithIgnoreCase (".pdf"); }
     bool hasPdfBacking() const { return isPdfScore() && pdfBackingPath.isNotEmpty(); }

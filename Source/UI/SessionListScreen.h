@@ -7,6 +7,7 @@
 #include "../Theme/MetalLogo/FixedTextButton.h"
 #include "../Library/SessionFolders.h"
 #include "../Library/SessionSort.h"
+#include "../Library/SpatialNavigation.h"
 #include "SessionFolderList.h"
 #include "Icons.h"
 #include "SessionPickerPanel.h"
@@ -39,6 +40,11 @@ public:
     void mouseUp (const juce::MouseEvent& e) override;     // 列の見出しのクリックで並び替え
     void mouseMove (const juce::MouseEvent& e) override;   // 並び替えられる見出しの上では指のカーソル
 
+    // キーボード操作 (作者の指示): 矢印で選ぶ場所を動かし、Enter で押す。選んでいる場所はアクセントの色の枠で囲み、
+    // 動かすと枠がなめらかに次の場所へ飛ぶ。マウスを押すと枠は消える (次に矢印を押すと、また出る)
+    bool keyPressed (const juce::KeyPress& key) override;
+    void showKeyboardNavigationForSnapshot();   // 開発用 (DevSnapshots): 選んでいる行に枠を出す
+
 private:
     // ListBoxModel
     // 最後に空の行を1つ足す: 一覧の右下に重ねた「＋」で、いちばん下のセッションが隠れないように (作者の指示)
@@ -51,7 +57,7 @@ private:
     // 一覧の列 (見出しと行で同じ位置を使う)
     struct Columns
     {
-        juce::Rectangle<int> title, artist, bpm, difficulty, tuning, length, lastPracticed;
+        juce::Rectangle<int> title, artist, format, bpm, difficulty, tuning, length, lastPracticed;
     };
     static Columns layoutColumns (int width, int height);
     static int starAt (const Columns& columns, int x);   // x の位置の星 (1〜5)。星の上でなければ 0
@@ -110,11 +116,52 @@ private:
     juce::Rectangle<int> headerArea;    // 一覧の列の見出し (曲名・アーティスト…)。一覧の枠の中の上
     juce::Rectangle<int> tabBar;        // 「セッション｜セットリスト」のつながった帯 (paint で面・枠・区切りの線を描く)
 
-    // タブの帯の、選んでいるほうの塗り。0 = 左 (セッション)、1 = 右 (セットリスト)。押すと、なめらかに左右に動く
+    // タブの帯の、選んでいるほうの塗り。0 = 左 (セッション)、1 = 右 (セットリスト)。
+    // 押すと、選んだほうの塗りが真ん中からぼかしながら広がって現れ (フェードイン)、前のほうは同じように消える (作者の指示)
     float tabHighlight = 0.0f, tabHighlightTarget = 0.0f;
     void timerCallback() override;
     void updateTabTextColours();   // 塗りが重なっているほうの文字を白に (動いている間は、重なり具合で混ぜる)
     juce::Rectangle<int> listPanel;     // 一覧の枠 (見出し・一覧・「＋」を囲む面)
+
+    //==== キーボード操作 (SessionListNavigation.cpp) ====
+    // 矢印で選べる場所。id は、一覧の読み直しやスクロールのあとも同じ場所を指す名前 ("row:<ファイル>" など)
+    struct NavTarget
+    {
+        juce::String id;
+        juce::Rectangle<int> bounds;          // この画面の座標 (スクロールで見えていない場所も、その位置で)
+        const juce::Component* group = nullptr;   // スクロールする入れ物 (一覧・セットリストの欄)。無ければ nullptr
+        bool visible = true;                  // 入れ物の中で見えているか
+        std::function<void()> reveal;         // 選んだとき (見えるところまでスクロールする・行を選ぶ)
+        std::function<void()> activate;       // Enter
+    };
+    std::vector<NavTarget> collectNavTargets();
+    void moveNavigation (SpatialNavigation::Direction direction);
+    void selectNavTarget (const NavTarget& target);
+    void hideNavigation();
+    std::optional<juce::Rectangle<float>> findNavTargetBounds();   // 今選んでいる場所 (無くなっていれば無し)
+    void stepNavigationRing();   // 画面の書き換えの合図ごとに、経過時間から枠の場所を決める
+    void paintNavigationRing (juce::Graphics& g);
+    void revealInViewport (juce::Viewport& viewport, juce::Rectangle<int> boundsInScreen);
+    void keepKeyboardFocus();    // キーの入力を、中のボタンや一覧ではなくこの画面で受け取る
+
+    bool navVisible = false;
+    juce::String navId;
+    juce::Rectangle<float> navRing;       // 今描いている枠
+    juce::Rectangle<float> navMoveFrom;   // 飛び始めた場所
+    double navMoveStartMs = 0.0, navShownAtMs = 0.0;
+    static constexpr double navMoveDurationMs = 180.0;   // 飛ぶのにかかる時間
+    float navAlpha = 0.0f;                // 出るときに、ふわっと濃くする
+    std::unique_ptr<juce::VBlankAttachment> navVBlank;   // 枠が出ている間だけ
+
+    // 画面のどこかでマウスが押されたら、枠を消し、キーの入力をこの画面へ戻す
+    struct NavMouseWatcher final : juce::MouseListener
+    {
+        explicit NavMouseWatcher (SessionListScreen& o) : owner (o) {}
+        void mouseDown (const juce::MouseEvent&) override { owner.hideNavigation(); owner.keepKeyboardFocus(); }
+        void mouseUp (const juce::MouseEvent&) override   { owner.keepKeyboardFocus(); }
+        SessionListScreen& owner;
+    };
+    NavMouseWatcher navMouseWatcher { *this };
     std::unique_ptr<juce::AlertWindow> detailsWindow;   // 「詳細を編集…」のダイアログ
     std::unique_ptr<juce::AlertWindow> folderNameWindow;   // フォルダの名前を入れるダイアログ
 };

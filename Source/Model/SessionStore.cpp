@@ -1,6 +1,7 @@
 #include "SessionStore.h"
 #include "../Text.h"
 #include "../AppPaths.h"
+#include "../Library/SessionFormat.h"
 
 SessionStore::SessionStore()
     : SessionStore (AppPaths::documentsFolder().getChildFile ("Sessions"))
@@ -31,6 +32,7 @@ std::vector<SessionStore::Entry> SessionStore::list() const
         entry.lengthSeconds = (double) parsed["source"]["length_sec"];
         entry.artist = parsed["artist"].toString();
         entry.tuning = parsed["tuning"].toString();
+        entry.format = SessionFormat::describe (parsed["score"]["path"].toString(), parsed["source"]["type"].toString());
         entry.folder = parsed["folder"].toString();
         entry.bpm = (double) parsed["tempo"]["bpm"];
         entry.difficulty = juce::jlimit (0, Session::maxDifficulty, (int) parsed["difficulty"]);

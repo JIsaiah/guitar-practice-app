@@ -70,6 +70,11 @@ void SessionFolderList::paintListBoxItem (int row, juce::Graphics& g, int width,
     g.drawText (item.getLabel(), area, juce::Justification::centredLeft, true);
 }
 
+juce::Rectangle<int> SessionFolderList::getItemBounds (int index) const
+{
+    return list.getRowPosition (index, true) + list.getPosition();
+}
+
 void SessionFolderList::selectedRowsChanged (int row)
 {
     if (! updating && juce::isPositiveAndBelow (row, (int) items.size()) && onSelect != nullptr)

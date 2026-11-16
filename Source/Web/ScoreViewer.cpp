@@ -198,9 +198,9 @@ void ScoreViewer::setMidiTracks (const std::vector<MidiTrack>& midiTracks)
     send (makeCommand ("midiTracks", { { "tracks", list } }));
 }
 
-void ScoreViewer::setPdfBarsPerScreen (int bars)
+void ScoreViewer::setPdfSpeedPercent (int percent)
 {
-    send (makeCommand ("pdfBarsPerScreen", { { "bars", bars } }));
+    send (makeCommand ("pdfSpeed", { { "percent", percent } }));
 }
 
 void ScoreViewer::setPdfRepeats (const juce::var& repeats, double pendingStart)
@@ -287,6 +287,14 @@ void ScoreViewer::handleEvent (const juce::var& event)
     {
         if (onBarClicked != nullptr)
             onBarClicked ((double) event["beats"]);
+        return;
+    }
+
+    // ページの上でマウスが押された: 開いているアプリのメニューを閉じる (ふつうは「メニューの外を押した」で閉じるが、
+    // ページは別の窓なので、JUCE は押されたことに気づかない)。右クリックなら、このあとで新しいメニューが開く
+    if (type == "pagePointerDown")
+    {
+        juce::PopupMenu::dismissAllActiveMenus();
         return;
     }
 

@@ -12,6 +12,11 @@ SessionListScreen::SessionListScreen (SessionLibrary& l, SetlistStore& sl, Theme
       sessionsTab (t), setlistsTab (t),
       setlistPanel (l, sl, t, a)
 {
+    // キーボード操作 (矢印・Enter) をこの画面で受け取る。マウスを押したら枠を消す (SessionListNavigation.cpp)
+    setWantsKeyboardFocus (true);
+    addMouseListener (&navMouseWatcher, true);
+    keepKeyboardFocus();
+
     // タブ (setlist-mode.md 4.1)。最後に開いていたタブを覚えておく
     sessionsTab.setFixedText (FixedTextId::Sessions, "セッション"_jp);
     setlistsTab.setFixedText (FixedTextId::Setlists, "セットリスト"_jp);
@@ -90,6 +95,7 @@ SessionListScreen::SessionListScreen (SessionLibrary& l, SetlistStore& sl, Theme
 
 SessionListScreen::~SessionListScreen()
 {
+    removeMouseListener (&navMouseWatcher);
     theme.removeChangeListener (this);
 }
 
@@ -109,7 +115,7 @@ void SessionListScreen::showTab (Tab tab)
     sessionsTab.setToggleState (sessions, juce::dontSendNotification);
     setlistsTab.setToggleState (! sessions, juce::dontSendNotification);
 
-    // 選んでいるほうの塗りを、なめらかに動かす (画面が出ていないとき (起動時など) は、すぐにその位置へ)
+    // 選んだほうの塗りを、なめらかにフェードインする (画面が出ていないとき (起動時など) は、すぐにその状態へ)
     tabHighlightTarget = sessions ? 0.0f : 1.0f;
     if (isShowing())
     {
@@ -134,16 +140,19 @@ void SessionListScreen::showTab (Tab tab)
 
 void SessionListScreen::timerCallback()
 {
-    // 目標に向かって、残りの距離の 3 割ずつ近づく (はじめ速く、終わりはゆっくり。0.2 秒ほどで着く)
-    tabHighlight += (tabHighlightTarget - tabHighlight) * 0.3f;
-    if (std::abs (tabHighlightTarget - tabHighlight) < 0.004f)
+    // タブの塗り: 目標に向かって、残りの 2 割ずつ近づく (はじめ速く、終わりはゆっくり。0.3 秒ほどで着く)
+    if (! juce::exactlyEqual (tabHighlight, tabHighlightTarget))
     {
-        tabHighlight = tabHighlightTarget;
-        stopTimer();
+        tabHighlight += (tabHighlightTarget - tabHighlight) * 0.2f;
+        if (std::abs (tabHighlightTarget - tabHighlight) < 0.004f)
+            tabHighlight = tabHighlightTarget;
+
+        updateTabTextColours();
+        repaint (tabBar.expanded (2));
     }
 
-    updateTabTextColours();
-    repaint (tabBar.expanded (2));
+    if (juce::exactlyEqual (tabHighlight, tabHighlightTarget))
+        stopTimer();
 }
 
 void SessionListScreen::updateTabTextColours()
@@ -491,13 +500,13 @@ SessionListScreen::Columns SessionListScreen::layoutColumns (int width, int heig
     auto area = juce::Rectangle<int> (0, 0, width, height).reduced (16, 0);
     Columns c;
 
-    constexpr int bpmWidth = 48, tuningWidth = 110, lengthWidth = 52, lastWidth = 96;
+    constexpr int formatWidth = 104, bpmWidth = 48, tuningWidth = 110, lengthWidth = 52, lastWidth = 96;
     constexpr int starsWidth = starSize * Session::maxDifficulty;
-    constexpr int fixedWidth = bpmWidth + starsWidth + tuningWidth + lengthWidth + lastWidth;
+    constexpr int fixedWidth = formatWidth + bpmWidth + starsWidth + tuningWidth + lengthWidth + lastWidth;
 
     // 列の間: 広ければ 36px、狭いときは縮める (曲名・アーティストに最低 340px は残す)
-    const auto gap = juce::jlimit (16, 36, (area.getWidth() - fixedWidth - 340) / 6);
-    const auto flexible = juce::jmax (160, area.getWidth() - fixedWidth - gap * 6);
+    const auto gap = juce::jlimit (16, 36, (area.getWidth() - fixedWidth - 340) / 7);
+    const auto flexible = juce::jmax (160, area.getWidth() - fixedWidth - gap * 7);
     const auto titleWidth = juce::jmin (440, flexible * 6 / 10);
     const auto artistWidth = juce::jmin (280, flexible - titleWidth);
 
@@ -510,6 +519,7 @@ SessionListScreen::Columns SessionListScreen::layoutColumns (int width, int heig
 
     c.title = take (titleWidth);
     c.artist = take (artistWidth);
+    c.format = take (formatWidth);   // 形式 (作者の指示: アーティストと BPM の間)
     c.bpm = take (bpmWidth);
     c.difficulty = take (starsWidth);
     c.tuning = take (tuningWidth);
@@ -548,6 +558,10 @@ void SessionListScreen::paintListBoxItem (int row, juce::Graphics& g, int width,
     g.setFont (AppLookAndFeel::scaled (juce::FontOptions (14.0f)));
     g.setColour (entry.artist.isEmpty() ? muted : textColour);
     g.drawText (entry.artist.isEmpty() ? "—"_jp : entry.artist, columns.artist, juce::Justification::centredLeft);
+
+    // 形式: タブ譜のファイルの種類 (.gp・.pdf …)、無ければ音源の種類 (URL・ローカルファイル)
+    g.setColour (muted);
+    g.drawText (entry.format, columns.format, juce::Justification::centredLeft);
 
     g.setColour (textColour);
     g.drawText (entry.bpm > 0.0 ? juce::String (juce::roundToInt (entry.bpm)) : "—"_jp, columns.bpm,
@@ -734,7 +748,8 @@ void SessionListScreen::paint (juce::Graphics& g)
     g.fillAll (getLookAndFeel().findColour (juce::ResizableWindow::backgroundColourId));
 
     // タブの帯: 「セッション｜セットリスト」を1本の帯にし、真ん中に区切りの線 (作者のレイアウト)。
-    // 選んでいるほうは、帯の半分をすき間なく塗る (帯と同じ角の丸み)。押すと左右になめらかに動く
+    // 選んでいるほうは、帯の半分をすき間なく塗る (帯と同じ角の丸み)。
+    // 押すと、選んだほうの塗りが後ろからぼかしで広がるように現れ、前のほうは同じように消える (作者の指示)
     {
         const auto bar = tabBar.toFloat();
         g.setColour (findColour (ThemeColourIds::panel));
@@ -743,8 +758,44 @@ void SessionListScreen::paint (juce::Graphics& g)
         g.fillRect (juce::Rectangle<float> (bar.getCentreX() - 0.5f, bar.getY() + 12.0f, 1.0f, bar.getHeight() - 24.0f));
 
         const auto half = bar.getWidth() / 2.0f;
-        g.setColour (sessionsTab.findColour (juce::TextButton::buttonOnColourId));
-        g.fillRoundedRectangle (bar.withWidth (half).withX (bar.getX() + half * tabHighlight), 8.0f);
+        const auto fill = sessionsTab.findColour (juce::TextButton::buttonOnColourId);
+
+        // amount: 0 = 塗らない、1 = すき間なく塗る。途中は、真ん中の塗り (小さめ) の周りに、薄い輪を何枚も重ねてぼかす。
+        // 輪を重ねるほど濃くなるので、1枚の濃さは「重ねると amount になる」値にする (外側ほど重なりが少なく、薄い)
+        const auto paintFill = [&] (juce::Rectangle<float> area, float amount)
+        {
+            if (amount <= 0.002f)
+                return;
+
+            if (amount >= 0.998f)
+            {
+                g.setColour (fill);
+                g.fillRoundedRectangle (area, 8.0f);
+                return;
+            }
+
+            juce::Graphics::ScopedSaveState state (g);
+            juce::Path clip;
+            clip.addRoundedRectangle (area, 8.0f);
+            g.reduceClipRegion (clip);   // ぼかしが帯の半分の外に出ないように
+
+            const auto eased = 1.0f - (1.0f - amount) * (1.0f - amount);
+            const auto spread = 0.4f + 0.6f * eased;   // 真ん中の塗りの大きさ (半分の 4 割 → いっぱい)
+            const auto core = area.withSizeKeepingCentre (area.getWidth() * spread, area.getHeight() * spread);
+            const auto feather = (1.0f - eased) * area.getHeight();   // ぼかしの幅 (広がりきると 0)
+
+            constexpr int layers = 10;
+            const auto layerAlpha = 1.0f - std::pow (1.0f - amount, 1.0f / (float) layers);
+            g.setColour (fill.withMultipliedAlpha (layerAlpha));
+            for (int i = layers; i >= 1; --i)
+            {
+                const auto grow = feather * (float) i / (float) layers;
+                g.fillRoundedRectangle (core.expanded (grow), 8.0f + grow);
+            }
+        };
+
+        paintFill (bar.withWidth (half), 1.0f - tabHighlight);
+        paintFill (bar.withWidth (half).withX (bar.getX() + half), tabHighlight);
 
         g.setColour (findColour (ThemeColourIds::border));
         g.drawRoundedRectangle (bar.reduced (0.5f), 8.0f, 1.0f);
@@ -799,6 +850,7 @@ void SessionListScreen::paint (juce::Graphics& g)
     };
     heading (columns.title, "曲名"_jp, SessionSort::Key::title, false);
     heading (columns.artist, "アーティスト"_jp, SessionSort::Key::artist, false);
+    heading (columns.format, "形式"_jp, std::nullopt, false);
     heading (columns.bpm, "BPM", std::nullopt, true);
     heading (columns.difficulty, "難易度"_jp, SessionSort::Key::difficulty, false);
     heading (columns.tuning, "チューニング"_jp, SessionSort::Key::tuning, false);
@@ -850,6 +902,8 @@ void SessionListScreen::mouseMove (const juce::MouseEvent& e)
 
 void SessionListScreen::paintOverChildren (juce::Graphics& g)
 {
+    paintNavigationRing (g);   // キーボード操作の枠 (いちばん上に描く)
+
     if (currentTab != Tab::sessions || ! entries.empty())
         return;
 

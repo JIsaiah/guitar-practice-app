@@ -33,9 +33,15 @@ public:
     void mouseDrag (const juce::MouseEvent& e) override;
     void mouseUp (const juce::MouseEvent& e) override;
 
+    // キーボード操作 (一覧画面の矢印・Enter)。行の番号は 0 から
+    int getNumRows() const noexcept { return (int) setlist.entries.size(); }
+    juce::Rectangle<int> getRowArea (int row) const { return highlightArea ({ 0, row * rowHeight, getWidth(), rowHeight }); }
+    juce::Rectangle<int> playButtonArea (int row) const;   // 行の右の「▶ ここから再生」
+    void openRow (int row);       // 行のクリックと同じ (単体で開く)
+    void playFromRow (int row);   // 「▶ ここから再生」と同じ
+
 private:
     int rowAt (int y) const;
-    juce::Rectangle<int> playButtonArea (int row) const;   // 行の右の「▶ ここから再生」
 public:
     static juce::Rectangle<int> highlightArea (juce::Rectangle<int> row);   // 行の塗りの範囲 (カードの「＋ 曲を追加」も同じ)
 private:

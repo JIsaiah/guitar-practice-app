@@ -108,7 +108,7 @@ juce::var Session::toVar() const
         { "created",     created.toMilliseconds() > 0 ? created.toISO8601 (true) : juce::String() },
         { "source",   source },
         { "score",    makeObject ({ { "path", scorePath }, { "track_index", scoreTrackIndex },
-                                    { "pdf_bars_per_screen", pdfBarsPerScreen },
+                                    { "pdf_speed_percent", pdfSpeedPercent },
                                     { "pdf_backing_path", pdfBackingPath },
                                     { "pdf_repeats", repeatsToVar (pdfRepeats) },
                                     { "pdf_backing_repeats", repeatsToVar (pdfBackingRepeats) },
@@ -177,7 +177,12 @@ Session Session::fromVar (const juce::var& value)
     const auto& score = value["score"];
     s.scorePath = getOr<juce::String> (score["path"], {});
     s.scoreTrackIndex = getOr<int> (score["track_index"], 0);
-    s.pdfBarsPerScreen = juce::jlimit (1, maxPdfBarsPerScreen, getOr<int> (score["pdf_bars_per_screen"], 12));
+    // 流れる速さ: 前の版は「1画面 ○ 小節」(pdf_bars_per_screen) で保存していたので、同じ速さの % に直して読む
+    if (! score["pdf_speed_percent"].isVoid())
+        s.pdfSpeedPercent = getOr<int> (score["pdf_speed_percent"], 100);
+    else if (const auto bars = getOr<int> (score["pdf_bars_per_screen"], 0); bars > 0)
+        s.pdfSpeedPercent = juce::roundToInt (100.0 * pdfBarsPerScreenAt100 / bars);
+    s.pdfSpeedPercent = juce::jlimit (minPdfSpeedPercent, maxPdfSpeedPercent, s.pdfSpeedPercent);
     s.pdfRepeats = repeatsFromVar (score["pdf_repeats"]);
     s.pdfBackingRepeats = repeatsFromVar (score["pdf_backing_repeats"]);
     s.pdfBackingPath = getOr<juce::String> (score["pdf_backing_path"], {});

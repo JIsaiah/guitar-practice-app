@@ -205,14 +205,27 @@ void SetlistEntryList::mouseUp (const juce::MouseEvent& e)
 
     // 「▶ ここから再生」: この曲から通しで再生。それ以外の場所: この曲のセッションを単体で開く
     if (playButtonArea (row).contains (e.getPosition()))
-    {
-        if (onPlay != nullptr)
-            onPlay (row);
-    }
-    else if (onOpenSession != nullptr)
-    {
+        playFromRow (row);
+    else
+        openRow (row);
+}
+
+void SetlistEntryList::openRow (int row)
+{
+    if (! juce::isPositiveAndBelow (row, (int) setlist.entries.size()) || ! library.contains (setlist.entries[(size_t) row].sessionId))
+        return;
+
+    if (onOpenSession != nullptr)
         onOpenSession (setlist.entries[(size_t) row].sessionId);
-    }
+}
+
+void SetlistEntryList::playFromRow (int row)
+{
+    if (! juce::isPositiveAndBelow (row, (int) setlist.entries.size()) || ! library.contains (setlist.entries[(size_t) row].sessionId))
+        return;
+
+    if (onPlay != nullptr)
+        onPlay (row);
 }
 
 void SetlistEntryList::showRowMenu (int row)

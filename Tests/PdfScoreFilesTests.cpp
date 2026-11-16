@@ -84,6 +84,27 @@ public:
             s.setScoreFiles ({ a });                                      // 別の PDF を選んだら消える
             expect (s.pdfRepeats.empty() && s.pdfBackingRepeats.empty());
         }
+
+        beginTest ("PDF speed: saved in %, and an older 'bars per screen' is read as the same speed");
+        {
+            Session s;
+            s.pdfSpeedPercent = 150;
+            expectEquals (Session::fromVar (s.toVar()).pdfSpeedPercent, 150);
+
+            // 前の版の保存: 1画面 24 小節 = 100% (12 小節) の半分の速さ → 50%
+            auto old = s.toVar();
+            if (auto* score = old["score"].getDynamicObject())
+            {
+                score->removeProperty ("pdf_speed_percent");
+                score->setProperty ("pdf_bars_per_screen", 24);
+            }
+            expectEquals (Session::fromVar (old).pdfSpeedPercent, 50);
+
+            // どちらも無い (PDF の前のセッション) → 100%
+            if (auto* score = old["score"].getDynamicObject())
+                score->removeProperty ("pdf_bars_per_screen");
+            expectEquals (Session::fromVar (old).pdfSpeedPercent, 100);
+        }
     }
 };
 

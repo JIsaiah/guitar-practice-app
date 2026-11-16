@@ -15,12 +15,15 @@
   /* スクロールバー: 細く、目立たない形 (作者の指示)。溝は透明で、つまみだけを丸く出す。上下の矢印は出さない。
      つまみは薄い色 (75%)。ふだんは隠し、ホイールを回したとき・スクロールバーの近くでマウスを動かしたときだけ出して、
      2 秒動かさなければ消す (下のスクリプトが scrolling を付け外しする) */
-  #scroller::-webkit-scrollbar { width: 6px; }
-  /* スクロールバーの上にマウスを乗せると太くなる (作者の指示: 引っ張りやすく) */
-  #scroller.wide::-webkit-scrollbar { width: 14px; }
-  #scroller.wide::-webkit-scrollbar-thumb { border-radius: 7px; }
+  /* スクロールバーの場所は、いつも太いときの幅 (14px) を取っておく (作者の指示: 太くなるときにタブ譜が左にずれないように)。
+     ふだんは、つまみの左 8px を透明な枠にして、右の 6px だけを塗る (background-clip)。
+     スクロールバーの上にマウスを乗せると、透明な枠をなくして 14px いっぱいに塗る (作者の指示: 引っ張りやすく) */
+  #scroller::-webkit-scrollbar { width: 14px; }
   #scroller::-webkit-scrollbar-track { background: transparent; }
-  #scroller::-webkit-scrollbar-thumb { background: transparent; border-radius: 3px; }
+  #scroller::-webkit-scrollbar-thumb { background: transparent; background-clip: padding-box;
+                                       border: 0 solid transparent; border-left-width: 8px;
+                                       border-radius: 11px 3px 3px 11px / 3px; }
+  #scroller.wide::-webkit-scrollbar-thumb { border-left-width: 0; border-radius: 7px; }
   #scroller.scrolling::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--color-border) 75%, transparent); }
   #scroller.scrolling::-webkit-scrollbar-thumb:hover,
   #scroller.scrolling::-webkit-scrollbar-thumb:active { background: color-mix(in srgb, var(--color-text-muted) 75%, transparent); }
@@ -243,8 +246,8 @@
       case "countdown": showCountdown(cmd.number, cmd.caption); break;
       case "freeze": scroller.classList.toggle("frozen", !!cmd.on); break;   // ラジアルメニューを出している間
       case "position": receivePosition(cmd); break;
-      case "pdfBarsPerScreen":
-        pdfBarsPerScreen = Math.max(1, cmd.bars | 0);
+      case "pdfSpeed":
+        pdfSpeed = Math.max(0.01, (cmd.percent | 0) / 100);
         setPosition(currentSeconds(performance.now()), timing.bpm, timing.offset);
         break;
       case "pdfRepeats":
@@ -343,7 +346,8 @@
   // ---- PDF のタブ譜 (作者の指示) ----
   // PDF には「どこに何小節目があるか」の情報が無いので、小節に合わせた針・タブ譜の音 (MIDI)・小節のクリックは使わない。
   // 再生すると、画面が BPM に合わせて一定の速さで上から下へ流れる (針は出さない。作者の指示)。
-  //   速さは「画面の高さ」で測る (作者の指示): 画面1つ分を pdfBarsPerScreen 小節 (4/4 とみなす) で流す。
+  //   速さは「画面の高さ」で測る (作者の指示): 100% で画面1つ分を 12 小節 (4/4 とみなす) で流す。
+  //   速さはアプリの「速さ ○ %」(pdfSpeed。1 = 100%) で変える (作者の指示: 小節の数より % のほうが想像しやすい)。
   //   ページの数・大きさには関係しないので、縦に長い1枚の PDF でも同じように流れる。
   //   画面の上から 3 割のところを「読んでいる線」(見えない) とし、この線が PDF の上を進む。
   //   作者が置いた繰り返し (pdfRepeats) の終わりに線が来たら、始めへ戻り、決めた回数だけ繰り返す
@@ -352,7 +356,8 @@
   // pdf.js は、ふつうは別のスレッド (Worker) で PDF を読むが、アプリのファイルの渡し方 (WebView のリソース) で
   // Worker が使えるか分からないので、読み込みの部品をこのページで直接読み込んで使う (globalThis.pdfjsWorker)
   const pdfElement = document.getElementById("pdf");
-  let pdfDoc = null, pdfPages = [], pdfBarsPerScreen = 12, pdfLoadCount = 0, pdfLib = null;
+  const pdfBarsPerScreenAt100 = 12;
+  let pdfDoc = null, pdfPages = [], pdfSpeed = 1, pdfLoadCount = 0, pdfLib = null;
   // 繰り返し: 位置は「ページの番号 (0 から) + ページの中の割合 (0〜1)」で持つ (ウィンドウの幅が変わっても同じ場所)。
   // count は弾く回数 (2 = 2回弾く = 1回戻る)。pdfPendingStart は「ここから繰り返し」だけ置いた始め (-1 = なし)
   let pdfRepeats = [], pdfPendingStart = -1;
@@ -502,9 +507,9 @@
 
   function setPdfPosition(seconds, bpm, offset) {
     if (!pdfDoc || pdfPages.length === 0 || bpm <= 0) return;
-    // 流した距離 = 拍 ÷ (画面1つ分の拍) × 画面の高さ
+    // 流した距離 = 拍 ÷ (100% のときの画面1つ分の拍) × 画面の高さ × 速さ
     const beats = Math.max(0, (seconds - offset) * bpm / 60);
-    const distance = beats / (Math.max(1, pdfBarsPerScreen) * 4) * scroller.clientHeight;
+    const distance = beats / (pdfBarsPerScreenAt100 * 4) * scroller.clientHeight * pdfSpeed;
     const y = pdfLineY(distance);
 
     // 再生中は、読んでいる線が画面の上から 3 割のところに来るように流す (止まっているときは、作者がスクロールしたままにする)
@@ -711,6 +716,9 @@
     if ((e.buttons & 3) === 3) { twoButtons = true; e.preventDefault(); }
   }, true);
   document.addEventListener("dragstart", function (e) { e.preventDefault(); }, true);
+  // アプリのメニュー (PDF の右クリックのメニューなど) は、このページ (別の窓) のクリックに気づかないので、
+  // 押したことを知らせて閉じてもらう (作者の指示: メニューの外を押したら消える)
+  document.addEventListener("pointerdown", function () { send("pagePointerDown"); }, true);
   document.addEventListener("mouseup", function (e) {
     if (twoButtons && (e.buttons & 3) === 0) setTimeout(function () { twoButtons = false; }, 0);   // click の後で戻す
   }, true);

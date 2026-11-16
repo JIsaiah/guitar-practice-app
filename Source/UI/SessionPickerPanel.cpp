@@ -53,6 +53,11 @@ void SessionPickerPanel::paintListBoxItem (int row, juce::Graphics& g, int width
 
 void SessionPickerPanel::listBoxItemClicked (int row, const juce::MouseEvent&)
 {
+    addItem (row);
+}
+
+void SessionPickerPanel::addItem (int row)
+{
     if (! juce::isPositiveAndBelow (row, (int) sessions.size()))
         return;
 

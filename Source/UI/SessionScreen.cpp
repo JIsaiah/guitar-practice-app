@@ -352,24 +352,26 @@ SessionScreen::SessionScreen (AudioEngine& e, SessionStore& s, ThemeManager& t, 
     scoreOffsetLabel.setText ("タブ譜だけ"_jp, juce::dontSendNotification);
     scoreOffsetLabel.setTooltip ("タブ譜のカーソルだけをずらします (メトロノームと音源は合っているのに、タブ譜がずれるとき)"_jp);
     offsetLabel.setText ("拍の位置"_jp, juce::dontSendNotification);
-    // PDF のタブ譜: 画面1つ分を何小節で流すか (作者の指示: 流れる速さは画面の高さで測る)
-    pdfBarsLabel.setText ("1画面"_jp, juce::dontSendNotification);
-    pdfBarsLabel.setJustificationType (juce::Justification::centredRight);
-    pdfBarsLabel.setTooltip ("PDF のタブ譜で、画面1つ分を何小節で流すか (4/4 とみなします)。速すぎたら増やし、遅すぎたら減らします。PDF の上の右クリックで繰り返しを置けます"_jp);
-    pdfBarsSlider.setRange (1.0, (double) Session::maxPdfBarsPerScreen, 1.0);
-    pdfBarsSlider.setTextValueSuffix (" 小節"_jp);
-    pdfBarsSlider.setTextBoxStyle (juce::Slider::TextBoxLeft, false, 70, 24);
-    pdfBarsSlider.setIncDecButtonsMode (juce::Slider::incDecButtonsNotDraggable);
-    pdfBarsSlider.setValue (session.pdfBarsPerScreen, juce::dontSendNotification);
-    pdfBarsSlider.setTooltip (pdfBarsLabel.getTooltip());
-    pdfBarsSlider.setMouseClickGrabsKeyboardFocus (false);
-    pdfBarsSlider.onValueChange = [this]
+    // PDF のタブ譜: 流れる速さ (%)。作者の指示: 小節の数より % のほうが想像しやすい
+    pdfSpeedLabel.setText ("タブ譜が流れる速度"_jp, juce::dontSendNotification);
+    pdfSpeedLabel.setJustificationType (juce::Justification::centredRight);
+    pdfSpeedLabel.setMinimumHorizontalScale (0.7f);   // 幅が足りないときは、文字を少し細くして収める
+    pdfSpeedLabel.setBorderSize ({ 0, 0, 0, 4 });     // 数字との間を詰める (作者の指示)
+    pdfSpeedLabel.setTooltip ("PDF のタブ譜が流れる速さ。100% は BPM に合わせた標準の速さ (画面1つ分を 12 小節) です。速すぎたら下げ、遅すぎたら上げます。PDF の上の右クリックで繰り返しを置けます"_jp);
+    // ミキサーと同じ形のスライダー (作者の指示)。範囲は 10〜400%、5% ずつ。ホイールでも 5% ずつ
+    setUpSlider (pdfSpeedSlider, (double) Session::minPdfSpeedPercent, (double) Session::maxPdfSpeedPercent, 5.0, session.pdfSpeedPercent);
+    showAsPercent (pdfSpeedSlider, 1.0);
+    pdfSpeedSlider.wheelStep = 5.0;
+    pdfSpeedSlider.setDoubleClickReturnValue (true, 100.0);
+    pdfSpeedSlider.setTooltip (pdfSpeedLabel.getTooltip());
+    pdfSpeedSlider.setMouseClickGrabsKeyboardFocus (false);
+    pdfSpeedSlider.onValueChange = [this]
     {
-        session.pdfBarsPerScreen = juce::roundToInt (pdfBarsSlider.getValue());
-        scoreViewer.setPdfBarsPerScreen (session.pdfBarsPerScreen);
+        session.pdfSpeedPercent = juce::roundToInt (pdfSpeedSlider.getValue());
+        scoreViewer.setPdfSpeedPercent (session.pdfSpeedPercent);
     };
-    addChildComponent (pdfBarsLabel);
-    addChildComponent (pdfBarsSlider);
+    addChildComponent (pdfSpeedLabel);
+    addChildComponent (pdfSpeedSlider);
 
     scoreStartButton.onClick = [this] { setScoreStartHere(); };
     scoreStartButton.onRightClick = [this]
@@ -475,7 +477,7 @@ SessionScreen::SessionScreen (AudioEngine& e, SessionStore& s, ThemeManager& t, 
     {
         session.speedPercent = (int) speedSlider.getValue();
         engine.setSpeed (session.speedPercent / 100.0);
-        scoreClock.setRate (session.speedPercent / 100.0, juce::Time::getMillisecondCounterHiRes());   // タブ譜だけのとき
+        scoreClock.setRate (practiceRate(), juce::Time::getMillisecondCounterHiRes());   // タブ譜だけのとき
 
         if (isYouTube())
         {
@@ -1162,18 +1164,19 @@ void SessionScreen::updateScoreUi()
 }
 
 // PDF のタブ譜のとき: 「小節を同じ幅に」は使えない (小節の情報が無い)。リード・バッキングは PDF の1つ目・2つ目を切り替える。
-// リード・バッキングの右に「1画面 ○ 小節」(流れる速さ) を出す。小節の操作 (ループ・戻る・進む) は、小節が無いので自動で秒単位になる
+// リード・バッキングの右に「速さ ○ %」(流れる速さ) を出す。小節の操作 (ループ・戻る・進む) は、小節が無いので自動で秒単位になる
 void SessionScreen::updatePdfUi()
 {
     const auto pdf = session.isPdfScore();
-    const auto layoutChanged = pdf != pdfBarsSlider.isVisible();
-    pdfBarsLabel.setVisible (pdf);
-    pdfBarsSlider.setVisible (pdf);
-    equalBarsButton.setEnabled (! pdf);
+    const auto layoutChanged = pdf != pdfSpeedSlider.isVisible();
+    pdfSpeedLabel.setVisible (pdf);
+    pdfSpeedSlider.setVisible (pdf);
+    // PDF のときは「小節を同じ幅に」を隠す (使えないうえに、「速さ」の欄のぶん幅が足りず、「ここから流す」が見えなくなるため)
+    equalBarsButton.setVisible (! pdf);
 
     if (pdf)
     {
-        scoreViewer.setPdfBarsPerScreen (session.pdfBarsPerScreen);
+        scoreViewer.setPdfSpeedPercent (session.pdfSpeedPercent);
         sendPdfRepeats();
     }
 
@@ -1232,7 +1235,7 @@ bool SessionScreen::isTransportPlaying() const
 void SessionScreen::seekTo (double seconds)
 {
     if (isScoreOnly())
-        scoreClock.seek (juce::jlimit (0.0, getScoreLengthSeconds(), seconds), juce::Time::getMillisecondCounterHiRes());
+        scoreClock.seek (clampToLength (seconds), juce::Time::getMillisecondCounterHiRes());
     else if (isYouTube())
         youtube.seek (seconds);
     else
@@ -1253,7 +1256,47 @@ void SessionScreen::pauseTransport()
 // タブ譜だけで再生する (音源が無いとき)
 bool SessionScreen::isScoreOnly() const
 {
-    return ! hasSource() && session.scorePath.isNotEmpty() && ! scoreViewer.getBarStartBeats().empty();
+    if (hasSource() || session.scorePath.isEmpty())
+        return false;
+
+    // PDF: 小節の情報は無いが、BPM に合わせて流せるので、タブ譜の時計で再生する (作者の指示)。
+    // 曲の長さは分からないので、再生バーは進まず、最後で止まることもない (止めるまで流れる)。
+    // 読み込みが終わったかではなくファイルがあるかで決める (リード・バッキングを切り替えて読み直す間に、時計が 0 に戻らないように)
+    if (session.isPdfScore())
+        return currentScoreFile().existsAsFile();
+
+    return ! scoreViewer.getBarStartBeats().empty();
+}
+
+// 下の帯の「速度」は音源の速度 (作者の指示)。音源が無い PDF のセッションでは使えない
+// (PDF の流れる速さは、見出しの「タブ譜が流れる速度」で決める)。
+// .gp だけのセッションは、タブ譜の音 (MIDI) が音源の代わりなので、今までどおり使える
+bool SessionScreen::usesPracticeSpeed() const
+{
+    return hasSource() || ! session.isPdfScore();
+}
+
+double SessionScreen::practiceRate() const
+{
+    return usesPracticeSpeed() ? session.speedPercent / 100.0 : 1.0;
+}
+
+void SessionScreen::updateSpeedEnabled (double nowMs)
+{
+    const auto usable = usesPracticeSpeed();
+    if (speedSlider.isEnabled() == usable)
+        return;
+
+    speedSlider.setEnabled (usable);   // 使えないときは薄くなる (値はそのまま残し、音源を入れたらまた効く)
+    speedHeading.setAlpha (usable ? 1.0f : 0.5f);
+    scoreClock.setRate (practiceRate(), nowMs);
+}
+
+double SessionScreen::clampToLength (double seconds) const
+{
+    // 長さが分からない (PDF だけ) ときは、0 より前に行かないようにだけする
+    const auto length = getLength();
+    return length > 0.0 ? juce::jlimit (0.0, length, seconds) : juce::jmax (0.0, seconds);
 }
 
 double SessionScreen::getScoreLengthSeconds() const
@@ -1276,6 +1319,7 @@ double SessionScreen::getScoreLengthSeconds() const
 void SessionScreen::updateScoreOnly (double nowMs)
 {
     const auto scoreOnly = isScoreOnly();
+    updateSpeedEnabled (nowMs);
 
     // タブ譜だけになった (タブ譜を読み込んだ・音源を外した) / 音源が入った
     if (scoreOnly != scoreOnlyActive)
@@ -1283,7 +1327,7 @@ void SessionScreen::updateScoreOnly (double nowMs)
         scoreOnlyActive = scoreOnly;
         scoreClock.pause (nowMs);
         scoreClock.seek (0.0, nowMs);
-        scoreClock.setRate (session.speedPercent / 100.0, nowMs);
+        scoreClock.setRate (practiceRate(), nowMs);
         // 音源が入ったときは、音源の読み込みの側が準備の状態を決める (読み込みが先に終わることもあるので、ここでは触らない)
         if (scoreOnly || ! hasSource())
         {
@@ -1292,7 +1336,8 @@ void SessionScreen::updateScoreOnly (double nowMs)
         }
 
         if (scoreOnly)
-            setStatus ("音源がないので、タブ譜の音で再生します"_jp);
+            setStatus (session.isPdfScore() ? "音源がないので、タブ譜だけを流します (再生バーは進みません)"_jp
+                                            : "音源がないので、タブ譜の音で再生します"_jp);
         else if (! isYouTube())
             engine.clearExternalClock();
     }
@@ -1547,7 +1592,8 @@ void SessionScreen::startPlayback()
     if (isScoreOnly())
     {
         const auto now = juce::Time::getMillisecondCounterHiRes();
-        if (scoreClock.getPosition (now) >= getScoreLengthSeconds() - 0.05)
+        const auto length = getScoreLengthSeconds();   // PDF は 0 (長さが分からない): 頭に戻さず、そのまま続ける
+        if (length > 0.0 && scoreClock.getPosition (now) >= length - 0.05)
             scoreClock.seek (0.0, now);
         scoreClock.play (now);
         return;
@@ -1663,7 +1709,7 @@ void SessionScreen::updatePlayButton()
 void SessionScreen::skip (double seconds)
 {
     if (sourceReady)
-        seekTo (juce::jlimit (0.0, getLength(), getPosition() + seconds));
+        seekTo (clampToLength (getPosition() + seconds));
 }
 
 // タブ譜モード: タブ譜を左の大きな枠に表示していて、タブ譜の小節が分かるとき
@@ -1686,7 +1732,7 @@ void SessionScreen::skipBars (int direction)
     if (direction < 0 && position - barStartSeconds (current) > 0.5)
         target = current;
 
-    seekTo (juce::jlimit (0.0, juce::jmax (0.0, getLength()), barStartSeconds (juce::jmax (0, target))));
+    seekTo (clampToLength (barStartSeconds (juce::jmax (0, target))));
 }
 
 // 戻る・進むのボタンの文字を、今のモード (小節単位／秒単位) に合わせる
@@ -2057,7 +2103,7 @@ void SessionScreen::seekToBar (double barStartBeats)
 
     // カーソルの式 (拍 = (位置 − ずらし) × BPM ÷ 60) を逆にして、小節の頭の位置 (秒) を求める
     const auto seconds = barStartBeats * 60.0 / session.bpm + getScoreOffsetSeconds();
-    seekTo (juce::jlimit (0.0, juce::jmax (0.0, getLength()), seconds));
+    seekTo (clampToLength (seconds));
     grabKeyboardFocus();   // タブ譜 (WebView) に移ったキー操作を、練習画面に戻す
 }
 
@@ -3062,7 +3108,7 @@ void SessionScreen::timerCallback()
     updateMetronomeDots (beats);
 
     // タブ譜は「拍の位置」+「タブ譜だけ」。針はページの中で、速度と経過時間からなめらかに進める
-    const auto rate = isYouTube() ? youtube.getState().rate : session.speedPercent / 100.0;
+    const auto rate = isYouTube() ? youtube.getState().rate : practiceRate();
     scoreViewer.setPosition (position, session.bpm, getScoreOffsetSeconds(), rate, playing);
 
     // YouTube: カウントダウン中に、音を消して一瞬だけ再生し、読み込みを済ませておく (作者の指示)。
@@ -3542,30 +3588,38 @@ void SessionScreen::resized()
     // (作者のレイアウトの左の「リード」「バッキング」は、タブ譜の切り替えを作るときに置く)
     auto scoreHeader = area.removeFromTop (34);
     {
-        auto partsArea = scoreHeader.removeFromLeft (90 + 6 + 90);
-        leadButton.setBounds (partsArea.removeFromLeft (90).reduced (0, 2));
+        // PDF のときは「タブ譜が流れる速度」の欄が入るので、ボタンを少し細くする (文字は収まる幅)
+        const bool pdf = session.isPdfScore();
+        const int partWidth = pdf ? 76 : 90;
+        auto partsArea = scoreHeader.removeFromLeft (partWidth + 6 + partWidth);
+        leadButton.setBounds (partsArea.removeFromLeft (partWidth).reduced (0, 2));
         partsArea.removeFromLeft (6);
-        backingButton.setBounds (partsArea.removeFromLeft (90).reduced (0, 2));
+        backingButton.setBounds (partsArea.removeFromLeft (partWidth).reduced (0, 2));
+        scoreHeader.removeFromLeft (pdf ? 8 : 12);
 
-        // PDF のときは、リード・バッキングの右に「1画面 ○ 小節」(流れる速さ)
-        if (session.isPdfScore())
+        scoreRemoveButton.setBounds (scoreHeader.removeFromRight (pdf ? 96 : 110).reduced (0, 2));
+        scoreHeader.removeFromRight (6);
+        scoreChooseButton.setBounds (scoreHeader.removeFromRight (pdf ? 96 : 110).reduced (0, 2));
+        scoreHeader.removeFromRight (6);
+        swapButton.setBounds (scoreHeader.removeFromRight (pdf ? 108 : 120).reduced (0, 2));
+        scoreHeader.removeFromRight (6);
+        if (! pdf)
         {
-            scoreHeader.removeFromLeft (12);
-            pdfBarsLabel.setBounds (scoreHeader.removeFromLeft (56));
-            pdfBarsSlider.setBounds (scoreHeader.removeFromLeft (130).reduced (0, 3));
+            equalBarsButton.setBounds (scoreHeader.removeFromRight (120).reduced (0, 2));
+            scoreHeader.removeFromRight (6);
+        }
+        scoreStartButton.setBounds (scoreHeader.removeFromRight (pdf ? 100 : 120).reduced (0, 2));   // 「ここから流す」(作者のレイアウト)
+        scoreHeader.removeFromRight (8);
+
+        // PDF のときは、リード・バッキングの右に「タブ譜が流れる速度」とスライダー (ミキサーと同じ形)。
+        // 名前は文字の幅、スライダーは残りの幅 (広いときは 220 まで)
+        if (pdf)
+        {
+            const auto labelWidth = juce::GlyphArrangement::getStringWidthInt (pdfSpeedLabel.getFont(), pdfSpeedLabel.getText()) + 10;
+            pdfSpeedLabel.setBounds (scoreHeader.removeFromLeft (juce::jmin (labelWidth, scoreHeader.getWidth())));
+            pdfSpeedSlider.setBounds (scoreHeader.removeFromLeft (juce::jmin (220, scoreHeader.getWidth())).reduced (0, 3));
         }
     }
-    scoreHeader.removeFromLeft (12);
-    scoreRemoveButton.setBounds (scoreHeader.removeFromRight (110).reduced (0, 2));
-    scoreHeader.removeFromRight (6);
-    scoreChooseButton.setBounds (scoreHeader.removeFromRight (110).reduced (0, 2));
-    scoreHeader.removeFromRight (6);
-    swapButton.setBounds (scoreHeader.removeFromRight (120).reduced (0, 2));
-    scoreHeader.removeFromRight (6);
-    equalBarsButton.setBounds (scoreHeader.removeFromRight (120).reduced (0, 2));
-    scoreHeader.removeFromRight (6);
-    scoreStartButton.setBounds (scoreHeader.removeFromRight (120).reduced (0, 2));   // 「ここから流す」(作者のレイアウト)
-    scoreHeader.removeFromRight (12);
     positionLabel.setVisible (false);   // 「小節 ○ 拍 ○」は、作者のレイアウトに無いので出さない (タブ譜のカーソルと再生バーで分かる)
     // タブ譜のファイル名は出さない (作者の指示)。残りの幅は空けておく
     area.removeFromTop (6);

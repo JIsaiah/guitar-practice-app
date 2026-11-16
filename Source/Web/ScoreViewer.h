@@ -47,7 +47,7 @@ public:
     void showCountdown (int number, const juce::String& caption = {});
 
     // PDF のタブ譜: 画面1つ分を何小節で流すか (流れる速さ)
-    void setPdfBarsPerScreen (int bars);
+    void setPdfSpeedPercent (int percent);   // PDF のタブ譜の流れる速さ (100% = 画面1つ分を 12 小節で)
     // PDF のタブ譜の繰り返し ([{start, end, count}] の並び) と、「ここから繰り返し」だけ置いた始め (-1 = なし)
     void setPdfRepeats (const juce::var& repeats, double pendingStart);
 

@@ -24,6 +24,11 @@ public:
     void resized() override;
     void paint (juce::Graphics& g) override;
 
+    // キーボード操作 (一覧画面の矢印・Enter)
+    const std::vector<std::unique_ptr<SetlistCard>>& getCards() const noexcept { return cards; }
+    juce::Viewport& getViewport() noexcept { return viewport; }
+    juce::Button& getNewButton() noexcept { return newButton; }
+
 private:
     void createSetlist();
     void layoutCards();
