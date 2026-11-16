@@ -42,6 +42,13 @@
   #cursor { position: absolute; width: 3px; border-radius: 2px; background: var(--color-accent);
             opacity: 0; transition: opacity 0.15s; pointer-events: none; z-index: 5; }
   #barHighlight { position: absolute; background: var(--color-accent); opacity: 0; pointer-events: none; z-index: 4; }
+  /* タブ譜の編集 (作者の指示): 編集中の音の枠と、上の案内 */
+  #editBox { position: absolute; display: none; border: 2px solid var(--color-accent); border-radius: 5px;
+             box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent) 25%, transparent);
+             pointer-events: none; z-index: 6; box-sizing: border-box; }
+  #editHint { position: absolute; top: 8px; left: 50%; transform: translateX(-50%); display: none; z-index: 50;
+              padding: 4px 12px; border-radius: 6px; background: var(--color-accent); color: #fff;
+              font-size: 12px; font-weight: 700; white-space: nowrap; pointer-events: none; }
   #message { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
              color: var(--color-text-muted); text-align: center; padding: 24px; box-sizing: border-box; }
   /* 再生前のカウントダウン (setlist-mode.md 7.2)。離れた位置からでも読める大きさ。
@@ -133,7 +140,8 @@
 
   function createApi() {
     api = new alphaTab.AlphaTabApi(scoreElement, {
-      core: { fontDirectory: "/alphatab/font/", useWorkers: false },
+      // includeNoteBounds: 音の1つ1つの場所を覚えておく (タブ譜の編集で、押した音を探す・枠を置くのに使う)
+      core: { fontDirectory: "/alphatab/font/", useWorkers: false, includeNoteBounds: true },
       // タブ譜の音 (MIDI)。alphaTab の音源 (SONiVOX の SoundFont、同梱) で鳴らす。
       // 再生の位置・止める・始めるは、アプリの時計に合わせてこのページが行う (syncMidi)。alphaTab のカーソルは使わない
       player: { playerMode: alphaTab.PlayerMode.EnabledSynthesizer, soundFont: "/alphatab/soundfont/sonivox.sf2",
@@ -180,6 +188,7 @@
       showMessage("");
       scoreElement.appendChild(barHighlight);
       scoreElement.appendChild(cursor);
+      placeEditBox(false);   // 編集中の音の枠を、描き直した場所に置き直す
       send("rendered");
       applyMidiTracks();   // 表示するトラックを変えると MIDI が作り直されることがあるので、当て直す
     });
@@ -228,14 +237,19 @@
     document.getElementById("message").style.color = colours.muted;
     cursor.style.background = colours.accent;
     barHighlight.style.background = colours.accent;
+    editBox.style.borderColor = colours.accent;
+    editHint.style.background = colours.accent;
   }
 
   // ---- アプリからの命令 ----
   window.scoreCommand = function (cmd) {
     switch (cmd.type) {
-      case "load": load(cmd.url, cmd.track || 0); break;
-      case "clear": clearScore(); break;
-      case "track": showTrack(cmd.track); break;
+      case "load": endEdit(); undoStack = []; redoStack = []; editable = !!cmd.editable; load(cmd.url, cmd.track || 0); break;
+      case "clear": endEdit(); undoStack = []; redoStack = []; editable = false; clearScore(); break;
+      case "undo": if (editable && score) undoEdit(); break;
+      case "redo": if (editable && score) redoEdit(); break;
+      case "track": endEdit(); showTrack(cmd.track); break;
+      case "endEdit": endEdit(); break;
       case "midiTracks":
         midiTracks = cmd.tracks || [];
         applyMidiTracks();
@@ -732,6 +746,12 @@
     if (twoButtons) return;   // ラジアルメニューの操作だった
     if (!api || !score || !api.renderer || !api.renderer.boundsLookup || barStartBeats.length === 0) return;
     const rect = scoreElement.getBoundingClientRect();
+    // 編集モードの間は、クリックで編集する場所を選ぶ (再生の位置は動かさない)
+    if (editSel) {
+      const place = placeAt(e.clientX - rect.left, e.clientY - rect.top);
+      if (place) startEdit(place.beat, place.string);
+      return;
+    }
     const beat = api.renderer.boundsLookup.getBeatAtPos(e.clientX - rect.left, e.clientY - rect.top);
     if (!beat || !beat.voice || !beat.voice.bar || !beat.voice.bar.masterBar) return;
     // 繰り返しのある曲では、同じ小節を何度も弾く。今の位置にいちばん近い回を選ぶ
@@ -764,6 +784,337 @@
       send("key", { key: e.code });
     }
   });
+
+  // ---- タブ譜の編集 (作者の指示。Guitar Pro 7 以降の .gp だけ) ----
+  // タブ譜をダブルクリックすると編集モードに入り、押した拍・弦を枠で囲む (音が無い弦も選べる)。
+  //   数字キー: その弦のフレットを変える。音が無ければ、その数字の音を足す (続けて押すと2桁。1 → 2 で 12)
+  //   Delete・Backspace: その弦の音を消す (拍の音が無くなると休符になる)
+  //   Ctrl+Z: 元に戻す   Ctrl+Y・Ctrl+Shift+Z: やり直す (編集モードの外でも効く)
+  //   ←→: 前・次の拍へ (小節をまたぐ)   ↑↓: 上・下の弦へ   クリック: 押した場所へ
+  //   Esc・Enter: 編集モードを終わる   Space: 再生・停止 (いつもどおり)
+  // 変えるたびにアプリに知らせ (noteEdited)、アプリが「保存」のときに .gp のファイルへ書き込む。
+  // 元に戻す・やり直すも、逆の編集としてアプリに知らせる (アプリが、すぐ前の編集とまとめる)
+  let editable = false;   // 今のタブ譜を編集できるか (アプリが読み込みの命令で知らせる)
+  let editSel = null;     // 編集中の場所 { beat, string }。null = 編集モードではない
+  let fretBuffer = "", fretBufferAt = 0;
+  let undoStack = [], redoStack = [];
+  let midiRebuildTimer = 0;
+  const maxFret = 30;
+  const editBox = document.createElement("div"); editBox.id = "editBox";
+  const editHint = document.createElement("div"); editHint.id = "editHint";
+  editHint.textContent = "編集中: 数字でフレット・Delete で消す・Ctrl+Z で戻す・矢印で移動・Esc で終わる (保存はアプリの保存ボタン)";
+  document.body.appendChild(editHint);
+
+  function stringCount(beat) {
+    const staff = beat.voice.bar.staff;
+    return staff.tuning ? staff.tuning.length : 0;
+  }
+
+  // 選んでいる場所の四角 (タブ譜の中の座標)。音があれば音の数字、無ければ弦の線の上
+  function selectionBounds() {
+    const lookup = api && api.renderer ? api.renderer.boundsLookup : null;
+    if (!editSel || !lookup) return null;
+    const beatBounds = lookup.findBeat(editSel.beat);
+    if (!beatBounds) return null;
+    const note = editSel.beat.getNoteOnString(editSel.string);
+    if (note && beatBounds.notes)
+      for (const nb of beatBounds.notes) if (nb.note === note) return nb.noteHeadBounds;
+    // 弦の線: 小節の線の範囲 (visualBounds) を、弦の数で等分する (alphaTab の描き方と同じ。確かめた)
+    const bar = beatBounds.barBounds ? beatBounds.barBounds.visualBounds : null;
+    const strings = stringCount(editSel.beat);
+    if (!bar || strings < 2) return null;
+    const y = bar.y + (strings - editSel.string) * bar.h / (strings - 1);
+    const x = typeof beatBounds.onNotesX === "number" ? beatBounds.onNotesX : beatBounds.visualBounds.x + beatBounds.visualBounds.w / 2;
+    return { x: x - 7, y: y - 7, w: 14, h: 14 };
+  }
+
+  // 編集する場所の枠を、今の描かれた場所に置く (描き直したあとも呼ぶ)
+  function placeEditBox(scrollIntoView) {
+    const b = selectionBounds();
+    if (!b) { editBox.style.display = "none"; return; }
+    if (editBox.parentNode !== scoreElement) scoreElement.appendChild(editBox);
+    const pad = 4;
+    editBox.style.display = "block";
+    editBox.style.left = (b.x - pad) + "px"; editBox.style.top = (b.y - pad) + "px";
+    editBox.style.width = (b.w + pad * 2) + "px"; editBox.style.height = (b.h + pad * 2) + "px";
+    if (scrollIntoView) {
+      const top = b.y - 60, bottom = b.y + b.h + 60;
+      if (top < scroller.scrollTop) scroller.scrollTop = Math.max(0, top);
+      else if (bottom > scroller.scrollTop + scroller.clientHeight) scroller.scrollTop = bottom - scroller.clientHeight;
+    }
+  }
+
+  function startEdit(beat, string) {
+    const wasEditing = !!editSel;
+    editSel = { beat: beat, string: string }; fretBuffer = "";
+    placeEditBox(true);
+    editHint.style.display = "block";
+    if (!wasEditing) send("editMode", { on: true });
+  }
+
+  function endEdit() {
+    if (!editSel) return;
+    editSel = null; fretBuffer = "";
+    editBox.style.display = "none";
+    editHint.style.display = "none";
+    send("editMode", { on: false });
+  }
+
+  // 編集できる拍か (ファイルに無い、alphaTab が補った空の拍は除く)
+  function isEditableBeat(beat) { return !!beat && !beat.isEmpty && stringCount(beat) > 0 && !beat.voice.bar.staff.isPercussion; }
+
+  // 画面の上の位置 (タブ譜の中の座標) の拍と弦。段の外なら null
+  function placeAt(x, y) {
+    const lookup = api && api.renderer ? api.renderer.boundsLookup : null;
+    if (!lookup) return null;
+    const beat = lookup.getBeatAtPos(x, y);
+    if (!isEditableBeat(beat)) return null;
+    const hit = lookup.getNoteAtPos(beat, x, y);
+    if (hit) return { beat: beat, string: hit.string };
+    const beatBounds = lookup.findBeat(beat);
+    const bar = beatBounds && beatBounds.barBounds ? beatBounds.barBounds.visualBounds : null;
+    const strings = stringCount(beat);
+    if (!bar || strings < 2) return null;
+    const spacing = bar.h / (strings - 1);
+    if (y < bar.y - spacing || y > bar.y + bar.h + spacing) return null;   // 段から離れたところ
+    const string = Math.round(strings - (y - bar.y) / spacing);
+    return { beat: beat, string: Math.max(1, Math.min(strings, string)) };
+  }
+
+  // ファイルの中の場所 (アプリが .gp の score.gpif の同じ場所を探すのに使う。GpScoreEdit.h)
+  function beatLocation(beat, string) {
+    const voice = beat.voice, bar = voice.bar, staff = bar.staff, track = staff.track;
+    let slot = staff.index;
+    for (let i = 0; i < track.index; i++) slot += score.tracks[i].staves.length;
+    return { slot: slot, bar: bar.index, voice: voice.index, beat: beat.index, string: string };
+  }
+
+  // 各弦の開放の音の高さ (MIDI。[0] が弦 1 = いちばん低い弦)。アプリが、足す音の高さを決めるのに使う
+  function tuningByString(beat) {
+    const tuning = beat.voice.bar.staff.tuning || [];
+    const out = [];
+    for (let s = 1; s <= tuning.length; s++) out.push(tuning[tuning.length - s]);
+    return out;
+  }
+
+  // 拍の音を足した・消したあとに、alphaTab が音から決めておく値を作り直す (描き方・音の長さの線に使う)
+  function refreshBeat(beat) {
+    beat.notes.forEach(function (n, i) { n.index = i; });
+    beat.minNote = beat.maxNote = beat.minStringNote = beat.maxStringNote = null;
+    for (const n of beat.notes) {
+      if (!beat.minNote || n.realValue < beat.minNote.realValue) beat.minNote = n;
+      if (!beat.maxNote || n.realValue > beat.maxNote.realValue) beat.maxNote = n;
+      if (!beat.minStringNote || n.string < beat.minStringNote.string) beat.minStringNote = n;
+      if (!beat.maxStringNote || n.string > beat.maxStringNote.string) beat.maxStringNote = n;
+    }
+  }
+
+  // ---- 編集の操作 ----
+  // 1回の操作 (数字・Delete) は、いくつかの「手順」でできている (タイでつながった音も一緒に変えるため)。
+  // 手順は、モデルを変えてアプリに知らせる。元に戻すときは、手順を逆の順に、逆向きに行う
+  //   set: フレットを変える   add・remove: 音を足す・消す   tie: タイでつながった2つの音を、つなぐ・切る
+  function sendNote(beat, string, fields) {
+    const loc = beatLocation(beat, string);
+    for (const k in fields) loc[k] = fields[k];
+    send("noteEdited", loc);
+  }
+
+  function runStep(step, forward) {
+    if (step.t === "set") {
+      const to = forward ? step.to : step.from, from = forward ? step.from : step.to;
+      step.beat.getNoteOnString(step.string).fret = to;
+      sendNote(step.beat, step.string, { kind: "set", oldFret: from, fret: to });
+    } else if (step.t !== "tie" && (step.t === "add") === forward) {
+      // 足す (add を進める・remove を戻す)。消した音を戻すときは、同じ音 (奏法も) を戻す
+      const note = step.note || new alphaTab.model.Note();
+      note.string = step.string; note.fret = step.fret;
+      step.beat.addNote(note);
+      if (!step.note) {
+        try { note.dynamics = step.beat.dynamics; note.finish(api.settings, new Map()); } catch (e) { /* 音の飾りの準備だけ */ }
+        step.note = note;
+      }
+      refreshBeat(step.beat);
+      sendNote(step.beat, step.string, { kind: "add", fret: step.fret, tuning: tuningByString(step.beat) });
+    } else if (step.t === "add" || step.t === "remove") {
+      step.beat.removeNote(step.note);
+      refreshBeat(step.beat);
+      sendNote(step.beat, step.string, { kind: "remove", oldFret: step.fret });
+    } else if (step.t === "tie") {
+      // origin (始め) と destination (終わり) の2つの音を、つなぐ (link) か切る
+      const link = forward ? step.link : !step.link;
+      const o = step.origin, d = step.destination;
+      const before = { o: [!!o.tieOrigin(), !!o.tieDest()], d: [!!d.tieOrigin(), !!d.tieDest()] };
+      const on = o.beat.getNoteOnString(o.string), dn = d.beat.getNoteOnString(d.string);
+      if (link) { on.tieDestination = dn; dn.tieOrigin = on; dn.isTieDestination = true; }
+      else { on.tieDestination = null; dn.tieOrigin = null; dn.isTieDestination = false; }
+      const sendOrigin = function () {
+        sendNote(o.beat, o.string, { kind: "tie", origin: on.tieDestination !== null, destination: !!on.isTieDestination,
+                                      oldOrigin: before.o[0], oldDestination: before.o[1] });
+      };
+      const sendDestination = function () {
+        sendNote(d.beat, d.string, { kind: "tie", origin: dn.tieDestination !== null, destination: !!dn.isTieDestination,
+                                      oldOrigin: before.d[0], oldDestination: before.d[1] });
+      };
+      // 元に戻すときは逆の順に送る (アプリが、すぐ前の編集と打ち消し合わせて、戻しきったら「未保存」を消せるように)
+      if (forward) { sendOrigin(); sendDestination(); } else { sendDestination(); sendOrigin(); }
+    }
+  }
+
+  // タイの手順で使う、音の場所 (音そのものは、消して戻すと別の物になることがあるので、拍と弦で持つ)
+  function notePlace(note) {
+    return { beat: note.beat, string: note.string,
+             tieOrigin: function () { const n = this.beat.getNoteOnString(this.string); return n && n.tieDestination !== null; },
+             tieDest: function () { const n = this.beat.getNoteOnString(this.string); return n && n.isTieDestination; } };
+  }
+
+  function untieSteps(origin, destination) {
+    return { t: "tie", link: false, origin: notePlace(origin), destination: notePlace(destination) };
+  }
+
+  // 操作を行って記録する (やり直しの記録は消す)
+  function perform(steps) {
+    if (steps.length === 0) return;
+    for (const s of steps) runStep(s, true);
+    undoStack.push({ steps: steps, beat: editSel.beat, string: editSel.string });
+    redoStack = [];
+    afterEdit();
+  }
+
+  function typeFret(fret) {
+    const beat = editSel.beat, string = editSel.string;
+    const note = beat.getNoteOnString(string);
+    if (!note) {
+      perform([{ t: "add", beat: beat, string: string, fret: fret, note: null }]);
+      return;
+    }
+    if (note.fret === fret) return;
+
+    const steps = [];
+    // タイの終わりの音: 前の音と同じ高さでなくなるので、タイを切る
+    if (note.isTieDestination && note.tieOrigin) {
+      const s = untieSteps(note.tieOrigin, note);
+      runStep(s, true); steps.push(s);
+    }
+    // この音と、タイでつながった後ろの音 (同じ高さ) のフレットを変える
+    for (let n = note; n; n = n.tieDestination) {
+      const s = { t: "set", beat: n.beat, string: n.string, from: n.fret, to: fret };
+      runStep(s, true); steps.push(s);
+    }
+    undoStack.push({ steps: steps, beat: beat, string: string });
+    redoStack = [];
+    afterEdit();
+  }
+
+  function deleteNote() {
+    const beat = editSel.beat, string = editSel.string;
+    const note = beat.getNoteOnString(string);
+    if (!note) return;
+    const steps = [];
+    // タイでつながった前・後ろの音とのタイを切ってから消す (残った音が、別の音とつながらないように)
+    if (note.tieDestination) { const s = untieSteps(note, note.tieDestination); runStep(s, true); steps.push(s); }
+    if (note.isTieDestination && note.tieOrigin) { const s = untieSteps(note.tieOrigin, note); runStep(s, true); steps.push(s); }
+    const remove = { t: "remove", beat: beat, string: string, fret: note.fret, note: note };
+    runStep(remove, true); steps.push(remove);
+    undoStack.push({ steps: steps, beat: beat, string: string });
+    redoStack = [];
+    afterEdit();
+  }
+
+  function afterEdit() {
+    api.render();   // 描き直す (枠は描き終わったときに置き直す)
+    // タブ譜の音 (MIDI) も作り直す。続けて押したときに何度も作らないよう、少し待つ
+    clearTimeout(midiRebuildTimer);
+    midiRebuildTimer = setTimeout(function () {
+      if (!api || !score) return;
+      try { api.loadMidiForScore(); } catch (e) { /* 音が作れなくても、編集は続ける */ }
+    }, 400);
+  }
+
+  // 元に戻す (Ctrl+Z): 手順を逆の順に、逆向きに。やり直す (Ctrl+Y): もう一度。どちらも、その場所を選ぶ
+  function undoEdit() {
+    const a = undoStack.pop();
+    if (!a) return;
+    for (let i = a.steps.length - 1; i >= 0; i--) runStep(a.steps[i], false);
+    redoStack.push(a);
+    if (editSel) { editSel = { beat: a.beat, string: a.string }; fretBuffer = ""; }
+    afterEdit();
+  }
+
+  function redoEdit() {
+    const a = redoStack.pop();
+    if (!a) return;
+    for (const s of a.steps) runStep(s, true);
+    undoStack.push(a);
+    if (editSel) { editSel = { beat: a.beat, string: a.string }; fretBuffer = ""; }
+    afterEdit();
+  }
+
+  // 同じ譜表・同じ声部の、前・次の拍 (小節をまたぐ。休符にも止まる: 音を足せるように)
+  function stepBeat(direction) {
+    const voiceIndex = editSel.beat.voice.index, staff = editSel.beat.voice.bar.staff;
+    let barIndex = editSel.beat.voice.bar.index, beatIndex = editSel.beat.index + direction;
+    while (barIndex >= 0 && barIndex < staff.bars.length) {
+      const voice = staff.bars[barIndex].voices[voiceIndex];
+      const beats = voice ? voice.beats : [];
+      if (beatIndex === Infinity) beatIndex = beats.length - 1;
+      for (; beatIndex >= 0 && beatIndex < beats.length; beatIndex += direction)
+        if (isEditableBeat(beats[beatIndex])) return beats[beatIndex];
+      barIndex += direction;
+      beatIndex = direction > 0 ? 0 : Infinity;
+    }
+    return null;
+  }
+
+  function moveEdit(key) {
+    if (key === "ArrowLeft" || key === "ArrowRight") {
+      const beat = stepBeat(key === "ArrowRight" ? 1 : -1);
+      if (beat) startEdit(beat, Math.min(editSel.string, stringCount(beat)));
+    } else {
+      // ↑: 画面で上 (高い弦 = 番号が大きい)、↓: 画面で下
+      const string = editSel.string + (key === "ArrowUp" ? 1 : -1);
+      if (string >= 1 && string <= stringCount(editSel.beat)) startEdit(editSel.beat, string);
+    }
+  }
+
+  scoreElement.addEventListener("dblclick", function (e) {
+    if (!editable || twoButtons || !score) return;
+    const rect = scoreElement.getBoundingClientRect();
+    const place = placeAt(e.clientX - rect.left, e.clientY - rect.top);
+    if (place) startEdit(place.beat, place.string); else endEdit();
+  });
+
+  // 編集のキー (いつものキーの扱いより先に受け取る)
+  document.addEventListener("keydown", function (e) {
+    if (!editable || !score) return;
+
+    // 元に戻す・やり直す: 編集モードの外でも効く (編集したあとに Esc で抜けてからでも戻せるように)
+    if (e.ctrlKey && !e.altKey && (e.code === "KeyZ" || e.code === "KeyY")) {
+      if (e.code === "KeyY" || e.shiftKey) redoEdit(); else undoEdit();
+      e.preventDefault(); e.stopImmediatePropagation();
+      return;
+    }
+
+    if (!editSel) return;
+    const digit = /^(Digit|Numpad)([0-9])$/.exec(e.code);
+    if (digit && !e.ctrlKey && !e.altKey) {
+      const now = performance.now();
+      const joined = fretBuffer + digit[2];
+      fretBuffer = (fretBuffer && now - fretBufferAt < 1000 && +joined <= maxFret) ? joined : digit[2];
+      fretBufferAt = now;
+      typeFret(+fretBuffer);
+    } else if (e.code === "Delete" || e.code === "Backspace") {
+      fretBuffer = "";
+      deleteNote();
+    } else if (e.code === "ArrowLeft" || e.code === "ArrowRight" || e.code === "ArrowUp" || e.code === "ArrowDown") {
+      moveEdit(e.code);
+    } else if (e.code === "Escape" || e.code === "Enter" || e.code === "NumpadEnter") {
+      endEdit();
+    } else {
+      return;   // Space などは、いつもどおりアプリへ
+    }
+    e.preventDefault();
+    e.stopImmediatePropagation();
+  }, true);
 
   document.addEventListener("DOMContentLoaded", function () { showMessage(""); send("pageReady"); });
 </script>

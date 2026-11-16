@@ -4,6 +4,7 @@
 #include "../Theme/Palette.h"
 #include "../Model/ScoreParts.h"
 #include "../Model/MusicInfo.h"
+#include "GpScoreEdit.h"
 
 // タブ譜の表示 (設計書 #5、PoC-3)
 // - WebView2 の中で alphaTab (同梱) を動かし、タブ譜を描く
@@ -77,6 +78,14 @@ public:
     std::function<void (const juce::String& key)> onKey;      // タブ譜の上で押されたキー ("Space"、"ArrowLeft" など)
     std::function<void (double position, int repeat)> onPdfContext;   // PDF の右クリック (場所と、そこを含む繰り返しの番号。-1 = なし)
 
+    // タブ譜の編集 (作者の指示。.gp だけ): ページで音のフレットを変えた・編集モードに入った/終わった
+    std::function<void (const GpScoreEdit::NoteEdit& edit)> onNoteEdited;
+    std::function<void (bool editing)> onEditModeChanged;
+    bool isEditing() const noexcept { return editing; }
+    void endEditing();   // 編集モードを終わらせる
+    void undoEdit();     // 元に戻す (Ctrl+Z。練習画面がキーを持っているとき)
+    void redoEdit();     // やり直す (Ctrl+Y)
+
     void resized() override;
 
 private:
@@ -85,7 +94,7 @@ private:
     std::optional<juce::WebBrowserComponent::Resource> provide (const juce::String& path);
 
     std::unique_ptr<juce::WebBrowserComponent> browser;
-    bool pageReady = false, rendered = false;
+    bool pageReady = false, rendered = false, editing = false;
     std::vector<juce::var> pending;   // ページの準備ができる前に来た命令
 
     juce::CriticalSection fileLock;   // 読み込みの要求は、別のスレッドから来ることがあるため

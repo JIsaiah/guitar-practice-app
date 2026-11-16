@@ -123,11 +123,22 @@ void ScoreViewer::load (const juce::File& file, int trackIndex)
                                    [] (const juce::var& c) { return c["type"] == "load" || c["type"] == "clear"; }),
                    pending.end());
 
+    editing = false;
     if (file.existsAsFile())
-        send (makeCommand ("load", { { "url", "/score?n=" + juce::String (++loadCount) }, { "track", trackIndex } }));
+        send (makeCommand ("load", { { "url", "/score?n=" + juce::String (++loadCount) }, { "track", trackIndex },
+                                     { "editable", GpScoreEdit::isEditable (file) } }));
     else
         send (makeCommand ("clear"));
 }
+
+void ScoreViewer::endEditing()
+{
+    if (editing)
+        send (makeCommand ("endEdit"));
+}
+
+void ScoreViewer::undoEdit() { send (makeCommand ("undo")); }
+void ScoreViewer::redoEdit() { send (makeCommand ("redo")); }
 
 void ScoreViewer::setFrozen (bool frozen)
 {
@@ -302,6 +313,43 @@ void ScoreViewer::handleEvent (const juce::var& event)
     {
         if (onPdfContext != nullptr)
             onPdfContext ((double) event["pos"], (int) event["repeat"]);
+        return;
+    }
+
+    if (type == "noteEdited")
+    {
+        GpScoreEdit::NoteEdit edit;
+        const auto kind = event["kind"].toString();
+        edit.kind = kind == "add" ? GpScoreEdit::Kind::add : kind == "remove" ? GpScoreEdit::Kind::remove
+                  : kind == "tie" ? GpScoreEdit::Kind::tie : GpScoreEdit::Kind::setFret;
+        edit.tieOrigin = (bool) event["origin"];
+        edit.tieDestination = (bool) event["destination"];
+        edit.oldTieOrigin = (bool) event["oldOrigin"];
+        edit.oldTieDestination = (bool) event["oldDestination"];
+        if (const auto* tuning = event["tuning"].getArray())
+            for (const auto& pitch : *tuning)
+                edit.tuning.push_back ((int) pitch);
+        edit.slot = (int) event["slot"];
+        edit.masterBar = (int) event["bar"];
+        edit.voice = (int) event["voice"];
+        edit.beat = (int) event["beat"];
+        edit.string = (int) event["string"];
+        edit.oldFret = (int) event["oldFret"];
+        edit.fret = (int) event["fret"];
+        if (onNoteEdited != nullptr)
+            onNoteEdited (edit);
+        return;
+    }
+
+    if (type == "editMode")
+    {
+        editing = (bool) event["on"];
+        // 編集モードに入ったら、キーの入力をページに渡す (数字キーをページで受け取るため)。
+        // ダブルクリックの1回目のクリックで、練習画面が小節へ移動してキーの入力を取り戻していることがある
+        if (editing && browser != nullptr)
+            browser->grabKeyboardFocus();
+        if (onEditModeChanged != nullptr)
+            onEditModeChanged (editing);
         return;
     }
 

@@ -144,6 +144,20 @@ SessionScreen::SessionScreen (AudioEngine& e, SessionStore& s, ThemeManager& t, 
     // タブ譜の小節をクリックしたら、その小節の頭から再生する
     scoreViewer.onBarClicked = [this] (double barStartBeats) { seekToBar (barStartBeats); };
     scoreViewer.onKey = [this] (const juce::String& key) { handlePageKey (key); };
+    // タブ譜の編集 (作者の指示。.gp だけ): 変えた音を覚えておき、保存で .gp に書き込む
+    scoreViewer.onNoteEdited = [this] (const GpScoreEdit::NoteEdit& edit)
+    {
+        GpScoreEdit::addEdit (scoreEdits, edit);
+        setStatus (scoreEdits.empty() ? "タブ譜の編集を、すべて元に戻しました"_jp
+                                      : "タブ譜を変えました。保存すると、タブ譜のファイル (.gp) に書き込みます"_jp);
+    };
+    scoreViewer.onEditModeChanged = [this] (bool editing)
+    {
+        if (editing)
+            setStatus ("タブ譜の編集: 数字キーでフレット (音が無ければ足す)、Delete で消す、Ctrl+Z で戻す、矢印で移動、Esc で終わる"_jp);
+        else
+            grabKeyboardFocus();   // 編集を終えたら、キー操作 (Space など) を練習画面に戻す
+    };
     scoreViewer.onPdfContext = [this] (double position, int repeat) { showPdfRepeatMenu (position, repeat); };
     youtube.onKey = [this] (const juce::String& key) { handlePageKey (key); };
     // 動画表示 (入れ替え中) で、動画を押すと再生・停止 (作者の指示)。再生ボタンと同じ (1回目はカウントダウン)
@@ -620,6 +634,9 @@ SessionScreen::~SessionScreen()
     scoreViewer.onBarClicked = nullptr;
     scoreViewer.onKey = nullptr;
     scoreViewer.onPdfContext = nullptr;
+    scoreViewer.onNoteEdited = nullptr;
+    scoreViewer.onEditModeChanged = nullptr;
+    scoreViewer.endEditing();
     scoreViewer.hide();
 
     engine.setPlaying (false);
@@ -921,6 +938,7 @@ void SessionScreen::loadScore()
     scoreViewer.onError = [this] (const juce::String& message) { setStatus ("タブ譜: "_jp + message); };
 
     scoreViewer.setColours (theme.getPalette());
+    scoreEdits.clear();   // タブ譜を読み直すと、ページの編集は消える
     scoreViewer.load (currentScoreFile(), session.scoreTrackIndex);
     updateScoreUi();
 }
@@ -1091,6 +1109,7 @@ void SessionScreen::choosePdfPart (bool backing)
         (backing ? safe->session.pdfBackingRepeats : safe->session.pdfRepeats).clear();   // 別の PDF なので
         safe->pdfPendingRepeatStart = -1.0;
         safe->session.backingActive = backing;
+        safe->scoreEdits.clear();   // タブ譜を読み直すと、ページの編集は消える
         safe->scoreViewer.load (safe->currentScoreFile(), 0);
         safe->updateScoreUi();
         safe->switchPart (backing, true);
@@ -1125,6 +1144,7 @@ void SessionScreen::showPdfPartMenu (bool backing)
             safe->session.pdfBackingRepeats.clear();
             safe->pdfPendingRepeatStart = -1.0;
             safe->session.backingActive = false;
+            safe->scoreEdits.clear();   // タブ譜を読み直すと、ページの編集は消える
             safe->scoreViewer.load (safe->currentScoreFile(), 0);
             safe->updateScoreUi();
             safe->switchPart (false, true);
@@ -1141,6 +1161,7 @@ void SessionScreen::removeScore()
     pdfPendingRepeatStart = -1.0;
     session.scoreTrackIndex = 0;
     resetParts();
+    scoreEdits.clear();   // タブ譜を読み直すと、ページの編集は消える
     scoreViewer.load ({}, 0);
     updateScoreUi();
     updateLoop();   // 4/4 の小節に戻るので、小節の番号を出し直す
@@ -1371,7 +1392,7 @@ void SessionScreen::updateScoreOnly (double nowMs)
 bool SessionScreen::isDirty() const
 {
     // プラグインのつまみの変更は、セッションの値には表れないので別に見る (timerCallback で1秒ごとに確かめる)
-    return juce::JSON::toString (session.toVar()) != savedSnapshot || pluginStateChanged;
+    return juce::JSON::toString (session.toVar()) != savedSnapshot || pluginStateChanged || ! scoreEdits.empty();
 }
 
 bool SessionScreen::writeToDisk()
@@ -1392,6 +1413,18 @@ bool SessionScreen::writeToDisk()
 bool SessionScreen::save()
 {
     capturePluginState();   // TONE3000 で選んだ音色・つまみも保存する
+
+    // タブ譜の編集を .gp のファイルに書き込む (初めてのときは、元のファイルを「.gp.bak」に残す)
+    if (! scoreEdits.empty())
+    {
+        const auto result = GpScoreEdit::applyToGpFile (currentScoreFile(), scoreEdits);
+        if (result.failed())
+        {
+            setStatus ("タブ譜を保存できませんでした: "_jp + result.getErrorMessage());
+            return false;
+        }
+        scoreEdits.clear();
+    }
 
     if (! writeToDisk())
     {
@@ -1487,6 +1520,10 @@ bool SessionScreen::keyPressed (const juce::KeyPress& key)
     if (key == juce::KeyPress::homeKey)   { perform (Command::goToStart); return true; }
     if (key == juce::KeyPress::rightKey)  { perform (Command::fastForward); return true; }
     if (key == juce::KeyPress ('s', juce::ModifierKeys::ctrlModifier, 0)) { perform (Command::save); return true; }
+    // タブ譜の編集の、元に戻す・やり直す (.gp のとき。ページがキーを持っているときは、ページが自分で受け取る)
+    if (key == juce::KeyPress ('z', juce::ModifierKeys::ctrlModifier, 0)) { scoreViewer.undoEdit(); return true; }
+    if (key == juce::KeyPress ('y', juce::ModifierKeys::ctrlModifier, 0)
+        || key == juce::KeyPress ('z', juce::ModifierKeys::ctrlModifier | juce::ModifierKeys::shiftModifier, 0)) { scoreViewer.redoEdit(); return true; }
     return false;
 }
 
@@ -2116,7 +2153,9 @@ void SessionScreen::handlePageKey (const juce::String& key)
     else if (key == "ArrowRight") perform (Command::fastForward);
     else if (key == "Enter")      perform (Command::tapTempo);
 
-    grabKeyboardFocus();
+    // タブ譜の編集中は、キーをページに残す (数字キーで続けて編集できるように)
+    if (! scoreViewer.isEditing())
+        grabKeyboardFocus();
 }
 
 //==============================================================================
@@ -2361,6 +2400,7 @@ void SessionScreen::switchPart (bool backing, bool fromUser)
         if (session.currentScorePath() != before)
         {
             pdfPendingRepeatStart = -1.0;
+            scoreEdits.clear();   // タブ譜を読み直すと、ページの編集は消える
             scoreViewer.load (currentScoreFile(), 0);
             updateScoreUi();
         }

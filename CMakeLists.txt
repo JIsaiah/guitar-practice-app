@@ -89,6 +89,7 @@ target_sources(GuitarPractice PRIVATE
     Source/UI/SettingsPanel.cpp
     Source/Web/YouTubePlayer.cpp
     Source/Web/ScoreViewer.cpp
+    Source/Web/GpScoreEdit.cpp
     Source/Web/WebResources.cpp
     Source/Audio/AudioEngine.cpp
     Source/Audio/NamTone.cpp
@@ -226,6 +227,8 @@ target_sources(GuitarPracticeTests PRIVATE
     Tests/AppPathsTests.cpp
     Tests/SessionFormatTests.cpp
     Tests/SpatialNavigationTests.cpp
+    Tests/GpScoreEditTests.cpp
+    Source/Web/GpScoreEdit.cpp
     Source/Model/Session.cpp
     Source/Model/SessionStore.cpp
     Source/Library/SessionLibrary.cpp

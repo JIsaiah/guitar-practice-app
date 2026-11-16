@@ -301,6 +301,8 @@ private:
     // TONE3000 (VST3 プラグイン) のカード。TONE3000 を選んでいるときだけ、音色とミキサーの間に出す
     PluginToneCard pluginCard { engine };
     bool pluginStateChanged = false;   // プラグインのつまみを動かした (保存されていない)
+    // タブ譜の編集 (.gp の音のフレット)。保存するときに .gp のファイルへ書き込む (GpScoreEdit)。タブ譜を読み直したら捨てる
+    std::vector<GpScoreEdit::NoteEdit> scoreEdits;
     juce::String pluginBaselineState;  // 読み込んだとき・保存したときのプラグインの状態 (比べる元)
     bool pluginScrollPending = false;  // 次に並べたとき、TONE3000 のカードの全体が見えるところまでスクロールする
     bool relayoutPending = false;      // 並べ直しを次のメッセージで行う予定がある
