@@ -1,5 +1,6 @@
 #include "SessionListScreen.h"
 #include "../Text.h"
+#include "../TimingLog.h"
 
 namespace
 {
@@ -115,15 +116,18 @@ void SessionListScreen::showTab (Tab tab)
     sessionsTab.setToggleState (sessions, juce::dontSendNotification);
     setlistsTab.setToggleState (! sessions, juce::dontSendNotification);
 
-    // 選んだほうの塗りを、なめらかにフェードインする (画面が出ていないとき (起動時など) は、すぐにその状態へ)
+    // 選んだほうの塗りを、なめらかにフェードインする (画面が出ていないとき (起動時など) は、すぐにその状態へ)。
+    // 動いている途中で押し直したら、今の値から新しい目標へ向かう
     tabHighlightTarget = sessions ? 0.0f : 1.0f;
     if (isShowing())
     {
-        startTimerHz (60);
+        tabHighlightFrom = tabHighlight;
+        tabMoveStartMs = juce::Time::getMillisecondCounterHiRes();
+        ensureFrameVBlank();
     }
     else
     {
-        tabHighlight = tabHighlightTarget;
+        tabHighlight = tabHighlightFrom = tabHighlightTarget;
         updateTabTextColours();
     }
 
@@ -138,21 +142,79 @@ void SessionListScreen::showTab (Tab tab)
     repaint();
 }
 
-void SessionListScreen::timerCallback()
+void SessionListScreen::stepTabHighlight (double nowMs)
 {
-    // タブの塗り: 目標に向かって、残りの 2 割ずつ近づく (はじめ速く、終わりはゆっくり。0.3 秒ほどで着く)
-    if (! juce::exactlyEqual (tabHighlight, tabHighlightTarget))
-    {
-        tabHighlight += (tabHighlightTarget - tabHighlight) * 0.2f;
-        if (std::abs (tabHighlightTarget - tabHighlight) < 0.004f)
-            tabHighlight = tabHighlightTarget;
-
-        updateTabTextColours();
-        repaint (tabBar.expanded (2));
-    }
-
+    // タブの塗り: 押してからの経過時間で決める (はじめ速く、着く前にゆっくり: 3 次のイーズアウト。0.25 秒で着く)。
+    // 前は Timer で「60 回/秒、残りの 2 割ずつ」動かしていた。Timer は画面の書き換えと関係なく動くので、
+    // 120 Hz などの画面では変わる間隔が 1〜3 コマとばらつき、カタカタして見えていた
     if (juce::exactlyEqual (tabHighlight, tabHighlightTarget))
-        stopTimer();
+        return;
+
+    const auto t = (float) juce::jlimit (0.0, 1.0, (nowMs - tabMoveStartMs) / tabMoveDurationMs);
+    const auto eased = 1.0f - std::pow (1.0f - t, 3.0f);
+    tabHighlight = t >= 1.0f ? tabHighlightTarget : tabHighlightFrom + (tabHighlightTarget - tabHighlightFrom) * eased;
+
+    updateTabTextColours();
+    repaint (tabBar.expanded (2));
+}
+
+void SessionListScreen::ensureFrameVBlank()
+{
+    if (frameVBlank == nullptr)
+        frameVBlank = std::make_unique<juce::VBlankAttachment> (this, [this] (double timestampSec) { onFrame (timestampSec); });
+}
+
+bool SessionListScreen::isAnimating() const
+{
+    if (! juce::exactlyEqual (tabHighlight, tabHighlightTarget))
+        return true;
+
+    const auto now = juce::Time::getMillisecondCounterHiRes();
+    return navVisible && (now - navMoveStartMs < navMoveDurationMs || navAlpha < 1.0f);
+}
+
+void SessionListScreen::onFrame (double timestampSec)
+{
+    // 合図が渡す時刻 (ミリ秒にすると Time::getMillisecondCounterHiRes() と同じ基準) で、動きを決める
+    const auto nowMs = timestampSec * 1000.0;
+
+   #if JUCE_DEBUG
+    // 開発用 (後で消す): 合図の間隔 (画面の 1 コマ。抜けると 2 倍以上になる)・届くまでの遅れ・描くのにかかった時間
+    {
+        auto& s = frameStats;
+        const auto animating = isAnimating();
+        if (animating && ! s.active)
+            s = { true, 0, nowMs, 0.0, 0.0, 0.0, 0.0 };
+        else if (animating)
+        {
+            const auto interval = nowMs - s.lastFrameMs;
+            s.frames++;
+            s.intervalSum += interval;
+            s.intervalMax = juce::jmax (s.intervalMax, interval);
+            s.lastFrameMs = nowMs;
+        }
+
+        if (s.active)
+            s.lagMax = juce::jmax (s.lagMax, juce::Time::getMillisecondCounterHiRes() - nowMs);
+
+        if (! animating && s.active)
+        {
+            s.active = false;
+            if (s.frames > 0)
+            {
+                const auto average = s.intervalSum / s.frames;
+                TimingLog::note ("一覧のアニメーション: コマ数 " + juce::String (s.frames)
+                                 + " / 間隔の平均 " + juce::String (average, 1) + " ms (" + juce::String (1000.0 / average, 0) + " Hz)"
+                                 + " / 間隔の最大 " + juce::String (s.intervalMax, 1) + " ms"
+                                 + " / 届くまでの遅れの最大 " + juce::String (s.lagMax, 1) + " ms"
+                                 + " / 描画の最大 " + juce::String (s.paintMax, 1) + " ms");
+            }
+        }
+    }
+   #endif
+
+    stepTabHighlight (nowMs);
+    stepNavigationRing (nowMs);
 }
 
 void SessionListScreen::updateTabTextColours()
@@ -745,6 +807,10 @@ void SessionListScreen::editDetails (int row)
 
 void SessionListScreen::paint (juce::Graphics& g)
 {
+   #if JUCE_DEBUG
+    paintStartMs = juce::Time::getMillisecondCounterHiRes();   // 開発用 (後で消す): paintOverChildren までの時間を測る
+   #endif
+
     g.fillAll (getLookAndFeel().findColour (juce::ResizableWindow::backgroundColourId));
 
     // タブの帯: 「セッション｜セットリスト」を1本の帯にし、真ん中に区切りの線 (作者のレイアウト)。
@@ -903,6 +969,12 @@ void SessionListScreen::mouseMove (const juce::MouseEvent& e)
 void SessionListScreen::paintOverChildren (juce::Graphics& g)
 {
     paintNavigationRing (g);   // キーボード操作の枠 (いちばん上に描く)
+
+   #if JUCE_DEBUG
+    // 開発用 (後で消す): この画面と、中の部品 (一覧の行など) を描くのにかかった時間
+    if (frameStats.active)
+        frameStats.paintMax = juce::jmax (frameStats.paintMax, juce::Time::getMillisecondCounterHiRes() - paintStartMs);
+   #endif
 
     if (currentTab != Tab::sessions || ! entries.empty())
         return;

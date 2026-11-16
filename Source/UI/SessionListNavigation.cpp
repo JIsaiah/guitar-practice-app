@@ -303,11 +303,9 @@ void SessionListScreen::selectNavTarget (const NavTarget& target)
         navMoveStartMs = now;
     }
 
-    // 画面の書き換えの合図 (60 回/秒など、画面に合わせた間隔) ごとに、経過時間から枠の場所を決める
-    if (navVBlank == nullptr)
-        navVBlank = std::make_unique<juce::VBlankAttachment> (this, [this] { stepNavigationRing(); });
-
-    stepNavigationRing();
+    // 画面の書き換えの合図 (60 回/秒・144 回/秒など、画面に合わせた間隔) ごとに、経過時間から枠の場所を決める
+    ensureFrameVBlank();
+    stepNavigationRing (now);
 }
 
 void SessionListScreen::hideNavigation()
@@ -320,10 +318,10 @@ void SessionListScreen::hideNavigation()
 
     navVisible = false;
     navId = {};   // 次は、マウスで選んだ行から始める
-    // 画面の書き換えの合図 (navVBlank) は残しておく (合図の中から呼ばれることがあり、そこで消すと危ないため。枠が無い間は何もしない)
+    // 画面の書き換えの合図 (frameVBlank) は残しておく (合図の中から呼ばれることがあり、そこで消すと危ないため。枠が無い間は何もしない)
 }
 
-void SessionListScreen::stepNavigationRing()
+void SessionListScreen::stepNavigationRing (double now)
 {
     if (! navVisible)
         return;
@@ -336,7 +334,7 @@ void SessionListScreen::stepNavigationRing()
         return;
     }
 
-    const auto now = juce::Time::getMillisecondCounterHiRes();
+    // now は、合図が渡す書き換えの時刻 (onFrame)。呼ばれた時刻ではないので、合図が届くまでの遅れがばらついても、動きは揺れない
     const auto before = navRing;
 
     // 経過時間で決める (はじめ速く、着く前にゆっくり: 3 次のイーズアウト)。間隔が揺れても、動きはなめらか
@@ -378,6 +376,6 @@ void SessionListScreen::showKeyboardNavigationForSnapshot()
     // 動きを終わらせる
     navMoveStartMs -= navMoveDurationMs;
     navShownAtMs -= 1000.0;
-    stepNavigationRing();
-    navVBlank.reset();
+    stepNavigationRing (juce::Time::getMillisecondCounterHiRes());
+    frameVBlank.reset();
 }

@@ -42,8 +42,17 @@ void TimingLog::mark (const juce::String& label, double startMs)
     juce::ignoreUnused (label, startMs);
     return;
    #else
-    const auto line = juce::Time::getCurrentTime().formatted ("%Y-%m-%d %H:%M:%S") + "  "
-                    + label + ": " + juce::String (now() - startMs, 1) + " ms";
+    note (label + ": " + juce::String (now() - startMs, 1) + " ms");
+   #endif
+}
+
+void TimingLog::note (const juce::String& text)
+{
+   #if ! JUCE_DEBUG
+    juce::ignoreUnused (text);
+    return;
+   #else
+    const auto line = juce::Time::getCurrentTime().formatted ("%Y-%m-%d %H:%M:%S") + "  " + text;
     DBG ("Timing: " << line);
 
     const auto file = getFile();

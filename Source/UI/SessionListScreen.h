@@ -17,8 +17,7 @@
 // 上部のタブで「セッション」と「セットリスト」を切り替える (setlist-mode.md 4.1)
 class SessionListScreen final : public juce::Component,
                                 private juce::ListBoxModel,
-                                private juce::ChangeListener,
-                                private juce::Timer
+                                private juce::ChangeListener
 {
 public:
     SessionListScreen (SessionLibrary& library, SetlistStore& setlists, ThemeManager& theme, AppSettings& settings);
@@ -118,8 +117,12 @@ private:
 
     // タブの帯の、選んでいるほうの塗り。0 = 左 (セッション)、1 = 右 (セットリスト)。
     // 押すと、選んだほうの塗りが真ん中からぼかしながら広がって現れ (フェードイン)、前のほうは同じように消える (作者の指示)
+    // 動きは、画面の書き換えの合図 (frameVBlank) ごとに「押してからの経過時間」で決める (画面が 60 Hz でも 144 Hz でも同じ速さ)
     float tabHighlight = 0.0f, tabHighlightTarget = 0.0f;
-    void timerCallback() override;
+    float tabHighlightFrom = 0.0f;        // 動き始めたときの値 (途中で押し直したら、その途中の値)
+    double tabMoveStartMs = 0.0;
+    static constexpr double tabMoveDurationMs = 250.0;
+    void stepTabHighlight (double nowMs);
     void updateTabTextColours();   // 塗りが重なっているほうの文字を白に (動いている間は、重なり具合で混ぜる)
     juce::Rectangle<int> listPanel;     // 一覧の枠 (見出し・一覧・「＋」を囲む面)
 
@@ -139,7 +142,7 @@ private:
     void selectNavTarget (const NavTarget& target);
     void hideNavigation();
     std::optional<juce::Rectangle<float>> findNavTargetBounds();   // 今選んでいる場所 (無くなっていれば無し)
-    void stepNavigationRing();   // 画面の書き換えの合図ごとに、経過時間から枠の場所を決める
+    void stepNavigationRing (double nowMs);   // 画面の書き換えの合図ごとに、経過時間から枠の場所を決める
     void paintNavigationRing (juce::Graphics& g);
     void revealInViewport (juce::Viewport& viewport, juce::Rectangle<int> boundsInScreen);
     void keepKeyboardFocus();    // キーの入力を、中のボタンや一覧ではなくこの画面で受け取る
@@ -151,7 +154,24 @@ private:
     double navMoveStartMs = 0.0, navShownAtMs = 0.0;
     static constexpr double navMoveDurationMs = 180.0;   // 飛ぶのにかかる時間
     float navAlpha = 0.0f;                // 出るときに、ふわっと濃くする
-    std::unique_ptr<juce::VBlankAttachment> navVBlank;   // 枠が出ている間だけ
+
+    // 画面の書き換えの合図 (タブの塗りとキーボードの枠で共用)。合図は「その書き換えの時刻」を渡してくれるので、それで動きを決める。
+    // 合図がメッセージの列を通って届くまでの遅れ (毎回ばらつく) に左右されず、動きがなめらかになる
+    std::unique_ptr<juce::VBlankAttachment> frameVBlank;
+    void ensureFrameVBlank();          // 動きを始めるときに作る (一度作ったら、画面が消えるまで残す)
+    void onFrame (double timestampSec);
+    bool isAnimating() const;
+
+   #if JUCE_DEBUG
+    // 開発用 (後で消す): 動いている間の、合図の間隔・描くのにかかった時間を測り、動き1回ごとに timing.log へ書く
+    struct FrameStats
+    {
+        bool active = false;
+        int frames = 0;
+        double lastFrameMs = 0.0, intervalSum = 0.0, intervalMax = 0.0, lagMax = 0.0, paintMax = 0.0;
+    } frameStats;
+    double paintStartMs = 0.0;
+   #endif
 
     // 画面のどこかでマウスが押されたら、枠を消し、キーの入力をこの画面へ戻す
     struct NavMouseWatcher final : juce::MouseListener

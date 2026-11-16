@@ -17,4 +17,7 @@ namespace TimingLog
 
     // 「label: 〇〇 ms」を記録する。startMs は now() で測った開始時刻
     void mark (const juce::String& label, double startMs);
+
+    // 1行をそのまま記録する (時刻を頭に付ける)。Debug ビルドだけ
+    void note (const juce::String& text);
 }
