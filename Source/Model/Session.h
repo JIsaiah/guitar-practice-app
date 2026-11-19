@@ -89,12 +89,19 @@ struct Session
 
     double bpm = 120.0;
     TempoOrigin tempoOrigin = TempoOrigin::manual;
+    // メトロノームの拍子 (作者の指示: .gp が無いときに手で決める。例: 8/9 → 1小節 8 拍、1拍目を強く)。
+    // .gp のタブ譜があるときは、タブ譜の拍子を使う
+    int meterNumerator = 4, meterDenominator = 4;
+    static constexpr int maxMeterNumerator = 32, maxMeterDenominator = 32;
 
     int speedPercent = 100;
     int syncOffsetMs = 0;    // 拍の位置: メトロノームとタブ譜を、音源に対してずらす
     int scoreOffsetMs = 0;   // タブ譜だけをずらす (タブ譜の再生開始の位置合わせ)
     int metronomeStartMs = 0;   // 動画モードで、メトロノームを始める位置 (「ここから開始」)。0 = 指定なし
     int scoreStartMs = 0;       // タブ譜の1小節目を合わせる、音源の位置 (「ここから流す」)。0 = 音源の頭から
+    // 音源の開始・終了位置 (作者の指示: この間だけ再生する)。0 = 指定なし (頭から・最後まで)。
+    // セットリストから開いたときは、エントリの専用の値を使う (PlaybackSettingsResolver)
+    int sourceStartMs = 0, sourceEndMs = 0;
 
     bool videoInMainArea = false;   // タブ譜と動画を入れ替えて、動画を大きく表示する (タブ譜つきの動画で練習するとき)
 

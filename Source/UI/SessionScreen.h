@@ -21,6 +21,7 @@
 #include "ToneDetailPanel.h"
 #include "PluginToneCard.h"
 #include "RadialMenu.h"
+#include "FoldAnimation.h"
 
 // 練習画面 (設計書 4.2)
 //   左: タブ譜 (alphaTab) と再生位置バー     右: 音源 (動画)・音色・ミキサー・ずらし (隠せる・幅を変えられる)
@@ -181,7 +182,13 @@ private:
 
     // 音源 (動画) のカードをたたむ (カードの右上のボタン。作者の指示)
     void toggleVideoCard();
+    // 大きな枠 (左) の上で、マウスを 3 秒動かさないとカーソルを隠す。動かすとまた出す (作者の指示。タイマーから)
+    void updateCursorHiding();
+    juce::Point<float> lastMousePosition;
+    double lastMouseMoveMs = 0.0;
+    bool mainCursorHidden = false;
     bool videoCardCollapsed = false;
+    FoldAnimation videoFold { *this };   // 音源のカードを上へたたむ・下へ広げる動き (作者の指示)
 
     void sendTabTracks();      // タブ譜の音 (MIDI) で鳴らすトラック・音量・ミュートを、タブ譜のページに送る
     bool hasLeadTab() const noexcept    { return session.scorePath.isNotEmpty() && session.leadTrack >= 0; }
@@ -349,10 +356,12 @@ private:
     // 下部: 再生操作。「再生／速度／メトロノーム／ループ」のグループに分け、それぞれに見出しを付ける
     SectionHeading playHeading { "再生"_jp }, speedHeading { "速度"_jp },
                    metronomeHeading { "メトロノーム"_jp }, loopHeading { "ループ"_jp };
-    std::vector<int> bottomDividers;   // グループの区切り線の x 座標 (paint で描く)
-    static constexpr int bottomBarHeight = 84;
+    std::vector<juce::Rectangle<int>> bottomDividers;   // グループの区切り線・段の間の線 (paint で描く)
+    int bottomBarHeight = 84;          // 1段なら 84。狭いウィンドウでは2段にして高くする (作者の指示)
+    bool bottomTwoRows = false;
     // 再生の操作は、作者が置いたアイコンで描く (Icons)
     IconButton toStartButton { Icons::toStart }, rewindButton { Icons::backward }, playButton { Icons::play }, forwardButton { Icons::forward };
+    IconButton toEndButton { Icons::toEnd };   // 音源の最後 (終了位置があればそこ) へ (作者の指示)
     WheelSlider speedSlider;
     FixedTextButton metronomeButton;
     juce::TextButton metronomeSoloButton;
@@ -366,6 +375,21 @@ private:
     void setMetronomeStartHere();
     void clearMetronomeStart();
     void updateMetronomeStart();                  // エンジンへの起点・ボタン・再生バーの目印を合わせる (タイマーから)
+
+    // メトロノームの拍子を手で決める (作者の指示: .gp が無いとき。拍子のドットの右クリック)
+    void showMeterMenu();
+    void setMeter (int numerator, int denominator);
+    MusicInfo::TimeSignature getManualMeter() const { return { session.meterNumerator, session.meterDenominator }; }
+
+    // 音源の開始・終了位置 (作者の指示: 音源のカードの、リンクの下の2つのボタン。メトロノームの「ここから開始」と同じ動き)。
+    // この間だけ再生する: 頭へ・カウントダウンからの再生は開始位置から、終了位置に来たら曲の終わりとして止まる
+    RightClickableButton sourceStartButton, sourceEndButton;
+    void setSourceRangeHere (bool start);
+    void clearSourceRange (bool start);
+    void updateSourceRangeButtons();
+    double getPlayStart() const;                  // 再生の始まり (開始位置。無ければ 0)
+    double getPlayEnd (double length) const;      // 再生の終わり (終了位置。無ければ長さ)
+    bool hasSourceRange() const noexcept { return session.sourceStartMs > 0 || session.sourceEndMs > 0; }
 
     // タブ譜の開始位置 (「ここから流す」。タブ譜の上の「小節を同じ幅に」の左。作者のレイアウト)。
     // 再生バーで選んだ位置に、タブ譜の1小節目を合わせる。右クリックで解除

@@ -27,6 +27,16 @@ SetlistCard::SetlistCard (Setlist s, SessionLibrary& l, SetlistStore& st, ThemeM
 
     setMouseCursor (juce::MouseCursor::PointingHandCursor);
     updatePlayButton();
+
+    // 開く・たたむ動き: 動いている間、カードの高さが変わる (一覧が並べ直す)。たたみ終わったら曲順を隠す
+    openFold.setTarget (false, false);
+    openFold.onChange = [this]
+    {
+        repaint();
+        if (onLayoutChanged != nullptr)
+            onLayoutChanged();
+    };
+    openFold.onFinished = [this] { entryList.setVisible (expanded); };
 }
 
 void SetlistCard::updatePlayButton()
@@ -41,7 +51,11 @@ void SetlistCard::setExpanded (bool shouldBeExpanded)
         return;
 
     expanded = shouldBeExpanded;
-    entryList.setVisible (expanded);
+    if (expanded)
+        entryList.setVisible (true);   // たたむときは、たたみ終わってから隠す (openFold.onFinished)
+    openFold.setTarget (expanded);     // 画面に出ていないとき (作ったとき) は、すぐにその高さ
+    if (! openFold.isAnimating())
+        entryList.setVisible (expanded);
     repaint();
 
     if (onLayoutChanged != nullptr)
@@ -50,7 +64,8 @@ void SetlistCard::setExpanded (bool shouldBeExpanded)
 
 int SetlistCard::getPreferredHeight() const
 {
-    return expanded ? headerHeight + entryList.getPreferredHeight() + addRowHeight : headerHeight;
+    // 開き具合の分だけ、曲順と「＋ 曲を追加」の高さを足す (たたむ・開く途中は、その途中の高さ)
+    return headerHeight + juce::roundToInt ((entryList.getPreferredHeight() + addRowHeight) * openFold.getValue());
 }
 
 void SetlistCard::addSession (const juce::String& sessionId)
@@ -154,15 +169,16 @@ void SetlistCard::paint (juce::Graphics& g)
     g.drawText (setlist.entries.empty() ? "曲がありません。開いて「＋ 曲を追加」から追加できます"_jp : describeSummary(),
                 header.withTrimmedTop (headerHeight / 2 + 4), juce::Justification::topLeft, true);
 
-    if (! expanded)
+    if (openFold.getValue() <= 0.0)
         return;
 
     // 見出しと曲順の境目 (カードの幅いっぱいに近い線)
     g.setColour (findColour (ThemeColourIds::border));
     g.fillRect (16, headerHeight - 1, getWidth() - 32, 1);
 
-    // 「＋ 曲を追加」の行。曲の行と同じ列 (番号の列に「＋」、曲名の列に文字) に置く
-    auto row = getAddRowArea();
+    // 「＋ 曲を追加」の行。曲の行と同じ列 (番号の列に「＋」、曲名の列に文字) に置く。
+    // たたむ・開く途中も、開いたときの場所に描く (カードの外にはみ出す分は描かれない)
+    auto row = juce::Rectangle<int> (0, headerHeight + entryList.getPreferredHeight(), getWidth(), addRowHeight);
     if (addHover)
         AppLookAndFeel::fillListHighlight (g, SetlistEntryList::highlightArea (row), findColour (ThemeColourIds::listSelection));
     g.setColour (findColour (ThemeColourIds::border));
@@ -182,7 +198,8 @@ void SetlistCard::resized()
     auto header = area.removeFromTop (headerHeight);
     playButton.setBounds (header.removeFromRight (200).reduced (16, 12));
 
-    entryList.setBounds (area.removeFromTop (entryList.getPreferredHeight()));
+    // 曲順は、開いたときの高さのまま置く (たたむ途中は、カードの外にはみ出す分が見えないだけ)
+    entryList.setBounds (area.getX(), area.getY(), area.getWidth(), entryList.getPreferredHeight());
 }
 
 void SetlistCard::mouseMove (const juce::MouseEvent& e)

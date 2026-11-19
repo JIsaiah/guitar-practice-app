@@ -34,6 +34,8 @@ SetlistEntry& Setlist::addEntry (const juce::String& sessionId, const Session* s
     {
         entry.overrides.loopStartSec = source->loopStartMs / 1000.0;
         entry.overrides.loopEndSec = source->loopEndMs / 1000.0;
+        entry.overrides.sourceStartSec = source->sourceStartMs / 1000.0;
+        entry.overrides.sourceEndSec = source->sourceEndMs / 1000.0;
     }
 
     entries.push_back (entry);
@@ -107,6 +109,7 @@ juce::var Setlist::toVar() const
             { "overrides", makeObject ({
                 { "speed", o.speed },
                 { "loop",  makeObject ({ { "enabled", o.loopEnabled }, { "startSec", o.loopStartSec }, { "endSec", o.loopEndSec } }) },
+                { "range", makeObject ({ { "startSec", o.sourceStartSec }, { "endSec", o.sourceEndSec } }) },
             }) },
         }));
     }
@@ -149,6 +152,8 @@ std::optional<Setlist> Setlist::fromVar (const juce::var& value)
             entry.overrides.loopEnabled = loop["enabled"].isVoid() ? false : (bool) loop["enabled"];
             entry.overrides.loopStartSec = doubleOr (loop["startSec"], 0.0);
             entry.overrides.loopEndSec = doubleOr (loop["endSec"], 0.0);
+            entry.overrides.sourceStartSec = juce::jmax (0.0, doubleOr (overrides["range"]["startSec"], 0.0));
+            entry.overrides.sourceEndSec = juce::jmax (0.0, doubleOr (overrides["range"]["endSec"], 0.0));
 
             s.entries.push_back (entry);
         }

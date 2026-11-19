@@ -194,6 +194,8 @@ SessionScreen::SessionScreen (AudioEngine& e, SessionStore& s, ThemeManager& t, 
 
     // 音源のカードをたたむボタン (右上)。たたんだかはアプリの設定に覚える
     videoCardCollapsed = settings.getVideoCardCollapsed();
+    videoFold.setTarget (! videoCardCollapsed, false);
+    videoFold.onChange = [this] { resized(); repaint(); };
     videoCollapseButton.setButtonText (videoCardCollapsed ? juce::String::fromUTF8 ("▼") : juce::String::fromUTF8 ("▲"));
     videoCollapseButton.setTooltip (videoCardCollapsed ? "音源のカードを広げる"_jp : "音源のカードをたたむ"_jp);
     videoCollapseButton.setMouseClickGrabsKeyboardFocus (false);
@@ -448,12 +450,45 @@ SessionScreen::SessionScreen (AudioEngine& e, SessionStore& s, ThemeManager& t, 
     forwardButton.setIconAfterText (true);   // 「1小節 ▶▶」(作者のレイアウト)
     toStartButton.setTooltip ("曲の頭に戻る (Home キー)"_jp);
     toStartButton.onClick = [this] { perform (Command::goToStart); };
+    toEndButton.setIconScale (0.45f);
+    toEndButton.setTooltip ("音源の最後へ (終了位置を決めていれば、そこへ)"_jp);
+    toEndButton.onClick = [this] { perform (Command::goToEnd); };
     rewindButton.onClick = [this] { perform (Command::rewind); };
     playButton.onClick = [this] { perform (Command::togglePlay); };
     forwardButton.onClick = [this] { perform (Command::fastForward); };
     metronomeButton.onClick = [this] { perform (Command::toggleMetronome); };
     metronomeSoloButton.onClick = [this] { toggleMetronomeSolo(); };
     metronomeDots.onClick = [this] { toggleBigMetronome(); };
+    metronomeDots.onRightClick = [this] { showMeterMenu(); };
+
+    // 音源の開始・終了位置: 押すと今の位置。右クリックで解除・そこへ移動 (メトロノームの「ここから開始」と同じ)
+    for (auto* b : { &sourceStartButton, &sourceEndButton })
+    {
+        const bool start = b == &sourceStartButton;
+        b->setMouseClickGrabsKeyboardFocus (false);
+        b->onClick = [this, start] { setSourceRangeHere (start); };
+        b->onRightClick = [this, b, start]
+        {
+            if ((start ? session.sourceStartMs : session.sourceEndMs) <= 0)
+                return;
+
+            juce::PopupMenu menu;
+            menu.addItem (1, start ? "開始位置を解除"_jp : "終了位置を解除"_jp);
+            menu.addItem (2, start ? "開始位置へ移動"_jp : "終了位置へ移動"_jp);
+            menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (b),
+                                [safe = juce::Component::SafePointer (this), start] (int result)
+            {
+                if (safe == nullptr)
+                    return;
+                if (result == 1)
+                    safe->clearSourceRange (start);
+                if (result == 2 && safe->sourceReady)
+                    safe->seekTo ((start ? safe->session.sourceStartMs : safe->session.sourceEndMs) / 1000.0);
+            });
+        };
+        addChildComponent (b);
+    }
+    updateSourceRangeButtons();
 
     metronomeStartButton.onClick = [this] { setMetronomeStartHere(); };
     metronomeStartButton.onRightClick = [this]
@@ -531,7 +566,7 @@ SessionScreen::SessionScreen (AudioEngine& e, SessionStore& s, ThemeManager& t, 
              &scoreStartButton,
              &sideScroll, &tunerButton,
              &playHeading, &speedHeading, &metronomeHeading, &loopHeading,
-             &toStartButton, &rewindButton, &playButton, &forwardButton, &speedSlider, &equalBarsButton,
+             &toStartButton, &rewindButton, &playButton, &forwardButton, &toEndButton, &speedSlider, &equalBarsButton,
              &metronomeButton, &metronomeSoloButton, &metronomeDots, &metronomeStartButton,
              &loopStartButton, &loopEndButton, &loopButton })
     {
@@ -647,6 +682,8 @@ SessionScreen::~SessionScreen()
     scoreViewer.onEditContext = nullptr;
     scoreViewer.onUndoInsert = nullptr;
     scoreViewer.onPreviewLoaded = nullptr;
+    scoreViewer.setCursorHidden (false);   // ほかの画面でもページを使うので、カーソルを戻しておく
+    youtube.setCursorHidden (false);
     scoreViewer.endEditing();
     scoreViewer.hide();
 
@@ -684,7 +721,7 @@ void SessionScreen::applySessionToEngine()
 
 void SessionScreen::setTransportEnabled (bool enabled)
 {
-    for (auto* button : std::initializer_list<juce::Button*> { &toStartButton, &rewindButton, &playButton, &forwardButton,
+    for (auto* button : std::initializer_list<juce::Button*> { &toStartButton, &rewindButton, &playButton, &forwardButton, &toEndButton,
                                                                &loopStartButton, &loopEndButton, &loopButton })
         button->setEnabled (enabled);
 }
@@ -1602,7 +1639,8 @@ void SessionScreen::perform (Command command)
     switch (command)
     {
         case Command::togglePlay:      togglePlay(); break;
-        case Command::goToStart:       if (sourceReady) seekTo (0.0); break;
+        case Command::goToStart:       if (sourceReady) seekTo (getPlayStart()); break;   // 開始位置があれば、そこへ
+        case Command::goToEnd:         if (sourceReady) seekTo (getPlayEnd (getLength())); break;
         // タブ譜モードでは小節単位、動画モード (とタブ譜がないとき) は秒単位
         case Command::rewind:          if (isBarMode()) skipBars (-1); else skip (-settings.getSkipSeconds()); break;
         case Command::fastForward:     if (isBarMode()) skipBars (1);  else skip (settings.getSkipSeconds()); break;
@@ -1619,6 +1657,8 @@ void SessionScreen::perform (Command command)
 
 bool SessionScreen::keyPressed (const juce::KeyPress& key)
 {
+    // Esc: チューナーを閉じる (作者の指示)
+    if (key == juce::KeyPress::escapeKey && tunerPanel != nullptr) { perform (Command::toggleTuner); return true; }
     if (key == juce::KeyPress::spaceKey)  { perform (Command::togglePlay); return true; }
     if (key == juce::KeyPress::returnKey) { perform (Command::tapTempo); return true; }
     if (key == juce::KeyPress::leftKey)   { perform (Command::rewind); return true; }
@@ -1741,6 +1781,14 @@ void SessionScreen::startPlayback()
         return;
     }
 
+    // 音源の開始・終了位置 (作者の指示): 開始位置より前・終了位置より後ろからは、開始位置から始める
+    if (hasSourceRange())
+    {
+        const auto position = getPosition();
+        if (position < getPlayStart() - 0.05 || position >= getPlayEnd (getLength()) - 0.05)
+            seekTo (getPlayStart());
+    }
+
     if (isYouTube())
     {
         youtube.play();   // 最後まで再生していたら、YouTube が頭から再生する
@@ -1749,7 +1797,7 @@ void SessionScreen::startPlayback()
 
     // 最後まで再生していたら、頭から
     if (engine.getPositionSeconds() >= engine.getSourceLengthSeconds() - 0.05)
-        engine.seekSeconds (0.0);
+        engine.seekSeconds (getPlayStart());
 
     engine.setPlaying (true);
 }
@@ -1822,7 +1870,9 @@ void SessionScreen::checkSongEnd (bool playing, double position, double length)
 
     // YouTube は「終了」の状態 (0) でも終わりとみなす。位置の報告は間をあけて届くので、
     // 最後に届いた位置が、動画の長さより少し手前のことがある
-    const bool reachedEnd = (length > 0.0 && position >= length - 0.25)
+    // 終了位置を決めていれば、そこが曲の終わり
+    const auto end = getPlayEnd (length);
+    const bool reachedEnd = (end > 0.0 && position >= end - 0.25)
                             || (isYouTube() && youtube.getState().playerState == 0);
 
     if (session.loopEnabled || ! reachedEnd)
@@ -1979,7 +2029,15 @@ void SessionScreen::updateMetronomeDots (double positionBeats)
     const bool running = metronomeActive && clock.running && clock.seconds >= 0.0;
     const auto beats = running ? clock.seconds * session.bpm / 60.0 : positionBeats;
 
-    const auto where = MusicInfo::locateBeat (beats, bars, signatures);
+    auto where = MusicInfo::locateBeat (beats, bars, signatures);
+    if (! scoreBars)
+    {
+        // .gp が無いとき: 手で決めた拍子 (作者の指示)。1小節は分子の数の拍
+        const auto meter = getManualMeter();
+        where.signature = meter;
+        where.beatInBar = beats >= 0.0 ? (int) std::floor (beats) % juce::jmax (1, meter.numerator) : 0;
+    }
+    engine.setMetronomeBeatsPerBar (scoreBars ? 4 : session.meterNumerator);   // 1拍目を強く鳴らす間隔
     const auto active = running ? where.beatInBar : -1;
     metronomeDots.setState (where.signature.numerator, where.signature.denominator, active);
 
@@ -2167,6 +2225,125 @@ void SessionScreen::setMetronomeStartHere()
     updateMetronomeStart();
 }
 
+//==============================================================================
+// メトロノームの拍子 (作者の指示: .gp が無いときに手で決める。例: 8/9 にすると、8拍ごとに1拍目を強く鳴らす)
+void SessionScreen::showMeterMenu()
+{
+    juce::PopupMenu menu;
+    if (usesScoreBars())
+    {
+        menu.addItem (0, "タブ譜 (.gp) の拍子を使っています"_jp, false);
+    }
+    else
+    {
+        menu.addSectionHeader ("メトロノームの拍子"_jp);
+        static const int common[][2] = { { 2, 4 }, { 3, 4 }, { 4, 4 }, { 5, 4 }, { 6, 8 }, { 7, 8 }, { 9, 8 }, { 12, 8 } };
+        int id = 1;
+        for (const auto& m : common)
+            menu.addItem (id++, juce::String (m[0]) + "/" + juce::String (m[1]), true,
+                          session.meterNumerator == m[0] && session.meterDenominator == m[1]);
+        menu.addSeparator();
+        menu.addItem (100, "ほかの拍子を入力…"_jp);
+    }
+
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&metronomeDots),
+                        [safe = juce::Component::SafePointer (this)] (int result)
+    {
+        if (safe == nullptr || result <= 0)
+            return;
+
+        static const int common[][2] = { { 2, 4 }, { 3, 4 }, { 4, 4 }, { 5, 4 }, { 6, 8 }, { 7, 8 }, { 9, 8 }, { 12, 8 } };
+        if (result <= (int) std::size (common))
+        {
+            safe->setMeter (common[result - 1][0], common[result - 1][1]);
+            return;
+        }
+
+        // ほかの拍子: 「8/9」のように入れる
+        auto* window = new juce::AlertWindow ("メトロノームの拍子"_jp, "「8/9」のように、分子/分母 を入れてください (分子が1小節の拍の数)"_jp,
+                                              juce::MessageBoxIconType::NoIcon, safe.getComponent());
+        window->addTextEditor ("meter", juce::String (safe->session.meterNumerator) + "/" + juce::String (safe->session.meterDenominator));
+        window->addButton ("OK", 1, juce::KeyPress (juce::KeyPress::returnKey));
+        window->addButton ("キャンセル"_jp, 0, juce::KeyPress (juce::KeyPress::escapeKey));
+        window->enterModalState (true, juce::ModalCallbackFunction::create ([safe, window] (int ok)
+        {
+            if (safe == nullptr || ok != 1)
+                return;
+            const auto text = window->getTextEditorContents ("meter").trim();
+            const auto n = text.upToFirstOccurrenceOf ("/", false, false).trim().getIntValue();
+            const auto d = text.containsChar ('/') ? text.fromFirstOccurrenceOf ("/", false, false).trim().getIntValue() : 4;
+            if (n < 1 || n > Session::maxMeterNumerator || d < 1 || d > Session::maxMeterDenominator)
+            {
+                safe->setStatus ("拍子は 1/1 から "_jp + juce::String (Session::maxMeterNumerator) + "/" + juce::String (Session::maxMeterDenominator)
+                                 + " の間で入れてください"_jp);
+                return;
+            }
+            safe->setMeter (n, d);
+        }), true);
+    });
+}
+
+void SessionScreen::setMeter (int numerator, int denominator)
+{
+    session.meterNumerator = juce::jlimit (1, Session::maxMeterNumerator, numerator);
+    session.meterDenominator = juce::jlimit (1, Session::maxMeterDenominator, denominator);
+    setStatus ("メトロノームの拍子を "_jp + juce::String (session.meterNumerator) + "/" + juce::String (session.meterDenominator)
+               + " にしました"_jp);
+}
+
+//==============================================================================
+// 音源の開始・終了位置 (作者の指示)
+double SessionScreen::getPlayStart() const
+{
+    return session.sourceStartMs / 1000.0;
+}
+
+double SessionScreen::getPlayEnd (double length) const
+{
+    return session.sourceEndMs > 0 ? session.sourceEndMs / 1000.0 : length;
+}
+
+void SessionScreen::setSourceRangeHere (bool start)
+{
+    if (! sourceReady)
+        return;
+
+    const auto ms = juce::jmax (1, juce::roundToInt (getPosition() * 1000.0));   // 0 は「指定なし」なので 1ms 以上
+    // 開始は終了より前、終了は開始より後ろでないといけない。逆になったら、もう片方を外す
+    if (start)
+    {
+        session.sourceStartMs = ms;
+        if (session.sourceEndMs > 0 && session.sourceEndMs <= ms)
+            session.sourceEndMs = 0;
+    }
+    else
+    {
+        session.sourceEndMs = ms;
+        if (session.sourceStartMs > 0 && session.sourceStartMs >= ms)
+            session.sourceStartMs = 0;
+    }
+
+    setStatus ((start ? "音源の開始位置を "_jp : "音源の終了位置を "_jp) + formatTime (ms / 1000.0) + " にしました"_jp);
+    updateSourceRangeButtons();
+}
+
+void SessionScreen::clearSourceRange (bool start)
+{
+    (start ? session.sourceStartMs : session.sourceEndMs) = 0;
+    setStatus (start ? "音源の開始位置を解除しました"_jp : "音源の終了位置を解除しました"_jp);
+    updateSourceRangeButtons();
+}
+
+void SessionScreen::updateSourceRangeButtons()
+{
+    sourceStartButton.setEnabled (sourceReady);
+    sourceEndButton.setEnabled (sourceReady);
+    sourceStartButton.setButtonText (session.sourceStartMs > 0 ? "開始 "_jp + formatTime (session.sourceStartMs / 1000.0) : "開始位置"_jp);
+    sourceEndButton.setButtonText (session.sourceEndMs > 0 ? "終了 "_jp + formatTime (session.sourceEndMs / 1000.0) : "終了位置"_jp);
+    sourceStartButton.setTooltip ("今の位置を、音源の開始位置にします (頭へ・再生はここから)。右クリックで解除"_jp);
+    sourceEndButton.setTooltip ("今の位置を、音源の終了位置にします (ここで曲の終わりとして止まる)。右クリックで解除"_jp);
+}
+
 void SessionScreen::clearMetronomeStart()
 {
     session.metronomeStartMs = 0;
@@ -2284,7 +2461,7 @@ void SessionScreen::updateSwapUi()
                                              : "音源があるときに使えます"_jp);
     // ローカル音源を入れ替えたとき: 左の大きな枠に、今の時刻と音源の名前を出す (クリックで再生・停止)
     scoreView.setAudioMode (isSwapped() && isLocalSource(), juce::File (session.sourcePath).getFileName());
-    sourceHeading.setText (isSwapped() ? "タブ譜 (動画と入れ替え中)"_jp : "音源"_jp, juce::dontSendNotification);
+    sourceHeading.setText (isSwapped() ? "タブ譜"_jp : "音源"_jp, juce::dontSendNotification);   // 「(動画と入れ替え中)」は出さない (作者の指示)
     updateSkipButtons();
     updateLoop();   // ループの A・B の表示 (小節 ⇔ 時刻) を合わせる
 
@@ -2826,6 +3003,7 @@ void SessionScreen::toggleVideoCard()
     settings.setVideoCardCollapsed (videoCardCollapsed);
     videoCollapseButton.setButtonText (videoCardCollapsed ? juce::String::fromUTF8 ("▼") : juce::String::fromUTF8 ("▲"));
     videoCollapseButton.setTooltip (videoCardCollapsed ? "音源のカードを広げる"_jp : "音源のカードをたたむ"_jp);
+    videoFold.setTarget (! videoCardCollapsed);   // 上へたたむ・下へ広げる (動いている間、毎回 resized を呼ぶ)
     resized();
 }
 
@@ -2933,6 +3111,7 @@ void SessionScreen::toggleTuner()
     showOverlay (tunerPanel.get());
     tunerButton.setToggleState (true, juce::dontSendNotification);
     resized();
+    grabKeyboardFocus();   // Esc で閉じられるように (タブ譜のページがキーを持っていることがある)
 }
 
 // 後ろの画面を少し暗くして、目が重ねたパネルに行くようにする。panel が nullptr なら幕を外す
@@ -3207,8 +3386,47 @@ void SessionScreen::toggleTonePanel()
 }
 
 //==============================================================================
+namespace
+{
+    // その場所のいちばん上の窓が、この画面の窓か (メニュー・ポップアップが重なっていない)
+    bool isTopWindowAt (juce::Component& self, juce::Point<float> screen)
+    {
+        auto* under = juce::Desktop::getInstance().findComponentAt (screen.roundToInt());
+        return under != nullptr && under->getTopLevelComponent() == self.getTopLevelComponent();
+    }
+}
+
+void SessionScreen::updateCursorHiding()
+{
+    const auto now = juce::Time::getMillisecondCounterHiRes();
+    const auto mouse = juce::Desktop::getInstance().getMainMouseSource().getScreenPosition();
+    if (mouse != lastMousePosition)
+    {
+        lastMousePosition = mouse;
+        lastMouseMoveMs = now;
+    }
+
+    // 大きな枠 (タブ譜・入れ替えた動画・ローカル音源の時刻) の上にあり、3 秒動いていない。
+    // メニュー・ポップアップを出しているとき、マウスのボタンを押しているときは隠さない
+    const auto overMain = isShowing() && scoreView.isShowing()
+                       && scoreView.getScreenBounds().toFloat().contains (mouse)
+                       && juce::ModalComponentManager::getInstance()->getNumModalComponents() == 0
+                       && isTopWindowAt (*this, mouse)
+                       && ! juce::ModifierKeys::currentModifiers.isAnyMouseButtonDown();
+    const bool hide = overMain && now - lastMouseMoveMs >= 3000.0;
+    if (hide == mainCursorHidden)
+        return;
+
+    mainCursorHidden = hide;
+    scoreView.setMouseCursor (hide ? juce::MouseCursor::NoCursor : juce::MouseCursor::NormalCursor);
+    scoreViewer.setCursorHidden (hide);
+    youtube.setCursorHidden (hide);
+    juce::Desktop::getInstance().getMainMouseSource().forceMouseCursorUpdate();
+}
+
 void SessionScreen::timerCallback()
 {
+    updateCursorHiding();
     if (loading)
         updateLoading();
     updateScoreOnly (juce::Time::getMillisecondCounterHiRes());
@@ -3228,13 +3446,18 @@ void SessionScreen::timerCallback()
     if (playing != wasPlaying)
         logMetronomeState (playing ? "再生を開始"_jp : "再生を停止"_jp);
 
+    // 終了位置に来たら止める (ループ中は止めない)。止めたあと、checkSongEnd が曲の終わりとして扱う
+    if (playing && session.sourceEndMs > 0 && ! session.loopEnabled && ! isScoreOnly() && position >= session.sourceEndMs / 1000.0)
+        pauseTransport();
+
     checkSongEnd (playing, position, length);
     wasPlaying = playing;
 
     if (openContext.isSetlist())
     {
         const auto& info = setlistBar.getInfo();
-        const auto fraction = length > 0.0 ? position / length : 0.0;
+        const auto rangeStart = getPlayStart(), rangeEnd = getPlayEnd (length);
+        const auto fraction = rangeEnd > rangeStart ? (position - rangeStart) / (rangeEnd - rangeStart) : 0.0;
         // 最後の曲になったら 100% にする (作者の指示)
         if (info.count > 0)
             setlistBar.setProgress (info.position >= info.count ? 1.0
@@ -3244,11 +3467,13 @@ void SessionScreen::timerCallback()
 
     updateMetronomeStart();
     updateScoreStartButton();
+    updateSourceRangeButtons();
 
     // 小節・拍 (一定テンポ + ずらし。設計書 3.1)。動画モードでメトロノームの開始位置があれば、そこが 1小節目
     const auto beats = (position - getMetronomeOffsetSeconds()) * session.bpm / 60.0;
-    const auto bar = beats >= 0.0 ? (int) std::floor (beats / 4.0) + 1 : 0;
-    const auto beat = beats >= 0.0 ? (int) std::floor (beats) % 4 + 1 : 0;
+    const auto beatsPerBar = usesScoreBars() ? 4 : juce::jmax (1, session.meterNumerator);   // 手で決めた拍子 (.gp が無いとき)
+    const auto bar = beats >= 0.0 ? (int) std::floor (beats / beatsPerBar) + 1 : 0;
+    const auto beat = beats >= 0.0 ? (int) std::floor (beats) % beatsPerBar + 1 : 0;
     positionLabel.setText ("小節 "_jp + juce::String (bar) + "   拍 "_jp + juce::String (beat), juce::dontSendNotification);
     scoreView.setBarAndBeat (bar, beat);
     scoreView.setTimeText (formatTime (position) + " / " + formatTime (length));   // ローカル音源を入れ替えたときに出す
@@ -3267,6 +3492,8 @@ void SessionScreen::timerCallback()
     }
 
     timeline.setState (position, length, session.loopStartMs / 1000.0, session.loopEndMs / 1000.0, session.loopEnabled);
+    timeline.setRange (session.sourceStartMs > 0 ? session.sourceStartMs / 1000.0 : -1.0,
+                       session.sourceEndMs > 0 ? session.sourceEndMs / 1000.0 : -1.0);
 
     // プラグインのつまみを動かしたか (1秒ごと。状態を取り出すのは軽くないため)
     if (--pluginStateCheckCountdown <= 0)
@@ -3355,8 +3582,8 @@ void SessionScreen::paint (juce::Graphics& g)
     g.setColour (findColour (ThemeColourIds::border));
     g.drawRoundedRectangle (bottom.reduced (0.5f), 10.0f, 1.0f);
 
-    for (auto x : bottomDividers)
-        g.fillRect ((float) x, bottom.getY() + 12.0f, 1.0f, bottom.getHeight() - 24.0f);
+    for (const auto& line : bottomDividers)   // グループの区切り (縦) と、2段のときの段の間 (横)
+        g.fillRect (line);
 }
 
 void SessionScreen::placeWebViews()
@@ -3370,8 +3597,10 @@ void SessionScreen::placeWebViews()
     auto& videoTarget = swapped ? static_cast<juce::Component&> (scoreView) : static_cast<juce::Component&> (videoView);
     auto& scoreTarget = swapped ? static_cast<juce::Component&> (videoView) : static_cast<juce::Component&> (scoreView);
     // 音源のカードをたたんでいるときは、そこに重ねるもの (ふだんは動画、入れ替え中はタブ譜) を出さない
-    const bool videoTargetVisible = swapped || (sidePanelVisible && ! videoCardCollapsed);
-    const bool scoreTargetVisible = ! swapped || (sidePanelVisible && ! videoCardCollapsed);
+    // たたむ・広げる動きの間も出さない (ページを毎回動かすと、ガタついて見えるため)。着いたら出す
+    const bool cardOpen = ! videoCardCollapsed && ! videoFold.isAnimating();
+    const bool videoTargetVisible = swapped || (sidePanelVisible && cardOpen);
+    const bool scoreTargetVisible = ! swapped || (sidePanelVisible && cardOpen);
 
     if (isYouTube() && canShow && videoTargetVisible)
         youtube.placeOver (videoTarget);
@@ -3424,40 +3653,23 @@ void SessionScreen::resized()
     area.removeFromTop (12);
 
     //==== 下部: 「再生／速度／メトロノーム／ループ」のグループ。それぞれ上に見出し、間に区切り線 ====
+    // 作者のレイアウト: 左から「速度 | ループ | メトロノーム | 再生」。
+    // 1段に入らない狭いウィンドウでは2段にする (作者の指示): 上「速度 | ループ」、下「メトロノーム | 再生」。
+    // 2段のときは、ボタンを低くし、どのボタンも同じ幅にする
+    constexpr int gap = 6, groupGap = 28;
+    constexpr int playWidth = 84 * 5 + gap * 4;   // 頭へ・戻る・再生・進む・最後へ
+    constexpr int dotsWidth = 116;   // 拍子 ("4/4") とドット。拍子の数が多いときは、ドットを小さくして収める
+    constexpr int metronomeWidth = 120 + 84 + dotsWidth + gap * 2;
+    constexpr int loopWidth = 96 + 96 + 96 + gap * 2;
+    constexpr int minSpeedWidth = 160;
+    bottomTwoRows = area.getWidth() - 28 < minSpeedWidth + loopWidth + metronomeWidth + playWidth + groupGap * 3;
+    constexpr int rowGap = 10;
+    bottomBarHeight = bottomTwoRows ? 2 * (20 + 2 + 36) + rowGap + 16 : 84;
+
     bottomBarArea = area.removeFromBottom (bottomBarHeight);
     auto bottom = bottomBarArea.reduced (14, 8);
     area.removeFromBottom (12);
     bottomDividers.clear();
-
-    // 作者のレイアウト: 左から「速度 | ループ | メトロノーム | 再生」
-    constexpr int gap = 6, groupGap = 28;
-    constexpr int playWidth = 84 * 4 + gap * 3;
-    constexpr int dotsWidth = 116;   // 拍子 ("4/4") とドット。拍子の数が多いときは、ドットを小さくして収める
-    constexpr int metronomeWidth = 120 + 84 + dotsWidth + gap * 2;
-    constexpr int loopWidth = 96 + 96 + 96 + gap * 2;
-    const auto speedWidth = juce::jlimit (130, 360, bottom.getWidth() - playWidth - metronomeWidth - loopWidth - groupGap * 3);
-
-    // 大きな画面では、速度の幅が上限になっても余白が残る。残りを、帯の左右の端とグループの間 (3か所) に分ける。
-    // 作者の指示で、端を多め (1か所あたり、間の2倍) にする: 端2か所 × 2 + 間3か所 × 1 = 7 つ分に割る
-    const auto spare = juce::jmax (0, bottom.getWidth() - (speedWidth + loopWidth + metronomeWidth + playWidth + groupGap * 3));
-    const auto spareUnit = spare / 7;
-    const auto sectionGap = groupGap + spareUnit;
-    bottom.reduce ((spare - spareUnit * 3) / 2, 0);   // 端の分 (割り切れない端数も、ここで左右に分ける)
-
-    // 見出し (20px) と、その下に部品の行 (残り)
-    const auto group = [&] (SectionHeading& heading, int width, bool divider)
-    {
-        auto g = bottom.removeFromLeft (width);
-        heading.setBounds (g.removeFromTop (20));
-        g.removeFromTop (2);
-
-        if (divider)
-        {
-            bottomDividers.push_back (bottom.getX() + sectionGap / 2);
-            bottom.removeFromLeft (sectionGap);
-        }
-        return g;
-    };
 
     const auto place = [] (juce::Rectangle<int>& row, juce::Component& c, int width)
     {
@@ -3465,18 +3677,81 @@ void SessionScreen::resized()
         row.removeFromLeft (gap);
     };
 
-    auto speed = group (speedHeading, speedWidth, true);
-    speedSlider.setBounds (speed);
+    // 見出し (20px) と、その下に部品の行 (残り)。divider: 後ろにグループの間 (区切り線) を取る
+    const auto group = [this] (juce::Rectangle<int>& row, SectionHeading& heading, int width, int sectionGap, bool divider)
+    {
+        auto g = row.removeFromLeft (width);
+        heading.setBounds (g.removeFromTop (20));
+        g.removeFromTop (2);
 
-    auto loop = group (loopHeading, loopWidth, true);
-    place (loop, loopStartButton, 96);
-    place (loop, loopEndButton, 96);
-    place (loop, loopButton, 96);
+        if (divider)
+        {
+            bottomDividers.push_back ({ row.getX() + sectionGap / 2, row.getY() + 4, 1, row.getHeight() - 8 });
+            row.removeFromLeft (sectionGap);
+        }
+        return g;
+    };
 
-    auto metronome = group (metronomeHeading, metronomeWidth, true);
-    place (metronome, metronomeButton, 120);
-    place (metronome, metronomeSoloButton, 84);
-    place (metronome, metronomeDots, dotsWidth);
+    if (! bottomTwoRows)
+    {
+        const auto speedWidth = juce::jlimit (minSpeedWidth, 360, bottom.getWidth() - playWidth - metronomeWidth - loopWidth - groupGap * 3);
+
+        // 大きな画面では、速度の幅が上限になっても余白が残る。残りを、帯の左右の端とグループの間 (3か所) に分ける。
+        // 作者の指示で、端を多め (1か所あたり、間の2倍) にする: 端2か所 × 2 + 間3か所 × 1 = 7 つ分に割る
+        const auto spare = juce::jmax (0, bottom.getWidth() - (speedWidth + loopWidth + metronomeWidth + playWidth + groupGap * 3));
+        const auto spareUnit = spare / 7;
+        const auto sectionGap = groupGap + spareUnit;
+        bottom.reduce ((spare - spareUnit * 3) / 2, 0);   // 端の分 (割り切れない端数も、ここで左右に分ける)
+
+        auto speed = group (bottom, speedHeading, speedWidth, sectionGap, true);
+        speedSlider.setBounds (speed);
+
+        auto loop = group (bottom, loopHeading, loopWidth, sectionGap, true);
+        place (loop, loopStartButton, 96);
+        place (loop, loopEndButton, 96);
+        place (loop, loopButton, 96);
+
+        auto metronome = group (bottom, metronomeHeading, metronomeWidth, sectionGap, true);
+        place (metronome, metronomeButton, 120);
+        place (metronome, metronomeSoloButton, 84);
+        place (metronome, metronomeDots, dotsWidth);
+
+        auto play = group (bottom, playHeading, playWidth, sectionGap, false);
+        for (auto* b : std::initializer_list<juce::Component*> { &toStartButton, &rewindButton, &playButton, &forwardButton, &toEndButton })
+            place (play, *b, 84);
+    }
+    else
+    {
+        // ボタンの幅 (どれも同じ): 下の段 (メトロノーム3つ + 再生5つ) が入る幅
+        auto row1 = bottom.removeFromTop ((bottom.getHeight() - rowGap) / 2);
+        bottom.removeFromTop (rowGap);
+        auto row2 = bottom;
+        const auto unit = juce::jlimit (60, 110, (row2.getWidth() - groupGap - gap * 6) / 8);
+        const auto metronomeW = unit * 3 + gap * 2, playW = unit * 5 + gap * 4;
+        const auto total = metronomeW + groupGap + playW;
+        const auto inset = juce::jmax (0, (row2.getWidth() - total) / 2);   // 2つの段を、同じ幅で真ん中に
+        row1 = row1.withTrimmedLeft (inset).withWidth (total);
+        row2 = row2.withTrimmedLeft (inset).withWidth (total);
+
+        // 段の間の線
+        bottomDividers.push_back ({ row1.getX(), row1.getBottom() + rowGap / 2, total, 1 });
+
+        const auto loopW = unit * 3 + gap * 2;
+        auto speed = group (row1, speedHeading, total - loopW - groupGap, groupGap, true);
+        speedSlider.setBounds (speed);
+        auto loop = group (row1, loopHeading, loopW, groupGap, false);
+        for (auto* b : std::initializer_list<juce::Component*> { &loopStartButton, &loopEndButton, &loopButton })
+            place (loop, *b, unit);
+
+        auto metronome = group (row2, metronomeHeading, metronomeW, groupGap, true);
+        place (metronome, metronomeButton, unit);
+        place (metronome, metronomeSoloButton, unit);
+        place (metronome, metronomeDots, unit);
+
+        auto play = group (row2, playHeading, playW, groupGap, false);
+        for (auto* b : std::initializer_list<juce::Component*> { &toStartButton, &rewindButton, &playButton, &forwardButton, &toEndButton })
+            place (play, *b, unit);
+    }
 
     // 「ここから開始」は、見出しの行の「単体」の真上に小さく置く (下の帯の高さを増やさないため)
     {
@@ -3485,12 +3760,6 @@ void SessionScreen::resized()
         metronomeStartButton.setBounds (solo.getX(), headingRow.getY(), solo.getWidth(), headingRow.getHeight() - 1);
         metronomeHeading.setBounds (headingRow.withRight (solo.getX() - 4));
     }
-
-    auto play = group (playHeading, playWidth, false);
-    place (play, toStartButton, 84);
-    place (play, rewindButton, 84);
-    place (play, playButton, 84);
-    place (play, forwardButton, 84);
 
     //==== 右のパネルと境目 ====
     sideCards.clear();
@@ -3535,7 +3804,7 @@ void SessionScreen::resized()
         const int mixerHeight = headingHeight + (3 + tabRows) * rowHeight;
         tabRowsShown = tabRows > 0;
         constexpr int tempoHeight = headingHeight + 3 * rowHeight + 2 * 4;   // BPM・タブ譜だけ・拍の位置
-        const int sourceExtra = headingHeight + 30 + (hasSource() ? 0 : 40);
+        const int sourceExtra = headingHeight + 30 + (hasSource() ? 34 : 40);   // 音源があれば、開始・終了位置のボタンの行
         constexpr int cardChrome = 16 + 8;   // カードの内側の余白と、カードの間
         constexpr int labelWidth = 84;       // 行の名前の列。狭くして、スライダーを長くする
 
@@ -3564,25 +3833,47 @@ void SessionScreen::resized()
 
         // 音源: 見出し (右上にたたむボタン)、動画 (16:9)、その下に URL かファイル名と、外すボタン。
         // たたんでいるときは見出しだけ
-        auto source = card (videoCardCollapsed ? 20 : videoHeight + sourceExtra);
+        // たたむ・広げるときは、開き具合 (videoFold) の分だけの高さにして、カードを上へたたむ (作者の指示)。
+        // 中身はカードの外にはみ出さないよう、カードの高さで切る (動いている間は動画・タブ譜のページを出さない: placeWebViews)
+        const auto openHeight = videoHeight + sourceExtra;
+        const auto fold = videoFold.getValue();
+        const auto shownHeight = 20 + juce::roundToInt ((openHeight - 20) * fold);
+        auto source = card (shownHeight);
+        const auto sourceClip = source.expanded (12, 8);
+        const auto sourceOpen = fold > 0.0;
         auto sourceHeadingRow = source.removeFromTop (20);
         videoCollapseButton.setBounds (sourceHeadingRow.removeFromRight (32).withSizeKeepingCentre (32, 22));
         sourceHeading.setBounds (sourceHeadingRow);
         source.removeFromTop (4);
-        videoView.setBounds (source.removeFromTop (videoCardCollapsed ? 0 : videoHeight));
-        videoView.setVisible (! videoCardCollapsed);
+        source.setHeight (openHeight - 24);   // 中身は開いたときの並びのまま (はみ出す分は下で隠す)
+        videoView.setBounds (source.removeFromTop (videoHeight));
+        videoView.setVisible (sourceOpen);
 
-        chooseFileButton.setVisible (! hasSource() && ! videoCardCollapsed);
-        pasteUrlButton.setVisible (! hasSource() && ! videoCardCollapsed);
-        sourceInfoLabel.setVisible (hasSource() && ! videoCardCollapsed);
-        sourceRemoveButton.setVisible (hasSource() && ! videoCardCollapsed);
+        chooseFileButton.setVisible (! hasSource() && sourceOpen);
+        pasteUrlButton.setVisible (! hasSource() && sourceOpen);
+        sourceInfoLabel.setVisible (hasSource() && sourceOpen);
+        sourceRemoveButton.setVisible (hasSource() && sourceOpen);
+        sourceStartButton.setVisible (hasSource() && sourceOpen);
+        sourceEndButton.setVisible (hasSource() && sourceOpen);
 
         if (hasSource())
         {
             auto row = source.removeFromTop (30).withTrimmedTop (4);
             sourceRemoveButton.setBounds (row.removeFromRight (26));
             sourceInfoLabel.setBounds (row);
+
+            // リンク・ファイル名の下に「開始位置」「終了位置」(作者の指示)
+            auto rangeRow = source.removeFromTop (34).withTrimmedTop (4);
+            sourceStartButton.setBounds (rangeRow.removeFromLeft ((rangeRow.getWidth() - 8) / 2));
+            rangeRow.removeFromLeft (8);
+            sourceEndButton.setBounds (rangeRow);
         }
+
+        // たたんでいる途中: カードの外に出た部品を隠す
+        for (auto* c : std::initializer_list<juce::Component*> { &videoView, &sourceInfoLabel, &sourceRemoveButton, &sourceStartButton,
+                                                                 &sourceEndButton, &chooseFileButton, &pasteUrlButton })
+            if (c->isVisible() && ! sourceClip.contains (c->getBounds()))
+                c->setVisible (false);
         else
         {
             source.removeFromTop (8);

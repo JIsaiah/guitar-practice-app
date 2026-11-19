@@ -601,6 +601,7 @@ void AudioEngine::audioDeviceIOCallbackWithContext (const float* const* inputs, 
     const auto gainMetronome = metronomeGain.load();
     const bool metronomeOn = metronomeEnabled.load();
     const double bpm = metronomeBpm.load();
+    const auto beatsPerBar = (juce::int64) juce::jmax (1, metronomeBeatsPerBar.load());
     const double offset = syncOffsetSeconds.load();
 
     if (metronomeResetRequested.exchange (false))
@@ -719,7 +720,7 @@ void AudioEngine::audioDeviceIOCallbackWithContext (const float* const* inputs, 
 
             // 1拍進んだときだけ鳴らす (シークやループで飛んだときは鳴らさない)
             if (musicTime >= 0.0 && beat == lastBeat + 1)
-                triggerClick (beat % 4 == 0, sampleRate);
+                triggerClick (beat % beatsPerBar == 0, sampleRate);
 
             lastBeat = beat;
         }

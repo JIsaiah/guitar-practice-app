@@ -15,11 +15,15 @@ Session PlaybackSettingsResolver::makeWorkingCopy (const Session& stored, bool s
     storedLoopStartMs = stored.loopStartMs;
     storedLoopEndMs = stored.loopEndMs;
     storedLoopEnabled = stored.loopEnabled;
+    storedSourceStartMs = stored.sourceStartMs;
+    storedSourceEndMs = stored.sourceEndMs;
 
     working.speedPercent = juce::jlimit (minSpeedPercent, maxSpeedPercent, juce::roundToInt (overrides->speed * 100.0));
     working.loopStartMs = juce::roundToInt (overrides->loopStartSec * 1000.0);
     working.loopEndMs = juce::roundToInt (overrides->loopEndSec * 1000.0);
     working.loopEnabled = overrides->loopEnabled;
+    working.sourceStartMs = juce::roundToInt (overrides->sourceStartSec * 1000.0);
+    working.sourceEndMs = juce::roundToInt (overrides->sourceEndSec * 1000.0);
 
     loopSuspended = suspendLoop && overrides->loopEnabled;
     overrideLoopEnabled = overrides->loopEnabled;
@@ -40,6 +44,8 @@ PlaybackSettingsResolver::Split PlaybackSettingsResolver::split (const Session& 
     o.loopStartSec = working.loopStartMs / 1000.0;
     o.loopEndSec = working.loopEndMs / 1000.0;
     o.loopEnabled = working.loopEnabled;
+    o.sourceStartSec = working.sourceStartMs / 1000.0;
+    o.sourceEndSec = working.sourceEndMs / 1000.0;
 
     // ループを外して開き、そのまま触っていなければ、エントリの「有効」は元のまま
     if (loopSuspended && ! working.loopEnabled)
@@ -51,5 +57,7 @@ PlaybackSettingsResolver::Split PlaybackSettingsResolver::split (const Session& 
     result.session.loopStartMs = storedLoopStartMs;
     result.session.loopEndMs = storedLoopEndMs;
     result.session.loopEnabled = storedLoopEnabled;
+    result.session.sourceStartMs = storedSourceStartMs;
+    result.session.sourceEndMs = storedSourceEndMs;
     return result;
 }

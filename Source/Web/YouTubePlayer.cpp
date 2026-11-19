@@ -108,6 +108,12 @@ void YouTubePlayer::unload()
 }
 
 void YouTubePlayer::play()                      { send (makeCommand ("play")); }
+
+void YouTubePlayer::setCursorHidden (bool hidden)
+{
+    if (hidden != std::exchange (cursorHidden, hidden))
+        send (makeCommand ("cursor", { { "hidden", hidden } }));
+}
 void YouTubePlayer::pause()                     { send (makeCommand ("pause")); }
 void YouTubePlayer::seek (double seconds)
 {

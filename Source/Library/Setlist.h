@@ -21,6 +21,8 @@ struct SetlistEntry
         double speed = 1.0;   // 1.0 = 原速
         bool loopEnabled = false;
         double loopStartSec = 0.0, loopEndSec = 0.0;
+        // 音源の開始・終了位置 (作者の指示: セッションとは別に、セットリストの曲ごとに覚える)。0 = 指定なし
+        double sourceStartSec = 0.0, sourceEndSec = 0.0;
 
         bool isDefault() const noexcept { return speed == 1.0 && ! loopEnabled; }   // 一覧の「速度80%」などの印を出すか
         bool operator== (const Overrides&) const = default;

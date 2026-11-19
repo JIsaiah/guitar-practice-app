@@ -10,6 +10,7 @@ namespace Icons
     inline constexpr const char* help         = "help-circle-svgrepo-com.svg";
     inline constexpr const char* back         = "back-arrow-direction-down-right-left-up-svgrepo-com.svg";
     inline constexpr const char* toStart      = "media-backward-end-svgrepo-com.svg";
+    inline constexpr const char* toEnd        = "media-forward-end-svgrepo-com.svg";
     inline constexpr const char* backward     = "media-backward-svgrepo-com.svg";
     inline constexpr const char* forward      = "media-forward-svgrepo-com.svg";
     inline constexpr const char* play         = "media-play-svgrepo-com.svg";

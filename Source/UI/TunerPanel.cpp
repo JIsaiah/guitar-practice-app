@@ -36,7 +36,10 @@ namespace
 TunerPanel::TunerPanel (AudioEngine& e)
     : engine (e)
 {
-    closeButton.setButtonText ("閉じる"_jp);
+    closeButton.setFrameless (true);
+    closeButton.setIconScale (0.5f);
+    closeButton.setMouseCursor (juce::MouseCursor::PointingHandCursor);
+    closeButton.setTooltip ("閉じる (Esc)"_jp);
     closeButton.onClick = [this] { if (onClose != nullptr) onClose(); };
     addAndMakeVisible (closeButton);
 
@@ -132,11 +135,7 @@ void TunerPanel::paint (juce::Graphics& g)
     g.drawRoundedRectangle (bounds, 12.0f, 1.0f);
 
     auto area = getLocalBounds().reduced (24, 18);
-    auto header = area.removeFromTop (22);
-    g.setColour (muted);
-    g.setFont (font (14.0f));
-    g.drawText ("チューナー"_jp, header, juce::Justification::centredLeft);
-    area.removeFromBottom (40);   // 閉じるボタン
+    area.removeFromTop (22);      // 左上の閉じるボタンの分 (「チューナー」の文字は出さない。作者の指示)
 
     // ---- 音名と、低い／高いの矢印 ----
     auto noteRow = area.removeFromTop (92);
@@ -235,5 +234,5 @@ void TunerPanel::paint (juce::Graphics& g)
 
 void TunerPanel::resized()
 {
-    closeButton.setBounds (getLocalBounds().reduced (18).removeFromBottom (32).removeFromRight (110));
+    closeButton.setBounds (8, 8, 36, 36);   // ウィンドウの左上 (作者の指示)
 }

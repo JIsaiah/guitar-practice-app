@@ -165,7 +165,7 @@ private:
             setUsingNativeTitleBar (true);
             setContentOwned (new MainComponent (engine, library, setlists, theme, settings), true);
             setResizable (true, true);
-            setResizeLimits (1200, 700, 10000, 10000);
+            setResizeLimits (1280, 720, 10000, 10000);   // いちばん小さくて 1280x720 (作者の指示)
             centreWithSize (getWidth(), getHeight());
             setVisible (true);
 

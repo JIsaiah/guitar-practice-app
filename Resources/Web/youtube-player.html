@@ -15,6 +15,8 @@
   /* 動画の上に透明な板を置き、マウスが YouTube に届かないようにする。
      YouTube はマウスが乗ると題名や操作の帯 (オーバーレイ) を出すため。再生の操作はアプリから行う */
   #shield { position: absolute; inset: 0; z-index: 10; }
+  /* マウスを 3 秒動かさないとカーソルを隠す (アプリが命令で付け外しする。作者の指示) */
+  html.noCursor, html.noCursor * { cursor: none !important; }
   #message { display: flex; align-items: center; justify-content: center; text-align: center; padding: var(--space-lg); box-sizing: border-box; }
   /* 再生前のカウントダウン (setlist-mode.md 7.2)。離れた位置からでも読める大きさ。
      すぐに始めるのはアプリの再生ボタンの2回押し。クリックは受けない (下のタブ譜をそのまま触れる) */
@@ -70,6 +72,7 @@
       case "play":   if (playerReady) { endWarmUp(true); player.playVideo(); } break;
       case "warmUp": warmUp(); break;
       case "pause":  if (playerReady) player.pauseVideo(); break;
+      case "cursor": document.documentElement.classList.toggle("noCursor", !!cmd.hidden); break;
       case "countdown": showCountdown(cmd.number, cmd.caption); break;
       case "seek":   if (playerReady) player.seekTo(Math.max(0, cmd.seconds), true); break;
       case "rate":   if (playerReady) player.setPlaybackRate(cmd.rate); break;

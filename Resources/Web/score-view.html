@@ -30,6 +30,8 @@
   #scroller::-webkit-scrollbar-button { display: none; height: 0; }
   #scroller.frozen #score { pointer-events: none; }
   #score { position: relative; }
+  /* マウスを 3 秒動かさないとカーソルを隠す (アプリが命令で付け外しする。作者の指示) */
+  html.noCursor, html.noCursor * { cursor: none !important; }
   /* PDF のタブ譜 (作者の指示)。ページを横幅いっぱいの画像にして縦に並べ、再生中は画面を上から下へ流す (針は出さない) */
   #pdf { position: relative; display: none; padding: 8px 0 40vh; }
   #pdf canvas { display: block; margin: 0 auto 12px; background: #fff; box-shadow: 0 0 0 1px var(--color-border); }
@@ -262,6 +264,7 @@
       case "redo": if (editable && score) redoEdit(); break;
       case "track": endEdit(); showTrack(cmd.track); break;
       case "endEdit": endEdit(); break;
+      case "cursor": document.documentElement.classList.toggle("noCursor", !!cmd.hidden); break;
       case "midiTracks":
         midiTracks = cmd.tracks || [];
         applyMidiTracks();

@@ -5,7 +5,7 @@
 // 開き方によって、ループ・速度の読み書き先を切り替える (setlist-mode.md 3.6)
 //
 //   | 設定                         | Standalone     | Setlist                   |
-//   | 速度・A-B ループ              | セッション      | エントリの overrides       |
+//   | 速度・A-B ループ・音源の開始/終了 | セッション   | エントリの overrides       |
 //   | 音色・ミキサー・ずらし・その他  | セッション      | セッション                 |
 //
 // 練習画面は、これまでどおり Session の値 (speedPercent、loop…) を読み書きする。
@@ -41,6 +41,7 @@ private:
     // Setlist のとき: 単体セッションの速度・ループ (保存するときに、このまま戻す)
     int storedSpeedPercent = 100;
     int storedLoopStartMs = 0, storedLoopEndMs = 0;
+    int storedSourceStartMs = 0, storedSourceEndMs = 0;
     bool storedLoopEnabled = false;
 
     // ループを外して開いたとき: 開いたときの「有効」(false) と、エントリに保存されていた「有効」

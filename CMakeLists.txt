@@ -158,6 +158,7 @@ juce_add_binary_data(GuitarPracticeData
         "svg icons/help-circle-svgrepo-com.svg"
         "svg icons/back-arrow-direction-down-right-left-up-svgrepo-com.svg"
         "svg icons/media-backward-end-svgrepo-com.svg"
+        "svg icons/media-forward-end-svgrepo-com.svg"
         "svg icons/media-backward-svgrepo-com.svg"
         "svg icons/media-forward-svgrepo-com.svg"
         "svg icons/media-play-svgrepo-com.svg"
@@ -212,6 +213,7 @@ target_sources(GuitarPracticeTests PRIVATE
     Tests/NoiseGateTests.cpp
     Tests/SessionFileNameTests.cpp
     Tests/PdfScoreFilesTests.cpp
+    Tests/SourceRangeTests.cpp
     Tests/TestMain.cpp
     Tests/SetlistTests.cpp
     Tests/PlaybackSettingsResolverTests.cpp

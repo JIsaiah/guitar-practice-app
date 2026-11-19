@@ -2,6 +2,7 @@
 
 #include <juce_gui_basics/juce_gui_basics.h>
 #include "../Audio/AudioEngine.h"
+#include "Icons.h"
 
 // チューナー。セッション画面の上に重ねて表示する
 // 見た目は、最近のチューナーアプリでよくある「左右のゲージ」: 中央が合っている位置で、
@@ -19,7 +20,7 @@ public:
     void paint (juce::Graphics& g) override;
     void resized() override;
 
-    static constexpr int preferredWidth = 480, preferredHeight = 300;
+    static constexpr int preferredWidth = 480, preferredHeight = 250;   // 下の「閉じる」をやめた分だけ低く
 
    #if JUCE_DEBUG
     // 開発用 (DevSnapshots): ギターを鳴らさずに、音が入ったときの表示を確かめる
@@ -41,5 +42,5 @@ private:
     // 表示する位置は、目標の値へ少しずつ近づける (数字がちらつかないように)
     double targetCents = 0.0, shownCents = 0.0;
 
-    juce::TextButton closeButton;
+    IconButton closeButton { Icons::back };   // 左上の戻る矢印 (作者の指示。Esc でも閉じる: SessionScreen::keyPressed)
 };

@@ -3,6 +3,7 @@
 #include "../Library/SetlistStore.h"
 #include "../Theme/MetalLogo/FixedTextButton.h"
 #include "SetlistEntryList.h"
+#include "FoldAnimation.h"
 
 // セットリストのカード (setlist-mode.md 4.2〜4.5)
 // - 見出し: 名前、曲数、合計時間、「通しで再生」(1曲目から)
@@ -65,4 +66,5 @@ private:
     bool expanded = false, adding = false, addHover = false;
     FixedTextButton playButton;
     SetlistEntryList entryList;
+    FoldAnimation openFold { *this };   // 開く・たたむ動き (作者の指示: 上へたたむ)。0 = たたんだ、1 = 開いた
 };

@@ -197,6 +197,12 @@ void ScoreViewer::endEditing()
 void ScoreViewer::undoEdit() { send (makeCommand ("undo")); }
 void ScoreViewer::redoEdit() { send (makeCommand ("redo")); }
 
+void ScoreViewer::setCursorHidden (bool hidden)
+{
+    if (hidden != std::exchange (cursorHidden, hidden))
+        send (makeCommand ("cursor", { { "hidden", hidden } }));
+}
+
 void ScoreViewer::setFrozen (bool frozen)
 {
     send (makeCommand ("freeze", { { "on", frozen } }));

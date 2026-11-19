@@ -36,6 +36,8 @@ public:
 
     // ラジアルメニューを出している間、タブ譜を止める (マウスでのスクロールや、タブ譜へのマウスの操作をさせない)
     void setFrozen (bool frozen);
+    // マウスのカーソルを隠す・出す (作者の指示: 大きな枠の上で 3 秒動かさないと消える)。変わったときだけ送る
+    void setCursorHidden (bool hidden);
 
     // タブ譜の音 (MIDI) で鳴らすトラック。ここに無いトラックは鳴らさない。音は再生中だけ (setPosition の playing)
     struct MidiTrack { int index; double volume; bool muted; };
@@ -104,7 +106,7 @@ private:
     std::optional<juce::WebBrowserComponent::Resource> provide (const juce::String& path);
 
     std::unique_ptr<juce::WebBrowserComponent> browser;
-    bool pageReady = false, rendered = false, editing = false;
+    bool pageReady = false, rendered = false, editing = false, cursorHidden = false;
     std::vector<juce::var> pending;   // ページの準備ができる前に来た命令
 
     juce::CriticalSection fileLock;   // 読み込みの要求は、別のスレッドから来ることがあるため

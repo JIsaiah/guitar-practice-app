@@ -172,6 +172,17 @@ public:
 
     bool isZoomed() const noexcept { return zoomed; }
 
+    // 音源の開始・終了位置 (作者の指示)。マイナスなら、その側は指定なし
+    void setRange (double startSeconds, double endSeconds)
+    {
+        if (! juce::approximatelyEqual (startSeconds, rangeStart) || ! juce::approximatelyEqual (endSeconds, rangeEnd))
+        {
+            rangeStart = startSeconds;
+            rangeEnd = endSeconds;
+            repaint();
+        }
+    }
+
     static constexpr double zoomSpanSeconds = 4.0;   // 拡大したときに見せる範囲 (針の前後 2 秒)
     static constexpr double holdMs = 350.0;          // ダブルクリックの2回目を、これだけ押し続けると拡大
 
@@ -221,6 +232,34 @@ public:
 
         g.setColour (findColour (ThemeColourIds::timelineProgress));
         g.fillRoundedRectangle (bar.withRight (xFor (shown)), thickness * 0.5f);
+
+        // 音源の開始・終了位置: 外側を薄くし、位置に「[」「]」の形の印を出す
+        if (rangeStart >= 0.0 || rangeEnd >= 0.0)
+        {
+            const auto dim = findColour (ThemeColourIds::panel).withAlpha (0.6f);
+            const auto mark = findColour (juce::Label::textColourId);
+            const auto top = bar.getY() - 7.0f, bottom = bar.getBottom() + 7.0f;
+            if (rangeStart >= 0.0)
+            {
+                const auto x = xFor (rangeStart);
+                g.setColour (dim);
+                g.fillRect (juce::Rectangle<float>::leftTopRightBottom (area.getX(), top, x, bottom));
+                g.setColour (mark);
+                g.fillRect (x - 1.0f, top, 2.0f, bottom - top);
+                g.fillRect (x - 1.0f, top, 6.0f, 2.0f);
+                g.fillRect (x - 1.0f, bottom - 2.0f, 6.0f, 2.0f);
+            }
+            if (rangeEnd >= 0.0)
+            {
+                const auto x = xFor (rangeEnd);
+                g.setColour (dim);
+                g.fillRect (juce::Rectangle<float>::leftTopRightBottom (x, top, area.getRight(), bottom));
+                g.setColour (mark);
+                g.fillRect (x - 1.0f, top, 2.0f, bottom - top);
+                g.fillRect (x - 5.0f, top, 6.0f, 2.0f);
+                g.fillRect (x - 5.0f, bottom - 2.0f, 6.0f, 2.0f);
+            }
+        }
 
         if (markerSeconds >= 0.0)
             drawMarker (g, xFor (markerSeconds), bar.getY());
@@ -503,6 +542,7 @@ private:
     bool hovering = false, nearKnob = false, dragging = false;
     double dragSeconds = 0.0;
     double markerSeconds = -1.0;
+    double rangeStart = -1.0, rangeEnd = -1.0;   // 音源の開始・終了位置 (マイナス = 指定なし)
 
     // 拡大モード
     bool waitingForHold = false, zoomed = false, fineDrag = false;
@@ -825,11 +865,21 @@ public:
     void setLarge (bool shouldBeLarge) { large = shouldBeLarge; repaint(); }
 
     std::function<void()> onClick;   // クリックされた (練習画面が、大きな表示を出す・消す)
+    std::function<void()> onRightClick;   // 右クリック (練習画面が、拍子を選ぶメニューを出す)
 
     void mouseUp (const juce::MouseEvent& e) override
     {
-        if (onClick != nullptr && getLocalBounds().contains (e.getPosition()))
+        if (! getLocalBounds().contains (e.getPosition()))
+            return;
+        if (e.mods.isPopupMenu())
+        {
+            if (onRightClick != nullptr)
+                onRightClick();
+        }
+        else if (onClick != nullptr)
+        {
             onClick();
+        }
     }
 
     void paint (juce::Graphics& g) override

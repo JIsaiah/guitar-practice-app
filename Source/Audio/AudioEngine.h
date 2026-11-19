@@ -55,6 +55,8 @@ public:
     void setMetronomeSolo (bool solo) noexcept;
     bool isMetronomeSolo() const noexcept { return metronomeSolo.load(); }
     void setBpm (double bpm) noexcept { metronomeBpm.store (juce::jlimit (20.0, 400.0, bpm)); }
+    // 1小節の拍の数 (1拍目を強く鳴らす)。手で決めた拍子 (例: 8/9 → 8)。ふつうは 4
+    void setMetronomeBeatsPerBar (int beats) noexcept { metronomeBeatsPerBar.store (juce::jlimit (1, 64, beats)); }
     void setSyncOffsetSeconds (double seconds) noexcept { syncOffsetSeconds.store (seconds); }
 
     // メトロノームが拍を数えている時計 (秒。拍の位置のずらしを引いたもの)。ビジュアライザー用。
@@ -253,6 +255,7 @@ private:
     std::atomic<bool> loopEnabled { false };
     std::atomic<bool> metronomeEnabled { false }, metronomeResetRequested { false }, metronomeSolo { false };
     std::atomic<double> metronomeBpm { 120.0 };
+    std::atomic<int> metronomeBeatsPerBar { 4 };
     std::atomic<double> syncOffsetSeconds { 0.0 };
     std::atomic<double> beatClockSeconds { 0.0 };   // オーディオスレッドが1ブロックごとに書く
     std::atomic<bool> beatClockRunning { false };
