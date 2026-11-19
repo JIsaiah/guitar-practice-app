@@ -125,7 +125,9 @@ void MainComponent::openSetlistEntryLater (const juce::String& setlistId, int en
         if (setlist.has_value() && juce::isPositiveAndBelow (entryIndex, (int) setlist->entries.size()))
         {
             const auto& entry = setlist->entries[(size_t) entryIndex];
-            if (auto session = m.library.openForPractice (entry.sessionId))
+            // セットリストで弾いた曲は「最後の練習日」にしない (作者の指示: 一覧の表示順に影響させない)。
+            // そのため、開いた日時を記録する openForPractice ではなく、読むだけの load を使う
+            if (auto session = m.library.load (entry.sessionId))
             {
                 // 通し再生なので、ループ (くり返し) は外して開く (作者の指示)
                 PlaybackSettingsResolver resolver (entry.overrides);

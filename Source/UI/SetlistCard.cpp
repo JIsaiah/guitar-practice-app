@@ -220,20 +220,31 @@ void SetlistCard::mouseUp (const juce::MouseEvent& e)
     if (e.y >= headerHeight)
         return;
 
+    // 名前の場所の外 (開閉の印など) は、続けて押しても毎回開閉する (ダブルクリックで名前の変更にしない)
     if (e.mods.isPopupMenu())
         showHeaderMenu();
-    else if (e.getNumberOfClicks() == 1)
+    else if (e.getNumberOfClicks() == 1 || ! getNameArea().contains (e.getPosition()))
         setExpanded (! expanded);
 }
 
 void SetlistCard::mouseDoubleClick (const juce::MouseEvent& e)
 {
-    // 名前のダブルクリックで名前を変える (1回目のクリックで開閉しているので、元に戻す)
-    if (e.y < headerHeight && ! e.mods.isPopupMenu())
+    // 名前のダブルクリックで名前を変える (1回目のクリックで開閉しているので、元に戻す)。
+    // 名前を変えられるのは、名前の左端から「通しで再生」の少し左までだけ (作者の指示: 開閉の印を連打しても出ないように)
+    if (getNameArea().contains (e.getPosition()) && ! e.mods.isPopupMenu())
     {
         setExpanded (! expanded);
         rename();
     }
+}
+
+juce::Rectangle<int> SetlistCard::getNameArea() const
+{
+    // paint と同じ計算: 見出しの左右の余白 16、右は「通しで再生」の分、左は開閉の印 (24) とその後ろの間 (24)
+    auto header = getLocalBounds().removeFromTop (headerHeight).reduced (16, 0);
+    header.removeFromRight (playButton.getWidth() + 16);
+    header.removeFromLeft (24 + 24);
+    return header;
 }
 
 void SetlistCard::showHeaderMenu()

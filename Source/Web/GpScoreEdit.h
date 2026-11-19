@@ -18,7 +18,11 @@
 namespace GpScoreEdit
 {
     // tie: タイ (前の音とつながっている) の付け外し。タイでつながった音の片方を消す・フレットを変えるときに、ページが送る
-    enum class Kind { setFret, add, remove, tie };
+    // insertBeat: その拍の後ろに、同じ長さの休符の拍を入れる (作者の指示: 右クリックで拍を挿入)。
+    // insertBar: その小節 (masterBar) の後ろに、同じ拍子の空の小節 (休符だけ) を、すべての譜表に入れる
+    enum class Kind { setFret, add, remove, tie, insertBeat, insertBar };
+
+    inline bool isInsert (Kind k) noexcept { return k == Kind::insertBeat || k == Kind::insertBar; }
 
     struct NoteEdit
     {
@@ -50,6 +54,10 @@ namespace GpScoreEdit
 
     // .gp のファイルを書き換える (編集を順に当てる)。初めて書き換えるときは、元のファイルを「名前.gp.bak」に写しておく
     juce::Result applyToGpFile (const juce::File& gpFile, const std::vector<NoteEdit>& edits);
+
+    // メモリの中の .gp (zip) に編集を当てた .gp を作る (ファイルは書き換えない)。
+    // 拍・小節を挿入したとき、ページに読み直させる楽譜を作るのに使う
+    juce::Result applyToGpData (const juce::MemoryBlock& gpData, const std::vector<NoteEdit>& edits, juce::MemoryBlock& result);
 
     // 編集できるタブ譜か (Guitar Pro 7 以降の .gp)
     inline bool isEditable (const juce::File& file) { return file.hasFileExtension ("gp"); }

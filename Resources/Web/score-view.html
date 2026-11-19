@@ -188,6 +188,7 @@
       showMessage("");
       scoreElement.appendChild(barHighlight);
       scoreElement.appendChild(cursor);
+      if (keepAfterLoad) restoreAfterReload();   // 挿入のあとの読み直し: 前のスクロール・選んでいた場所に戻す
       placeEditBox(false);   // 編集中の音の枠を、描き直した場所に置き直す
       send("rendered");
       applyMidiTracks();   // 表示するトラックを変えると MIDI が作り直されることがあるので、当て直す
@@ -244,7 +245,18 @@
   // ---- アプリからの命令 ----
   window.scoreCommand = function (cmd) {
     switch (cmd.type) {
-      case "load": endEdit(); undoStack = []; redoStack = []; editable = !!cmd.editable; load(cmd.url, cmd.track || 0); break;
+      case "load":
+        // keep: 拍・小節の挿入を見せるための読み直し。スクロールの位置を保ち、描き終えたら keep の場所を選び直す
+        // (編集モードは続ける。アプリには「終わった」と知らせない)
+        if (cmd.keep && typeof cmd.keep === "object") {
+          keepAfterLoad = { scroll: scroller.scrollTop, place: cmd.keep, editing: !!editSel };
+          editSel = null; fretBuffer = ""; editBox.style.display = "none";
+        } else {
+          keepAfterLoad = null;
+          endEdit();
+        }
+        undoStack = []; redoStack = []; editable = !!cmd.editable; load(cmd.url, cmd.track || 0);
+        break;
       case "clear": endEdit(); undoStack = []; redoStack = []; editable = false; clearScore(); break;
       case "undo": if (editable && score) undoEdit(); break;
       case "redo": if (editable && score) redoEdit(); break;
@@ -744,6 +756,16 @@
   // 小節をクリックしたら、その小節の頭から再生できるように、アプリに知らせる
   scoreElement.addEventListener("click", function (e) {
     if (twoButtons) return;   // ラジアルメニューの操作だった
+    // 編集中: 押した場所を選ぶ。音の無い弦なら、そこに 0 フレットの音を入れる (作者の指示)。小節へは移動しない
+    if (editSel && editable && score) {
+      const r = scoreElement.getBoundingClientRect();
+      const place = placeAt(e.clientX - r.left, e.clientY - r.top);
+      if (place) {
+        startEdit(place.beat, place.string);
+        if (!place.beat.getNoteOnString(place.string)) typeFret(0);
+      }
+      return;
+    }
     if (!api || !score || !api.renderer || !api.renderer.boundsLookup || barStartBeats.length === 0) return;
     const rect = scoreElement.getBoundingClientRect();
     // 編集モードの間は、クリックで編集する場所を選ぶ (再生の位置は動かさない)
@@ -798,11 +820,12 @@
   let editSel = null;     // 編集中の場所 { beat, string }。null = 編集モードではない
   let fretBuffer = "", fretBufferAt = 0;
   let undoStack = [], redoStack = [];
+  let keepAfterLoad = null;   // 挿入のあとの読み直しで、描き終えたら戻すもの { scroll, place, editing }
   let midiRebuildTimer = 0;
   const maxFret = 30;
   const editBox = document.createElement("div"); editBox.id = "editBox";
   const editHint = document.createElement("div"); editHint.id = "editHint";
-  editHint.textContent = "編集中: 数字でフレット・Delete で消す・Ctrl+Z で戻す・矢印で移動・Esc で終わる (保存はアプリの保存ボタン)";
+  editHint.textContent = "編集中: 数字でフレット・音の無い弦をクリックで音を入れる・右クリックで拍・小節を挿入・Delete で消す・Ctrl+Z で戻す・矢印で移動・Esc で終わる (保存はアプリの保存ボタン)";
   document.body.appendChild(editHint);
 
   function stringCount(beat) {
@@ -1033,7 +1056,7 @@
   // 元に戻す (Ctrl+Z): 手順を逆の順に、逆向きに。やり直す (Ctrl+Y): もう一度。どちらも、その場所を選ぶ
   function undoEdit() {
     const a = undoStack.pop();
-    if (!a) return;
+    if (!a) { send("undoInsert"); return; }   // このページで戻せるものが無い: 拍・小節の挿入を戻すかは、アプリが決める
     for (let i = a.steps.length - 1; i >= 0; i--) runStep(a.steps[i], false);
     redoStack.push(a);
     if (editSel) { editSel = { beat: a.beat, string: a.string }; fretBuffer = ""; }
@@ -1075,6 +1098,55 @@
       if (string >= 1 && string <= stringCount(editSel.beat)) startEdit(editSel.beat, string);
     }
   }
+
+  // ファイルの中の場所 (beatLocation の逆) の拍。無ければ null
+  function beatAtLocation(loc) {
+    if (!score) return null;
+    let slot = 0;
+    for (const track of score.tracks)
+      for (const staff of track.staves) {
+        if (slot++ !== loc.slot) continue;
+        const bar = staff.bars[loc.bar];
+        const voice = bar ? bar.voices[loc.voice] : null;
+        return voice ? voice.beats[loc.beat] || null : null;
+      }
+    return null;
+  }
+
+  // 挿入のあとの読み直しが描き終わった: スクロールを戻し、keep の場所を選んで編集を続ける
+  function restoreAfterReload() {
+    const keep = keepAfterLoad;
+    keepAfterLoad = null;
+    scroller.scrollTop = keep.scroll;
+    const beat = beatAtLocation(keep.place);
+    if (keep.editing && isEditableBeat(beat)) {
+      editSel = { beat: beat, string: Math.max(1, Math.min(stringCount(beat), keep.place.string)) };
+      fretBuffer = "";
+      editHint.style.display = "block";
+      placeEditBox(true);
+    } else if (keep.editing) {
+      endEditNotify();
+    }
+  }
+
+  // 選べる場所が無くなったとき: 編集モードを終える (アプリにも知らせる)
+  function endEditNotify() {
+    editSel = {};   // endEdit が「編集中だった」とみなして知らせるように
+    endEdit();
+  }
+
+  // 編集中の右クリック: 押した場所を選び、アプリに拍・小節の挿入のメニューを出してもらう (作者の指示)
+  scoreElement.addEventListener("contextmenu", function (e) {
+    if (!editable || !editSel || !score) return;
+    e.preventDefault();
+    if (twoButtons) return;   // ラジアルメニューの操作だった
+    const rect = scoreElement.getBoundingClientRect();
+    const place = placeAt(e.clientX - rect.left, e.clientY - rect.top);
+    if (place) startEdit(place.beat, place.string);
+    const loc = beatLocation(editSel.beat, editSel.string);
+    loc.tuning = tuningByString(editSel.beat);
+    send("editContext", loc);
+  });
 
   scoreElement.addEventListener("dblclick", function (e) {
     if (!editable || twoButtons || !score) return;

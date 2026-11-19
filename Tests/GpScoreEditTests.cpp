@@ -329,6 +329,121 @@ public:
 
             dir.deleteRecursively();
         }
+
+        // ---- 拍・小節の挿入 ----
+        const auto insertOf = [] (GpScoreEdit::Kind kind, int bar, int beat)
+        {
+            auto e = fretEdit (0, bar, 0, beat, 1, 0, 0);
+            e.kind = kind;
+            return e;
+        };
+
+        beginTest ("Insert a beat: same rhythm, after the beat, in a copy of a shared voice");
+        {
+            auto gpif = juce::parseXML (restGpif());
+            // restGpif: 拍 0 (音) と 拍 1 (休符)。拍 0 の後ろに入れる
+            expect (GpScoreEdit::applyToGpif (*gpif, insertOf (GpScoreEdit::Kind::insertBeat, 0, 0)).wasOk());
+            expectEquals (listText (*gpif, "Voices", "0", "Beats"), juce::String ("0 2 1"));
+            auto* inserted = beatById (*gpif, "2");
+            expect (inserted != nullptr && inserted->getChildByName ("Notes") == nullptr);   // 休符
+            expectEquals (inserted->getChildByName ("Rhythm")->getStringAttribute ("ref"), juce::String ("0"));
+
+            // 入れた拍 (拍 1 になった) に音を足せる
+            expect (GpScoreEdit::applyToGpif (*gpif, addEditOf (1, 3, 0)).wasOk());
+            expect (beatById (*gpif, "2")->getChildByName ("Notes") != nullptr);
+
+            // 使い回されている声部 (sampleGpif の小節 0 と 1) は、写してから入れる (小節 1 は変わらない)
+            auto shared = juce::parseXML (sampleGpif());
+            expect (GpScoreEdit::applyToGpif (*shared, insertOf (GpScoreEdit::Kind::insertBeat, 0, 0)).wasOk());
+            expectEquals (listText (*shared, "Voices", "0", "Beats"), juce::String ("0 -1 0"));
+        }
+
+        beginTest ("Insert a bar: every staff gets an empty bar with rests that fill the time signature");
+        {
+            auto gpif = juce::parseXML (R"(<?xml version="1.0" encoding="UTF-8"?>
+<GPIF>
+<MasterTrack><Automations>
+ <Automation><Type>Tempo</Type><Bar>0</Bar><Value>120 2</Value></Automation>
+ <Automation><Type>Tempo</Type><Bar>1</Bar><Value>140 2</Value></Automation>
+</Automations></MasterTrack>
+<MasterBars>
+ <MasterBar><Key><AccidentalCount>0</AccidentalCount></Key><Time>7/8</Time><Repeat start="true" end="false" count="0" /><Bars>0 1</Bars></MasterBar>
+ <MasterBar><Time>7/8</Time><Bars>0 1</Bars></MasterBar>
+</MasterBars>
+<Bars>
+ <Bar id="0"><Clef>G2</Clef><Voices>0 -1 -1 -1</Voices></Bar>
+ <Bar id="1"><Clef>F4</Clef><Voices>0 -1</Voices></Bar>
+</Bars>
+<Voices><Voice id="0"><Beats>0</Beats></Voice></Voices>
+<Beats><Beat id="0"><Rhythm ref="0" /></Beat></Beats>
+<Rhythms><Rhythm id="0"><NoteValue>Half</NoteValue><AugmentationDot count="1" /></Rhythm></Rhythms>
+<Notes />
+</GPIF>)");
+            expect (GpScoreEdit::applyToGpif (*gpif, insertOf (GpScoreEdit::Kind::insertBar, 0, 0)).wasOk());
+
+            auto* masterBars = gpif->getChildByName ("MasterBars");
+            expectEquals (masterBars->getNumChildElements(), 3);
+            auto* inserted = masterBars->getChildElement (1);
+            expectEquals (inserted->getChildByName ("Time")->getAllSubText(), juce::String ("7/8"));
+            expect (inserted->getChildByName ("Key") != nullptr);
+            expect (inserted->getChildByName ("Repeat") == nullptr);   // 繰り返し記号は写さない
+            expectEquals (inserted->getChildByName ("Bars")->getAllSubText().trim(), juce::String ("2 3"));
+
+            // 譜表ごとの小節: 音部記号と声部の欄の数は元と同じ。1つ目の声部に休符 (7/8 = 付点2分 + 8分)
+            expectEquals (listText (*gpif, "Bars", "2", "Voices"), juce::String ("1 -1 -1 -1"));
+            expectEquals (listText (*gpif, "Bars", "3", "Voices"), juce::String ("2 -1"));
+            expectEquals (listText (*gpif, "Bars", "3", "Clef"), juce::String ("F4"));
+            const auto restIds = juce::StringArray::fromTokens (listText (*gpif, "Voices", "1", "Beats"), " ", "");
+            expectEquals (restIds.size(), 2);
+            const auto rhythmOf = [&] (const juce::String& beatId)
+            {
+                const auto ref = beatById (*gpif, beatId)->getChildByName ("Rhythm")->getStringAttribute ("ref");
+                for (auto* r : gpif->getChildByName ("Rhythms")->getChildIterator())
+                    if (r->getStringAttribute ("id") == ref)
+                        return r->getChildByName ("NoteValue")->getAllSubText()
+                             + (r->getChildByName ("AugmentationDot") != nullptr ? "." : "");
+                return juce::String();
+            };
+            expectEquals (rhythmOf (restIds[0]), juce::String ("Half."));   // 元からある Rhythm を使う
+            expectEquals (rhythmOf (restIds[1]), juce::String ("Eighth"));  // 無いものは作る
+
+            // テンポの変化: 入れた小節より後ろのものだけ、1つずれる
+            auto* automations = gpif->getChildByName ("MasterTrack")->getChildByName ("Automations");
+            expectEquals (automations->getChildElement (0)->getChildByName ("Bar")->getAllSubText(), juce::String ("0"));
+            expectEquals (automations->getChildElement (1)->getChildByName ("Bar")->getAllSubText(), juce::String ("2"));
+        }
+
+        beginTest ("Inserts are never merged with other edits");
+        {
+            std::vector<NoteEdit> edits;
+            GpScoreEdit::addEdit (edits, insertOf (GpScoreEdit::Kind::insertBeat, 0, 0));
+            GpScoreEdit::addEdit (edits, removeEditOf (0, 1, 0));   // 同じ場所でも、まとめない
+            GpScoreEdit::addEdit (edits, insertOf (GpScoreEdit::Kind::insertBar, 0, 0));
+            expectEquals ((int) edits.size(), 3);
+        }
+
+        beginTest ("Edits applied in memory: the .gp data is rebuilt without touching a file");
+        {
+            juce::MemoryBlock gpData;
+            {
+                juce::ZipFile::Builder builder;
+                const auto text = restGpif();
+                builder.addEntry (std::make_unique<juce::MemoryInputStream> (text.toRawUTF8(), text.getNumBytesAsUTF8(), true), 6, "Content/score.gpif", {});
+                juce::MemoryOutputStream out (gpData, false);
+                expect (builder.writeToStream (out, nullptr));
+            }
+
+            juce::MemoryBlock result;
+            expect (GpScoreEdit::applyToGpData (gpData, { insertOf (GpScoreEdit::Kind::insertBeat, 0, 0) }, result).wasOk());
+            juce::ZipFile zip (std::make_unique<juce::MemoryInputStream> (result, false));
+            std::unique_ptr<juce::InputStream> stream (zip.createStreamForEntry (zip.getIndexOfFileName ("Content/score.gpif")));
+            expect (stream != nullptr);
+            if (stream != nullptr)
+            {
+                auto gpif = juce::XmlDocument::parse (stream->readEntireStreamAsString());
+                expectEquals (listText (*gpif, "Voices", "0", "Beats"), juce::String ("0 2 1"));
+            }
+        }
     }
 };
 

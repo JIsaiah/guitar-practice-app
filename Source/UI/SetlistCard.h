@@ -41,6 +41,7 @@ public:
 
     // キーボード操作 (一覧画面の矢印・Enter)
     juce::Rectangle<int> getHeaderArea() const { return getLocalBounds().withHeight (headerHeight); }
+    juce::Rectangle<int> getNameArea() const;   // 見出しの、名前の変更 (ダブルクリック) が効く場所
     juce::Rectangle<int> getAddRowBounds() const { return getAddRowArea(); }   // 開いていないときは空
     juce::Button& getPlayButton() noexcept { return playButton; }
     SetlistEntryList& getEntryList() noexcept { return entryList; }

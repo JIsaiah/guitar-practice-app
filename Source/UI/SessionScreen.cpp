@@ -158,6 +158,14 @@ SessionScreen::SessionScreen (AudioEngine& e, SessionStore& s, ThemeManager& t, 
         else
             grabKeyboardFocus();   // 編集を終えたら、キー操作 (Space など) を練習画面に戻す
     };
+    // 拍・小節の挿入 (作者の指示: 編集中の右クリックのメニューで、拍か小節かを選び、後ろに入れる)
+    scoreViewer.onEditContext = [this] (const GpScoreEdit::NoteEdit& place) { showInsertMenu (place); };
+    scoreViewer.onUndoInsert = [this] { undoInsert(); };
+    scoreViewer.onPreviewLoaded = [this]
+    {
+        updateLoop();          // 小節が増えたので、A・B の小節の番号を出し直す
+        updateSkipButtons();
+    };
     scoreViewer.onPdfContext = [this] (double position, int repeat) { showPdfRepeatMenu (position, repeat); };
     youtube.onKey = [this] (const juce::String& key) { handlePageKey (key); };
     // 動画表示 (入れ替え中) で、動画を押すと再生・停止 (作者の指示)。再生ボタンと同じ (1回目はカウントダウン)
@@ -636,6 +644,9 @@ SessionScreen::~SessionScreen()
     scoreViewer.onPdfContext = nullptr;
     scoreViewer.onNoteEdited = nullptr;
     scoreViewer.onEditModeChanged = nullptr;
+    scoreViewer.onEditContext = nullptr;
+    scoreViewer.onUndoInsert = nullptr;
+    scoreViewer.onPreviewLoaded = nullptr;
     scoreViewer.endEditing();
     scoreViewer.hide();
 
@@ -996,6 +1007,89 @@ void SessionScreen::chooseScoreFile()
             safe->setStatus ("PDF を2つ入れました (リード: "_jp + juce::File (safe->session.scorePath).getFileName()
                              + "、バッキング: "_jp + juce::File (safe->session.pdfBackingPath).getFileName() + ")");
     });
+}
+
+// タブ譜の拍・小節の挿入 (作者の指示: 編集中に右クリック → 拍か小節かを選び、選んでいる場所の後ろに入れる)。
+// 挿入は、ページの楽譜をその場で組み替えるのではなく、編集 (scoreEdits) に足し、ファイルの楽譜に当てたものを
+// ページに読み直させる (alphaTab が楽譜を一から組み立てるので、小節の番号・拍の長さ・タブ譜の音が必ずそろう)
+void SessionScreen::showInsertMenu (const GpScoreEdit::NoteEdit& place)
+{
+    juce::PopupMenu menu;
+    menu.addSectionHeader ("後ろに挿入"_jp);
+    menu.addItem (1, "拍を挿入 (同じ長さ。選んでいる弦に 0 フレット)"_jp);
+    menu.addItem (2, "小節を挿入 (同じ拍子の空の小節。すべてのトラック)"_jp);
+
+    menu.showMenuAsync (juce::PopupMenu::Options().withMousePosition(),
+                        [safe = juce::Component::SafePointer (this), place, file = currentScoreFile()] (int result)
+    {
+        if (safe == nullptr || result == 0 || safe->currentScoreFile() != file)
+            return;
+        safe->insertIntoScore (place, result == 2);
+    });
+}
+
+void SessionScreen::insertIntoScore (const GpScoreEdit::NoteEdit& place, bool bar)
+{
+    auto select = place;   // 読み直したあとに選ぶ場所
+    select.tuning.clear();
+
+    if (bar)
+    {
+        GpScoreEdit::NoteEdit insert;
+        insert.kind = GpScoreEdit::Kind::insertBar;
+        insert.slot = place.slot;
+        insert.masterBar = place.masterBar;
+        GpScoreEdit::addEdit (scoreEdits, insert);
+
+        select.masterBar = place.masterBar + 1;   // 入れた小節の最初の拍
+        select.voice = 0;
+        select.beat = 0;
+        setStatus ("小節を挿入しました ("_jp + juce::String (place.masterBar + 2) + " 小節目)。保存すると .gp に書き込みます。Ctrl+Z で戻せます"_jp);
+    }
+    else
+    {
+        auto insert = place;
+        insert.kind = GpScoreEdit::Kind::insertBeat;
+        insert.tuning.clear();
+        GpScoreEdit::addEdit (scoreEdits, insert);
+
+        // 入れた拍の、選んでいる弦に 0 フレットの音 (数字キーで、すぐに変えられる)
+        auto add = place;
+        add.kind = GpScoreEdit::Kind::add;
+        add.beat = place.beat + 1;
+        add.fret = 0;
+        GpScoreEdit::addEdit (scoreEdits, add);
+
+        select.beat = place.beat + 1;
+        setStatus ("拍を挿入しました。数字キーでフレットを変えられます。保存すると .gp に書き込みます。Ctrl+Z で戻せます"_jp);
+    }
+
+    scoreViewer.reloadWithEdits (scoreEdits, session.scoreTrackIndex, select);
+}
+
+void SessionScreen::undoInsert()
+{
+    // ページで戻せる編集が無いときの Ctrl+Z: 最後の挿入と、そのあとの編集を外して、読み直す
+    // (挿入の前の編集は、読み直したときにページの「元に戻す」から消えているので、ここでは戻さない)
+    const auto last = std::find_if (scoreEdits.rbegin(), scoreEdits.rend(),
+                                    [] (const GpScoreEdit::NoteEdit& e) { return GpScoreEdit::isInsert (e.kind); });
+    if (last == scoreEdits.rend())
+    {
+        setStatus ("これ以上は元に戻せません"_jp);
+        return;
+    }
+
+    auto select = *last;
+    select.tuning.clear();
+    if (select.kind == GpScoreEdit::Kind::insertBar)
+    {
+        select.voice = 0;
+        select.beat = 0;
+    }
+    scoreEdits.erase (std::prev (last.base()), scoreEdits.end());
+
+    setStatus (select.kind == GpScoreEdit::Kind::insertBar ? "小節の挿入を元に戻しました"_jp : "拍の挿入を元に戻しました"_jp);
+    scoreViewer.reloadWithEdits (scoreEdits, session.scoreTrackIndex, select);
 }
 
 // PDF の繰り返し (作者の指示: 繰り返し記号を手で置き、決めた回数だけ戻って流す)。
@@ -1398,8 +1492,18 @@ bool SessionScreen::isDirty() const
 bool SessionScreen::writeToDisk()
 {
     auto split = settingsResolver.split (session);
+
+    // セットリストで弾いているときは、ファイルの更新日時を変えない (作者の指示: セットリストの曲が、
+    // 一覧の並び (最後の練習日。開いたことが無いセッションは更新日時で代える) を変えないように)
+    const auto fileOf = [this] (const juce::String& id) { return store.getDirectory().getChildFile (id + SessionStore::fileExtension); };
+    const auto keepModified = openContext.isSetlist() && split.session.id.isNotEmpty() && fileOf (split.session.id).existsAsFile();
+    const auto modified = keepModified ? fileOf (split.session.id).getLastModificationTime() : juce::Time();
+
     if (! store.save (split.session))
         return false;
+
+    if (keepModified)
+        fileOf (split.session.id).setLastModificationTime (modified);   // 曲名を変えて名前が変わっていても、新しいファイルに
 
     session.id = split.session.id;   // 初めて保存したときに採番される
     session.sessionId = split.session.sessionId;
@@ -1424,6 +1528,7 @@ bool SessionScreen::save()
             return false;
         }
         scoreEdits.clear();
+        scoreViewer.clearPreviewEdits();   // ファイルが編集どおりになったので、ページに渡すときに当て直さない
     }
 
     if (! writeToDisk())
@@ -3130,8 +3235,10 @@ void SessionScreen::timerCallback()
     {
         const auto& info = setlistBar.getInfo();
         const auto fraction = length > 0.0 ? position / length : 0.0;
+        // 最後の曲になったら 100% にする (作者の指示)
         if (info.count > 0)
-            setlistBar.setProgress ((info.position - 1 + juce::jlimit (0.0, 1.0, fraction)) / info.count);
+            setlistBar.setProgress (info.position >= info.count ? 1.0
+                                                                : (info.position - 1 + juce::jlimit (0.0, 1.0, fraction)) / info.count);
         setlistBar.setNotice (session.loopEnabled ? "ループ中のため自動で次に進みません"_jp : juce::String());
     }
 

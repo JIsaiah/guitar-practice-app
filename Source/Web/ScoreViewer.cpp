@@ -63,7 +63,27 @@ std::optional<juce::WebBrowserComponent::Resource> ScoreViewer::provide (const j
                 return std::nullopt;
             cachedFile = scoreFile;
             cachedModified = modified;
+            previewDataVersion = -1;
         }
+
+        // 拍・小節を挿入したあと: ファイルの楽譜に、今までの編集を当てたものを渡す (ファイルは書き換えない)
+        if (! previewEdits.empty())
+        {
+            if (previewDataVersion != previewVersion)
+            {
+                if (const auto result = GpScoreEdit::applyToGpData (cachedData, previewEdits, previewData); result.failed())
+                {
+                    previewData.reset();
+                    if (onError != nullptr)
+                        juce::MessageManager::callAsync ([safe = juce::Component::SafePointer (this), message = result.getErrorMessage()]
+                                                         { if (safe != nullptr && safe->onError != nullptr) safe->onError (message); });
+                }
+                previewDataVersion = previewVersion;
+            }
+            if (! previewData.isEmpty())
+                return WebResources::fromMemory (previewData.getData(), previewData.getSize(), "application/octet-stream");
+        }
+
         return WebResources::fromMemory (cachedData.getData(), cachedData.getSize(), "application/octet-stream");
     }
 
@@ -109,8 +129,44 @@ void ScoreViewer::load (const juce::File& file, int trackIndex)
     {
         const juce::ScopedLock lock (fileLock);
         scoreFile = file;
+        previewEdits.clear();   // 別の読み込み: 挿入を見せるための編集は使わない
+        ++previewVersion;
     }
 
+    previewLoading = false;
+    loadInternal (file, trackIndex, {});
+}
+
+void ScoreViewer::reloadWithEdits (const std::vector<GpScoreEdit::NoteEdit>& edits, int trackIndex,
+                                   const GpScoreEdit::NoteEdit& keepSelection)
+{
+    {
+        const juce::ScopedLock lock (fileLock);
+        previewEdits = edits;
+        ++previewVersion;
+    }
+
+    // 読み直したあと、スクロールの位置を保ち、この場所を選んで編集モードを続ける
+    auto* keep = new juce::DynamicObject();
+    keep->setProperty ("slot", keepSelection.slot);
+    keep->setProperty ("bar", keepSelection.masterBar);
+    keep->setProperty ("voice", keepSelection.voice);
+    keep->setProperty ("beat", keepSelection.beat);
+    keep->setProperty ("string", keepSelection.string);
+
+    previewLoading = true;
+    loadInternal (scoreFile, trackIndex, juce::var (keep));
+}
+
+void ScoreViewer::clearPreviewEdits()
+{
+    const juce::ScopedLock lock (fileLock);
+    previewEdits.clear();
+    ++previewVersion;
+}
+
+void ScoreViewer::loadInternal (const juce::File& file, int trackIndex, const juce::var& keep)
+{
     rendered = false;
     scoreTempo = 0.0;
     barStartBeats.clear();
@@ -123,10 +179,11 @@ void ScoreViewer::load (const juce::File& file, int trackIndex)
                                    [] (const juce::var& c) { return c["type"] == "load" || c["type"] == "clear"; }),
                    pending.end());
 
-    editing = false;
+    if (keep.isVoid())
+        editing = false;   // 挿入を見せるための読み直しでは、編集モードを続ける (ページが同じ場所を選び直す)
     if (file.existsAsFile())
         send (makeCommand ("load", { { "url", "/score?n=" + juce::String (++loadCount) }, { "track", trackIndex },
-                                     { "editable", GpScoreEdit::isEditable (file) } }));
+                                     { "editable", GpScoreEdit::isEditable (file) }, { "keep", keep } }));
     else
         send (makeCommand ("clear"));
 }
@@ -282,8 +339,16 @@ void ScoreViewer::handleEvent (const juce::var& event)
         scoreArtist = event["artist"].toString().trim();
         scoreTuning = MusicInfo::describeTuning (strings);
 
-        if (onLoaded != nullptr)
+        // 挿入を見せるための読み直しでは、曲の BPM・リード・バッキングなどを決め直さない (onLoaded を呼ばない)
+        if (std::exchange (previewLoading, false))
+        {
+            if (onPreviewLoaded != nullptr)
+                onPreviewLoaded();
+        }
+        else if (onLoaded != nullptr)
+        {
             onLoaded (scoreTempo);
+        }
         return;
     }
 
@@ -313,6 +378,30 @@ void ScoreViewer::handleEvent (const juce::var& event)
     {
         if (onPdfContext != nullptr)
             onPdfContext ((double) event["pos"], (int) event["repeat"]);
+        return;
+    }
+
+    // 編集中の右クリック: 選んでいる場所 (拍・小節の挿入のメニューをアプリが出す)
+    if (type == "editContext")
+    {
+        GpScoreEdit::NoteEdit place;
+        place.slot = (int) event["slot"];
+        place.masterBar = (int) event["bar"];
+        place.voice = (int) event["voice"];
+        place.beat = (int) event["beat"];
+        place.string = (int) event["string"];
+        if (const auto* tuning = event["tuning"].getArray())
+            for (const auto& pitch : *tuning)
+                place.tuning.push_back ((int) pitch);
+        if (onEditContext != nullptr)
+            onEditContext (place);
+        return;
+    }
+
+    if (type == "undoInsert")
+    {
+        if (onUndoInsert != nullptr)
+            onUndoInsert();
         return;
     }
 

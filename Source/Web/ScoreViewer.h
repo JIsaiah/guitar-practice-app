@@ -86,10 +86,20 @@ public:
     void undoEdit();     // 元に戻す (Ctrl+Z。練習画面がキーを持っているとき)
     void redoEdit();     // やり直す (Ctrl+Y)
 
+    // 拍・小節の挿入 (作者の指示): 編集中の右クリックで、ページが選んでいる場所を知らせる (onEditContext)。
+    // 挿入は、ファイルの楽譜に edits を当てたもの (メモリの中だけ) をページに読み直させて見せる (reloadWithEdits)。
+    // keepSelection: 読み直したあとに選ぶ場所 (slot・masterBar・voice・beat・string)。スクロールの位置も保つ
+    std::function<void (const GpScoreEdit::NoteEdit& place)> onEditContext;   // place.tuning も入る
+    std::function<void()> onUndoInsert;   // ページで戻せる編集が無いときの Ctrl+Z (挿入を戻すかはアプリが決める)
+    std::function<void()> onPreviewLoaded;   // reloadWithEdits の読み直しが終わった (onLoaded の代わりに呼ぶ)
+    void reloadWithEdits (const std::vector<GpScoreEdit::NoteEdit>& edits, int trackIndex, const GpScoreEdit::NoteEdit& keepSelection);
+    void clearPreviewEdits();   // 保存したあと (ファイルが編集どおりになった) に呼ぶ
+
     void resized() override;
 
 private:
     void handleEvent (const juce::var& event);
+    void loadInternal (const juce::File& file, int trackIndex, const juce::var& keep);
     void send (const juce::var& command);
     std::optional<juce::WebBrowserComponent::Resource> provide (const juce::String& path);
 
@@ -102,6 +112,10 @@ private:
     juce::File cachedFile;            // ページに渡したデータの元のファイル (fileLock の中で使う)
     juce::Time cachedModified;
     juce::MemoryBlock cachedData;     // ページに渡すデータ (音声入りの .gp は音声を抜いたもの)
+    std::vector<GpScoreEdit::NoteEdit> previewEdits;   // ページに渡す前に当てる編集 (挿入を見せるため。fileLock の中で使う)
+    juce::MemoryBlock previewData;    // cachedData に previewEdits を当てたもの
+    int previewVersion = 0, previewDataVersion = -1;
+    bool previewLoading = false;      // 今の読み込みは reloadWithEdits のもの
     int loadCount = 0;
     double scoreTempo = 0.0;
     std::vector<double> barStartBeats;

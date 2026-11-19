@@ -200,6 +200,9 @@ private:
     void showPdfPartMenu (bool backing);      // PDF のリード・バッキングのボタンの右クリック
     void sendPdfRepeats();                    // 今の PDF の繰り返しをページに送る
     void showPdfRepeatMenu (double position, int repeat);   // PDF の右クリック: 繰り返しを置く・消す
+    void showInsertMenu (const GpScoreEdit::NoteEdit& place);   // タブ譜の編集中の右クリック: 拍・小節を後ろに挿入
+    void insertIntoScore (const GpScoreEdit::NoteEdit& place, bool bar);
+    void undoInsert();                        // 最後の挿入 (と、そのあとの編集) を元に戻す
     double pdfPendingRepeatStart = -1.0;      // 「ここから繰り返し」だけ置いた始め (-1 = なし。保存しない)
     void resetParts();                         // 別のタブ譜にしたとき
     int activePartTrack() const;               // 今のパートのトラック (-1 = なし)

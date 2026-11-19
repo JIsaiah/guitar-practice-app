@@ -195,7 +195,8 @@ void addEdit (std::vector<NoteEdit>& edits, const NoteEdit& edit)
     if ((edit.kind == Kind::setFret && edit.fret == edit.oldFret) || (edit.kind == Kind::tie && tieUnchanged (edit)))
         return;
 
-    if (edits.empty() || ! edits.back().isSameNote (edit))
+    // 拍・小節の挿入は、まとめない (前後の編集とも)
+    if (edits.empty() || isInsert (edit.kind) || isInsert (edits.back().kind) || ! edits.back().isSameNote (edit))
     {
         edits.push_back (edit);
         return;
@@ -430,6 +431,157 @@ namespace
 
         return juce::Result::ok();
     }
+
+    //==============================================================================
+    // 拍・小節の挿入
+    //   音の長さは <Rhythm> (例: <NoteValue>Quarter</NoteValue><AugmentationDot count="1" />) を、拍が ref で指す
+
+    // 長さ (64分音符の数) と、GP の書き方 (音価・付点の数)。長い順
+    struct RestLength { int length; const char* noteValue; int dots; };
+    const RestLength restLengths[] = {
+        { 64, "Whole", 0 }, { 48, "Half", 1 }, { 32, "Half", 0 }, { 24, "Quarter", 1 }, { 16, "Quarter", 0 },
+        { 12, "Eighth", 1 }, { 8, "Eighth", 0 }, { 4, "16th", 0 }, { 2, "32nd", 0 }, { 1, "64th", 0 }
+    };
+
+    // 同じ長さの <Rhythm> (3連符などの無いもの) の id。無ければ作る
+    juce::String rhythmIdFor (juce::XmlElement& gpif, const RestLength& length)
+    {
+        auto* rhythms = gpif.getChildByName ("Rhythms");
+        if (rhythms == nullptr)
+            rhythms = gpif.createNewChildElement ("Rhythms");
+
+        for (auto* rhythm : rhythms->getChildIterator())
+        {
+            auto* value = rhythm->getChildByName ("NoteValue");
+            auto* dot = rhythm->getChildByName ("AugmentationDot");
+            const auto dots = dot != nullptr ? dot->getIntAttribute ("count", 0) : 0;
+            if (value != nullptr && value->getAllSubText().trim() == length.noteValue && dots == length.dots
+                && rhythm->getChildByName ("PrimaryTuplet") == nullptr && rhythm->getChildByName ("SecondaryTuplet") == nullptr)
+                return rhythm->getStringAttribute ("id");
+        }
+
+        const auto id = juce::String (nextFreeId (rhythms));
+        auto* rhythm = rhythms->createNewChildElement ("Rhythm");
+        rhythm->setAttribute ("id", id);
+        writeValue (*rhythm->createNewChildElement ("NoteValue"), length.noteValue);
+        if (length.dots > 0)
+            rhythm->createNewChildElement ("AugmentationDot")->setAttribute ("count", length.dots);
+        return id;
+    }
+
+    // 拍子 (例: "3/4") の1小節を埋める休符の拍を作り、その id を返す (例: 3/4 → 付点2分休符1つ。7/8 → 2分 + 8分)
+    juce::StringArray makeRestBeats (juce::XmlElement& gpif, const juce::String& time)
+    {
+        auto* beats = gpif.getChildByName ("Beats");
+        const auto numerator = juce::jmax (1, time.upToFirstOccurrenceOf ("/", false, false).getIntValue());
+        const auto denominator = juce::jmax (1, time.fromFirstOccurrenceOf ("/", false, false).getIntValue());
+        auto left = juce::jmax (1, numerator * 64 / denominator);
+
+        juce::StringArray ids;
+        while (left > 0)
+        {
+            const RestLength* length = &restLengths[std::size (restLengths) - 1];
+            for (const auto& l : restLengths)
+                if (l.length <= left) { length = &l; break; }
+
+            const auto id = juce::String (nextFreeId (beats));
+            auto* beat = beats->createNewChildElement ("Beat");
+            beat->setAttribute ("id", id);
+            beat->createNewChildElement ("Rhythm")->setAttribute ("ref", rhythmIdFor (gpif, *length));
+            ids.add (id);
+            left -= length->length;
+        }
+        return ids;
+    }
+
+    // masterBar 番目の小節の後ろに、空の小節を入れる (すべての譜表。拍子・調は同じ。繰り返し記号などは写さない)
+    juce::Result insertBar (juce::XmlElement& gpif, int masterBarIndex)
+    {
+        auto* masterBars = gpif.getChildByName ("MasterBars");
+        auto* bars = gpif.getChildByName ("Bars");
+        auto* voices = gpif.getChildByName ("Voices");
+        auto* source = masterBars->getChildElement (masterBarIndex);
+        if (source == nullptr || source->getChildByName ("Bars") == nullptr)
+            return juce::Result::fail ("タブ譜の小節が見つかりません"_jp);
+
+        auto* masterBar = new juce::XmlElement ("MasterBar");
+        for (const auto* name : { "Key", "Time", "TripletFeel" })
+            if (auto* child = source->getChildByName (name))
+                masterBar->addChildElement (new juce::XmlElement (*child));
+
+        auto* timeElement = source->getChildByName ("Time");
+        const auto time = timeElement != nullptr ? timeElement->getAllSubText().trim() : juce::String ("4/4");
+
+        juce::StringArray newBarIds;
+        for (const auto& barId : tokensOf (source->getChildByName ("Bars")))
+        {
+            auto* sourceBar = findById (bars, barId);
+
+            // 声部は、元の小節と同じ数の欄 (ふつう 4)。1つ目だけ休符の拍を入れ、ほかは空 ("-1")
+            const auto voiceCount = juce::jmax (1, sourceBar != nullptr ? tokensOf (sourceBar->getChildByName ("Voices")).size() : 4);
+            const auto voiceId = juce::String (nextFreeId (voices));
+            auto* voice = voices->createNewChildElement ("Voice");
+            voice->setAttribute ("id", voiceId);
+            setTokens (*voice->createNewChildElement ("Beats"), makeRestBeats (gpif, time));
+
+            juce::StringArray voiceIds { voiceId };
+            while (voiceIds.size() < voiceCount)
+                voiceIds.add (noId);
+
+            const auto newBarId = juce::String (nextFreeId (bars));
+            auto* bar = bars->createNewChildElement ("Bar");
+            bar->setAttribute ("id", newBarId);
+            if (sourceBar != nullptr)
+                if (auto* clef = sourceBar->getChildByName ("Clef"))
+                    bar->addChildElement (new juce::XmlElement (*clef));
+            setTokens (*bar->createNewChildElement ("Voices"), voiceIds);
+            newBarIds.add (newBarId);
+        }
+
+        setTokens (*masterBar->createNewChildElement ("Bars"), newBarIds);
+        masterBars->insertChildElement (masterBar, masterBarIndex + 1);
+
+        // テンポなどの変化 (<Automation> の <Bar> は小節の番号) は、入れた小節より後ろなら1つずらす
+        std::function<void (juce::XmlElement&)> shiftAutomations = [&] (juce::XmlElement& element)
+        {
+            for (auto* child : element.getChildIterator())
+            {
+                if (child->hasTagName ("Automation"))
+                {
+                    if (auto* barNumber = child->getChildByName ("Bar"))
+                        if (const auto n = barNumber->getAllSubText().trim().getIntValue(); n > masterBarIndex)
+                            writeValue (*barNumber, juce::String (n + 1));
+                }
+                else
+                {
+                    shiftAutomations (*child);
+                }
+            }
+        };
+        shiftAutomations (gpif);
+        return juce::Result::ok();
+    }
+
+    // 拍の後ろに、同じ長さの休符の拍を入れる (beatList は makeUnique した声部の <Beats>、tokenIndex はその中の拍の場所)
+    juce::Result insertBeat (juce::XmlElement& gpif, juce::XmlElement& beatList, int tokenIndex)
+    {
+        auto* beats = gpif.getChildByName ("Beats");
+        auto tokens = tokensOf (&beatList);
+        auto* source = findById (beats, tokens[tokenIndex]);
+        if (source == nullptr)
+            return juce::Result::fail ("タブ譜の拍が見つかりません"_jp);
+
+        const auto id = juce::String (nextFreeId (beats));
+        auto* beat = beats->createNewChildElement ("Beat");
+        beat->setAttribute ("id", id);
+        for (const auto* name : { "Dynamic", "Rhythm" })
+            if (auto* child = source->getChildByName (name))
+                beat->addChildElement (new juce::XmlElement (*child));
+
+        tokens.insert (tokenIndex + 1, id);
+        setTokens (beatList, tokens);
+        return juce::Result::ok();
+    }
 }
 
 juce::Result applyToGpif (juce::XmlElement& gpif, const NoteEdit& edit)
@@ -443,6 +595,9 @@ juce::Result applyToGpif (juce::XmlElement& gpif, const NoteEdit& edit)
     auto* notes = gpif.getChildByName ("Notes");
     if (masterBars == nullptr || bars == nullptr || voices == nullptr || beats == nullptr || notes == nullptr)
         return juce::Result::fail ("タブ譜のファイルの形が違います"_jp);
+
+    if (edit.kind == Kind::insertBar)
+        return insertBar (gpif, edit.masterBar);
 
     // 小節 → その譜表の Bar
     auto* masterBar = masterBars->getChildElement (edit.masterBar);
@@ -461,6 +616,9 @@ juce::Result applyToGpif (juce::XmlElement& gpif, const NoteEdit& edit)
     const auto beatIndex = indexOfNth (tokensOf (beatList), edit.beat);
     if (beatIndex < 0)
         return fail ("拍");
+
+    if (edit.kind == Kind::insertBeat)
+        return insertBeat (gpif, *beatList, beatIndex);
 
     auto* beat = makeUnique (*beatList, beatIndex, beats, voices, "Beats");
     if (beat == nullptr)
@@ -511,20 +669,13 @@ juce::Result applyToGpif (juce::XmlElement& gpif, const NoteEdit& edit)
     return fail ("弦");
 }
 
-juce::Result applyToGpFile (const juce::File& gpFile, const std::vector<NoteEdit>& edits)
+namespace
 {
-    if (edits.empty())
-        return juce::Result::ok();
-
-    if (! gpFile.existsAsFile())
-        return juce::Result::fail ("タブ譜のファイルが見つかりません"_jp);
-
-    const juce::String gpifPath = "Content/score.gpif";
-    juce::TemporaryFile temp (gpFile);
-
+    // zip (.gp) の score.gpif に編集を当て、zip を作り直して out に書く:
+    // score.gpif だけ書き換えたもの、ほかはそのまま写す (並びも同じ)
+    juce::Result rewriteZip (juce::ZipFile& zip, const std::vector<NoteEdit>& edits, juce::OutputStream& out)
     {
-        juce::ZipFile zip (gpFile);
-        const auto gpifIndex = zip.getIndexOfFileName (gpifPath);
+        const auto gpifIndex = zip.getIndexOfFileName ("Content/score.gpif");
         if (gpifIndex < 0)
             return juce::Result::fail ("Guitar Pro 7 以降の .gp ではないので、保存できません"_jp);
 
@@ -540,7 +691,6 @@ juce::Result applyToGpFile (const juce::File& gpFile, const std::vector<NoteEdit
             if (auto result = applyToGpif (*gpif, edit); result.failed())
                 return result;
 
-        // zip を作り直す: score.gpif だけ書き換えたもの、ほかはそのまま写す (並びも同じ)
         juce::ZipFile::Builder builder;
         for (int i = 0; i < zip.getNumEntries(); ++i)
         {
@@ -558,9 +708,39 @@ juce::Result applyToGpFile (const juce::File& gpFile, const std::vector<NoteEdit
             }
         }
 
-        juce::FileOutputStream out (temp.getFile());
-        if (! out.openedOk() || ! builder.writeToStream (out, nullptr))
+        if (! builder.writeToStream (out, nullptr))
             return juce::Result::fail ("タブ譜のファイルを書けませんでした"_jp);
+        return juce::Result::ok();
+    }
+}
+
+juce::Result applyToGpData (const juce::MemoryBlock& gpData, const std::vector<NoteEdit>& edits, juce::MemoryBlock& result)
+{
+    juce::ZipFile zip (std::make_unique<juce::MemoryInputStream> (gpData, false));
+    result.reset();
+    juce::MemoryOutputStream out (result, false);
+    const auto written = rewriteZip (zip, edits, out);
+    out.flush();   // 書いた大きさに result を合わせる
+    return written;
+}
+
+juce::Result applyToGpFile (const juce::File& gpFile, const std::vector<NoteEdit>& edits)
+{
+    if (edits.empty())
+        return juce::Result::ok();
+
+    if (! gpFile.existsAsFile())
+        return juce::Result::fail ("タブ譜のファイルが見つかりません"_jp);
+
+    juce::TemporaryFile temp (gpFile);
+
+    {
+        juce::ZipFile zip (gpFile);
+        juce::FileOutputStream out (temp.getFile());
+        if (! out.openedOk())
+            return juce::Result::fail ("タブ譜のファイルを書けませんでした"_jp);
+        if (auto result = rewriteZip (zip, edits, out); result.failed())
+            return result;
         out.flush();
     }   // ここで元のファイルを閉じる (置き換えられるように)
 
