@@ -520,6 +520,158 @@ namespace
     };
 }
 
+namespace
+{
+    // プラグインのスロット (VST の複数プリセット) の確かめ: 同じプラグインを3つのスロットに読み込み、
+    // それぞれに音を通し、編集画面のウィンドウを開いたまま、鳴らすスロットを 1 → 2 → 3 → 1 と切り替える。
+    // 最後に 2・3 を外して消し終えるまで待つ。途中で落ちれば、ログはそこで止まる (plugin-slots.txt)
+    class PluginSlotsTest final : public juce::Timer
+    {
+    public:
+        PluginSlotsTest (const juce::File& outputFolder, const juce::File& vst3, std::function<void()> finished)
+            : folder (outputFolder), vst3File (vst3), onFinished (std::move (finished))
+        {
+            folder.createDirectory();
+            write ("plugin: " + vst3.getFullPathName());
+
+            card = std::make_unique<PluginToneCard> (engine);
+            card->setSize (380, 200);
+            owner = std::make_unique<OwnerWindow> ([this] { write ("!! the owner window received a close request"); });
+            owner->setUsingNativeTitleBar (true);
+            owner->setContentNonOwned (card.get(), true);
+            owner->setTopLeftPosition (40, 40);
+            owner->setVisible (true);
+
+            engine.onPluginToneAboutToReplace = [this] { card->deleteEditor(); };
+            engine.onPluginToneChanged = [this] { card->refreshEditor(); };
+
+            // --slots N: 読み込むスロットの数。--second <.vst3>: 2つ目以降を別のプラグインにする
+            const auto args = juce::JUCEApplicationBase::getCommandLineParameters();
+            numSlots = args.contains ("--slots") ? juce::jlimit (1, AudioEngine::numPluginSlots, argumentAfter (args, "--slots").getIntValue())
+                                                 : AudioEngine::numPluginSlots;
+            const juce::File second (args.contains ("--second") ? argumentAfter (args, "--second") : vst3.getFullPathName());
+            for (int slot = 0; slot < numSlots; ++slot)
+                engine.loadPluginToneAsync (slot, slot == 0 ? vst3 : second, {}, [this, slot] (bool ok, const juce::String& error)
+                {
+                    write ("slot " + juce::String (slot + 1) + " load: " + (ok ? juce::String ("ok") : error));
+                });
+
+            startTimer (1000);
+        }
+
+        ~PluginSlotsTest() override
+        {
+            engine.onPluginToneAboutToReplace = nullptr;
+            engine.onPluginToneChanged = nullptr;
+            card->deleteEditor();
+            owner = nullptr;
+            card = nullptr;
+        }
+
+    private:
+        void write (const juce::String& line)
+        {
+            log << "[" << juce::String ((juce::Time::getMillisecondCounterHiRes() - startMs) / 1000.0, 2) << "s] " << line << "\n";
+            folder.getChildFile ("plugin-slots.txt").replaceWithText (log);
+        }
+
+        // それぞれのスロットのプラグインに、1秒分の音 (440Hz) を通す (オーディオスレッドの代わりにここで呼ぶ)
+        void processAll()
+        {
+            for (int slot = 0; slot < AudioEngine::numPluginSlots; ++slot)
+                if (auto* tone = engine.getPluginTone (slot))
+                {
+                    std::vector<float> samples ((size_t) tone->getBlockSize());
+                    const auto rate = tone->getSampleRate();
+                    float peak = 0.0f;
+                    for (int block = 0; block < (int) (rate / (double) samples.size()); ++block)
+                    {
+                        for (size_t i = 0; i < samples.size(); ++i)
+                        {
+                            const auto n = (double) block * (double) samples.size() + (double) i;
+                            samples[i] = 0.1f * (float) std::sin (n * 440.0 * juce::MathConstants<double>::twoPi / rate);
+                        }
+                        tone->process (samples.data(), (int) samples.size());
+                        for (auto s : samples)
+                            peak = juce::jmax (peak, std::abs (s));
+                    }
+                    write ("  slot " + juce::String (slot + 1) + " processed, output peak " + juce::String (peak, 3));
+                }
+        }
+
+        void timerCallback() override
+        {
+            ++tick;
+            if (phase == 0)
+            {
+                // 3つとも読み込むまで待つ (最大 60 秒)
+                int loaded = 0;
+                for (int slot = 0; slot < numSlots; ++slot)
+                    loaded += engine.getPluginTone (slot) != nullptr ? 1 : 0;
+                if (loaded < numSlots && tick < 60)
+                    return;
+
+                write ("instances loaded: " + juce::String (loaded));
+                processAll();
+                phase = 1;
+                card->requestOpenWindow();
+                write ("open editor of slot 1");
+                startTimer (3000);
+                return;
+            }
+
+            if (phase >= 1 && phase <= 3)
+            {
+                const auto next = phase % AudioEngine::numPluginSlots;   // 1 -> 2 -> 3 -> 1
+                write ("switch to slot " + juce::String (next + 1) + " (editor: " + (card->hasEditor() ? "yes" : "no")
+                       + ", window: " + (card->isWindowShowing() ? "yes" : "no") + ")");
+                engine.setActivePluginSlot (next);
+                card->requestOpenWindow();
+                processAll();
+                ++phase;
+                return;
+            }
+
+            if (phase == 4)
+            {
+                write ("close editor, clear slots 2 and 3");
+                card->deleteEditor();
+                engine.clearPluginTone (1);
+                engine.clearPluginTone (2);
+                phase = 5;
+                tick = 0;
+                return;
+            }
+
+            if (engine.getNumRetired() > 0 && tick < 15)
+            {
+                write ("  waiting (retired: " + juce::String (engine.getNumRetired()) + ")");
+                return;
+            }
+
+            write ("finished without crash (retired: " + juce::String (engine.getNumRetired()) + ")");
+            stopTimer();
+            if (onFinished != nullptr)
+                onFinished();
+        }
+
+        juce::File folder, vst3File;
+        std::function<void()> onFinished;
+        AudioEngine engine;   // デバイスは開かない (音は出さない)
+        std::unique_ptr<PluginToneCard> card;
+        std::unique_ptr<OwnerWindow> owner;
+        juce::String log;
+        double startMs = juce::Time::getMillisecondCounterHiRes();
+        int phase = 0, tick = 0, numSlots = AudioEngine::numPluginSlots;
+    };
+}
+
+std::unique_ptr<juce::Timer> DevAudioCheck::startPluginSlotsTest (const juce::String& commandLine, std::function<void()> onFinished)
+{
+    return std::make_unique<PluginSlotsTest> (juce::File (argumentAfter (commandLine, pluginSlotsTestFlag)),
+                                              juce::File (argumentAfter (commandLine, "--plugin")), std::move (onFinished));
+}
+
 std::unique_ptr<juce::Timer> DevAudioCheck::startPluginWindowTest (const juce::String& commandLine, std::function<void()> onFinished)
 {
     return std::make_unique<PluginWindowTest> (juce::File (argumentAfter (commandLine, pluginWindowTestFlag)),

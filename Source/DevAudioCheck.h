@@ -29,5 +29,10 @@ namespace DevAudioCheck
     constexpr const char* metronomeCheckFlag = "--metronome-check";
     juce::String runMetronomeCheck (const juce::String& commandLine);
     std::unique_ptr<juce::Timer> startPluginWindowTest (const juce::String& commandLine, std::function<void()> onFinished);
+
+    // VST の複数プリセット: 同じプラグインを3つのスロットに読み込み、編集画面を開いたまま切り替えても落ちないか
+    //   suguhiku.exe --plugin-slots-test <出力フォルダ> --plugin <プラグイン.vst3>   -> plugin-slots.txt
+    constexpr const char* pluginSlotsTestFlag = "--plugin-slots-test";
+    std::unique_ptr<juce::Timer> startPluginSlotsTest (const juce::String& commandLine, std::function<void()> onFinished);
 }
 #endif

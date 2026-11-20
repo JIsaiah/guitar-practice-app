@@ -121,10 +121,25 @@ public:
     // Archetype Misha Mansoor X は、2つ目を作ったり、2つ目の画面を開いたりすると、1つ目が残っている間は落ちる
     // (クラッシュダンプと --plugin-window-test で確認)。
     // 同じファイルで、保存した状態があるときは、作り直さずに状態だけ戻す (セットリストで同じプラグインの曲が続くとき)
-    void loadPluginToneAsync (const juce::File& vst3File, const juce::MemoryBlock& state, LoadCallback onDone);
-    void clearPluginTone();
-    PluginTone* getPluginTone() const noexcept { return ownedPluginTone.get(); }   // 編集画面を作るため
-    bool isPluginToneLoading() const noexcept  { return pluginToneLoading; }
+    //
+    // 複数のプリセット (作者の指示: 1・2・3 に別々のプラグイン): プラグインの入れ物 (スロット) を3つ持ち、
+    // 全部を読み込んでおいて、鳴らすものを切り替える (setActivePluginSlot)。切り替えは、プラグインを作り直さないので速く、
+    // 前の音から次の音へ短く (約 10ms) つなぐので、音が途切れない。鳴らすのは今のスロットだけ (つなぐ間だけ2つ)
+    static constexpr int numPluginSlots = 3;
+    void loadPluginToneAsync (int slot, const juce::File& vst3File, const juce::MemoryBlock& state, LoadCallback onDone);
+    void loadPluginToneAsync (const juce::File& vst3File, const juce::MemoryBlock& state, LoadCallback onDone)
+    {
+        loadPluginToneAsync (getActivePluginSlot(), vst3File, state, std::move (onDone));
+    }
+    void clearPluginTone (int slot);
+    void clearPluginTone() { clearPluginTone (getActivePluginSlot()); }
+    // 鳴らすスロットを変える。編集画面は今のスロットのものだけなので、前後に onPluginToneAboutToReplace・onPluginToneChanged を呼ぶ
+    void setActivePluginSlot (int slot);
+    int getActivePluginSlot() const noexcept { return activePluginSlot.load(); }
+    PluginTone* getPluginTone (int slot) const noexcept;
+    PluginTone* getPluginTone() const noexcept { return getPluginTone (getActivePluginSlot()); }   // 編集画面を作るため
+    bool isPluginToneLoading (int slot) const noexcept;
+    bool isPluginToneLoading() const noexcept  { return isPluginToneLoading (getActivePluginSlot()); }
    #if JUCE_DEBUG
     // 開発用 (--metronome-check): オーディオデバイスを開かずに、オーディオの処理を1ブロック分だけ動かす
     void renderBlockForTest (float* const* outputs, int numOutputs, int numSamples, double sampleRate)
@@ -201,10 +216,11 @@ private:
     NamToneInfo getNamSlotInfo (const NamSlot& slot) const;
     void reloadNamSlotIfDeviceChanged (NamSlot& slot);
     bool processNam (const NamSlot& slot, float* buffer, int numSamples) noexcept;   // 鳴らせたら true
-    void installPluginTone (std::shared_ptr<PluginTone> newTone);
-    void startPendingPluginLoad();    // 古いプラグインを消し終えていれば、待っている読み込みを始める
+    void installPluginTone (int slot, std::shared_ptr<PluginTone> newTone);
+    void startPendingPluginLoad();    // 古いプラグインを消し終えていれば、待っている読み込みを (1つずつ) 始める
     bool hasRetiredPlugin() const;
     void updatePluginPreparation();   // デバイスの設定が変わったら、プラグインを準備し直す
+    void processPlugins (float* buffer, int numSamples) noexcept;   // 今のスロットのプラグイン (切り替えの直後は前のものとつなぐ)
     void processGuitar (const float* input, int numSamples, int toneType) noexcept;
     void pushTunerInput (const float* data, int numSamples) noexcept;
     void triggerClick (bool accent, double sampleRate) noexcept;
@@ -221,25 +237,39 @@ private:
     NamSlot userNam, driveNam;
 
     juce::AudioPluginFormatManager pluginFormats;   // VST3 (メッセージスレッドだけが使う)
-    std::shared_ptr<PluginTone> ownedPluginTone;
-    int pluginToneGeneration = 0;
-    bool pluginToneLoading = false;
 
-    // 古いプラグインが消えるのを待っている読み込み
+    // プラグインの入れ物 (スロット)。owned はメッセージスレッドだけ、current はオーディオスレッドが読む
+    struct PluginSlot
+    {
+        std::shared_ptr<PluginTone> owned;
+        std::atomic<PluginTone*> current { nullptr };
+        int generation = 0;
+        bool loading = false;
+        // 準備し直し: オーディオスレッドから外した時点のコールバックの回数。-1 なら準備し直していない
+        juce::int64 detachedAtCallback = -1;
+    };
+    std::array<PluginSlot, numPluginSlots> pluginSlots;
+    std::atomic<int> activePluginSlot { 0 };
+
+    // 古いプラグインが消えるのを待っている読み込み (1つずつ作る。プラグインを消している最中に作らないため)
     struct PendingPluginLoad
     {
+        int slot = 0;
         juce::File file;
         juce::MemoryBlock state;
         LoadCallback onDone;
         int generation = 0;
     };
-    std::optional<PendingPluginLoad> pendingPluginLoad;
-    // 準備し直し: オーディオスレッドから外した時点のコールバックの回数。-1 なら準備し直していない
-    juce::int64 pluginDetachedAtCallback = -1;
+    std::vector<PendingPluginLoad> pendingPluginLoads;
+    bool pluginCreating = false;   // 今、1つ作っている
+
+    // オーディオスレッドだけが使う: 切り替えのつなぎ (前のスロットの音を、だんだん小さくする)
+    int audioPluginSlot = 0, fadeFromSlot = -1, fadeSamplesLeft = 0;
+    static constexpr int pluginFadeSamples = 480;   // 48kHz で 10ms
+    std::vector<float> pluginFadeBuffer = std::vector<float> ((size_t) 16384, 0.0f);
 
     // スレッド間で共有する値
     std::atomic<LoadedAudio*> currentSource { nullptr };
-    std::atomic<PluginTone*> currentPluginTone { nullptr };
     std::atomic<int> deviceBufferSize { 512 };
     std::atomic<float> inputGain { 1.0f };
     std::atomic<float> noiseGateDb { NoiseGate::offDb };

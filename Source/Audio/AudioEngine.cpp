@@ -1,4 +1,5 @@
 #include "AudioEngine.h"
+#include "PluginLocator.h"
 #include "../AppLog.h"
 #include "../Text.h"
 
@@ -48,8 +49,11 @@ AudioEngine::~AudioEngine()
     loaderPool.removeAllJobs (true, 5000);
 
     // オーディオが止まったあとで、プラグインを確実にここ (メッセージスレッド) で消す
-    currentPluginTone.store (nullptr);
-    ownedPluginTone.reset();
+    for (auto& slot : pluginSlots)
+    {
+        slot.current.store (nullptr);
+        slot.owned.reset();
+    }
     retired.clear();
 }
 
@@ -158,37 +162,90 @@ void AudioEngine::clearNamTone()
 
 //==============================================================================
 // VST3 プラグインの音色
-void AudioEngine::loadPluginToneAsync (const juce::File& vst3File, const juce::MemoryBlock& state, LoadCallback onDone)
+void AudioEngine::loadPluginToneAsync (int slotIndex, const juce::File& vst3File, const juce::MemoryBlock& state, LoadCallback onDone)
 {
-    const auto generation = ++pluginToneGeneration;
-    pendingPluginLoad.reset();   // 前に頼まれて待っていたものは、やめる
+    if (! juce::isPositiveAndBelow (slotIndex, numPluginSlots))
+        return;
+
+    auto& slot = pluginSlots[(size_t) slotIndex];
+    const auto generation = ++slot.generation;
+
+    // 前にこのスロットに頼まれて待っていたものは、やめる
+    pendingPluginLoads.erase (std::remove_if (pendingPluginLoads.begin(), pendingPluginLoads.end(),
+                                              [slotIndex] (const PendingPluginLoad& p) { return p.slot == slotIndex; }),
+                              pendingPluginLoads.end());
 
     if (vst3File == juce::File())
     {
-        pluginToneLoading = false;
-        installPluginTone (nullptr);
+        slot.loading = false;
+        installPluginTone (slotIndex, nullptr);
         if (onDone != nullptr)
             onDone (true, {});
         return;
     }
 
-    // 同じプラグインが読み込まれていて、戻す状態があるなら、作り直さずに状態だけ戻す
-    if (ownedPluginTone != nullptr && ownedPluginTone->getFile() == vst3File && state.getSize() > 0)
+    // 同じプラグインが読み込まれていれば、作り直さない。戻す状態があれば、状態だけ戻す
+    if (slot.owned != nullptr && slot.owned->getFile() == vst3File)
     {
-        pluginToneLoading = false;
-        ownedPluginTone->getInstance().setStateInformation (state.getData(), (int) state.getSize());
-        if (onPluginToneChanged != nullptr)
+        slot.loading = false;
+        if (state.getSize() > 0)
+            slot.owned->getInstance().setStateInformation (state.getData(), (int) state.getSize());
+        if (slotIndex == getActivePluginSlot() && onPluginToneChanged != nullptr)
             onPluginToneChanged();
         if (onDone != nullptr)
             onDone (true, {});
         return;
     }
 
-    // 同時に1つだけ: 今のプラグインを外し (編集画面も消してもらう)、消し終えてから新しいものを作る
-    pluginToneLoading = true;
-    installPluginTone (nullptr);
-    pendingPluginLoad = PendingPluginLoad { vst3File, state, std::move (onDone), generation };
+    // 同時に2つ作ると落ちるプラグイン (PluginLocator::isSingleInstance) が、ほかのスロットにあれば、先にそちらを外す。
+    // 外したものが消え終わってから作るので、2つ同時にあることは無い
+    if (PluginLocator::isSingleInstance (vst3File))
+    {
+        for (int other = 0; other < numPluginSlots; ++other)
+        {
+            if (other == slotIndex)
+                continue;
+            auto& o = pluginSlots[(size_t) other];
+            if (o.owned != nullptr && o.owned->getFile() == vst3File)
+            {
+                ++o.generation;
+                installPluginTone (other, nullptr);
+            }
+            pendingPluginLoads.erase (std::remove_if (pendingPluginLoads.begin(), pendingPluginLoads.end(),
+                                                      [other, &vst3File] (const PendingPluginLoad& p) { return p.slot == other && p.file == vst3File; }),
+                                      pendingPluginLoads.end());
+        }
+    }
+
+    // このスロットの今のプラグインを外し (今のスロットなら編集画面も消してもらう)、消し終えてから新しいものを作る
+    slot.loading = true;
+    installPluginTone (slotIndex, nullptr);
+    pendingPluginLoads.push_back ({ slotIndex, vst3File, state, std::move (onDone), generation });
     startPendingPluginLoad();
+}
+
+PluginTone* AudioEngine::getPluginTone (int slot) const noexcept
+{
+    return juce::isPositiveAndBelow (slot, numPluginSlots) ? pluginSlots[(size_t) slot].owned.get() : nullptr;
+}
+
+bool AudioEngine::isPluginToneLoading (int slot) const noexcept
+{
+    return juce::isPositiveAndBelow (slot, numPluginSlots) && pluginSlots[(size_t) slot].loading;
+}
+
+void AudioEngine::setActivePluginSlot (int slot)
+{
+    slot = juce::jlimit (0, numPluginSlots - 1, slot);
+    if (slot == getActivePluginSlot())
+        return;
+
+    // 編集画面は今のスロットのプラグインのもの。先に消してもらい、切り替えてから新しいものを作ってもらう
+    if (onPluginToneAboutToReplace != nullptr)
+        onPluginToneAboutToReplace();
+    activePluginSlot.store (slot);   // オーディオスレッドが、次のブロックから短くつないで切り替える
+    if (onPluginToneChanged != nullptr)
+        onPluginToneChanged();
 }
 
 bool AudioEngine::hasRetiredPlugin() const
@@ -198,93 +255,131 @@ bool AudioEngine::hasRetiredPlugin() const
 
 void AudioEngine::startPendingPluginLoad()
 {
-    if (! pendingPluginLoad.has_value() || hasRetiredPlugin())
-        return;   // まだ古いプラグインが残っている (timerCallback で、また呼ぶ)
+    // 1つずつ作る。古いプラグインが残っている間 (消している最中) も作らない (timerCallback で、また呼ぶ)
+    if (pendingPluginLoads.empty() || pluginCreating || hasRetiredPlugin())
+        return;
 
-    auto load = std::move (*pendingPluginLoad);
-    pendingPluginLoad.reset();
+    // 同時に2つ作ると落ちるプラグイン: ほかのスロットにあれば、先に外し、消え終わるのを待ってから作る
+    // (作る直前に確かめる。頼まれたときには、まだできあがっていないことがあるため)
+    if (const auto& next = pendingPluginLoads.front(); PluginLocator::isSingleInstance (next.file))
+    {
+        bool removed = false;
+        for (int other = 0; other < numPluginSlots; ++other)
+        {
+            auto& o = pluginSlots[(size_t) other];
+            if (other != next.slot && o.owned != nullptr && o.owned->getFile() == next.file)
+            {
+                installPluginTone (other, nullptr);
+                removed = true;
+            }
+        }
+        if (removed)
+            return;   // timerCallback で、消え終わってから、また呼ばれる
+    }
 
+    auto load = std::move (pendingPluginLoads.front());
+    pendingPluginLoads.erase (pendingPluginLoads.begin());
+
+    const auto slotIndex = load.slot;
     const auto generation = load.generation;
     auto onDone = std::move (load.onDone);
     juce::WeakReference<AudioEngine> weakThis (this);
-    AppLog::write ("プラグインを読み込む: "_jp + load.file.getFileName());
+    AppLog::write ("プラグインを読み込む: "_jp + load.file.getFileName() + " (スロット "_jp + juce::String (slotIndex + 1) + ")");
+    pluginCreating = true;
 
     PluginTone::createAsync (pluginFormats, load.file, load.state,
                              deviceSampleRate.load(), deviceBufferSize.load(),
-                             [weakThis, generation, onDone] (std::shared_ptr<PluginTone> tone, const juce::String& error)
+                             [weakThis, slotIndex, generation, onDone] (std::shared_ptr<PluginTone> tone, const juce::String& error)
     {
         auto* self = weakThis.get();
-        if (self == nullptr || generation != self->pluginToneGeneration)
-            return;   // 破棄済み、または後から別のプラグインが選ばれた (できたものはここで消える: メッセージスレッド)
+        if (self == nullptr)
+            return;
+
+        self->pluginCreating = false;
+        auto& slot = self->pluginSlots[(size_t) slotIndex];
+        if (generation != slot.generation)
+        {
+            // 後から別のプラグインが選ばれた (できたものはここで消える: メッセージスレッド)
+            juce::MessageManager::callAsync ([weakThis] { if (auto* s = weakThis.get()) s->startPendingPluginLoad(); });
+            return;
+        }
 
         AppLog::write (tone != nullptr ? "プラグインを読み込んだ"_jp : "プラグインを読み込めなかった: "_jp + error);
-        self->pluginToneLoading = false;
+        slot.loading = false;
 
         if (tone != nullptr)
-            self->installPluginTone (tone);
+            self->installPluginTone (slotIndex, tone);
 
         if (onDone != nullptr)
             onDone (tone != nullptr, error);
+
+        self->startPendingPluginLoad();   // 待っている次のスロット
     });
 }
 
-void AudioEngine::clearPluginTone()
+void AudioEngine::clearPluginTone (int slot)
 {
-    loadPluginToneAsync ({}, {}, nullptr);
+    loadPluginToneAsync (slot, {}, {}, nullptr);
 }
 
-void AudioEngine::installPluginTone (std::shared_ptr<PluginTone> newTone)
+void AudioEngine::installPluginTone (int slotIndex, std::shared_ptr<PluginTone> newTone)
 {
-    // 今のプラグインの編集画面を、画面に消してもらう (プラグインより先に消す必要がある)
-    if (ownedPluginTone != nullptr && onPluginToneAboutToReplace != nullptr)
+    auto& slot = pluginSlots[(size_t) slotIndex];
+    const bool isActive = slotIndex == getActivePluginSlot();
+
+    // 今のスロットなら、プラグインの編集画面を、画面に消してもらう (プラグインより先に消す必要がある)
+    if (isActive && slot.owned != nullptr && onPluginToneAboutToReplace != nullptr)
         onPluginToneAboutToReplace();
 
     // 古いものは、オーディオスレッドが使い終わってから解放する (音源・NAM と同じ)
     // プラグインは、編集画面を消してから少し (1秒) 待って消す。編集画面を消したあとに、
     // プラグイン自身の後片付けのメッセージが届くことがあるため
-    if (ownedPluginTone != nullptr)
-        retired.push_back ({ ownedPluginTone, callbackCount.load(), juce::Time::getMillisecondCounter() + 1000, true });
+    if (slot.owned != nullptr)
+        retired.push_back ({ slot.owned, callbackCount.load(), juce::Time::getMillisecondCounter() + 1000, true });
 
-    ownedPluginTone = std::move (newTone);
-    pluginDetachedAtCallback = -1;
-    currentPluginTone.store (ownedPluginTone.get());
+    slot.owned = std::move (newTone);
+    slot.detachedAtCallback = -1;
+    slot.current.store (slot.owned.get());
 
-    if (onPluginToneChanged != nullptr)
+    if (isActive && onPluginToneChanged != nullptr)
         onPluginToneChanged();
 }
 
 void AudioEngine::updatePluginPreparation()
 {
-    if (ownedPluginTone == nullptr)
-        return;
-
     auto* device = deviceManager.getCurrentAudioDevice();
     const bool deviceRunning = device != nullptr && device->isPlaying();
     const auto sampleRate = deviceSampleRate.load();
     const auto blockSize = deviceBufferSize.load();
 
-    if (pluginDetachedAtCallback < 0)
+    for (auto& slot : pluginSlots)
     {
-        // デバイスのサンプルレートやバッファが変わったら、準備し直す。
-        // プラグインの準備 (prepareToPlay) は、オーディオスレッドが使っている間にはできないので、まず外す
-        const bool changed = ! juce::approximatelyEqual (ownedPluginTone->getSampleRate(), sampleRate)
-                          || ownedPluginTone->getBlockSize() < blockSize;
-        if (! changed)
-            return;
+        if (slot.owned == nullptr)
+            continue;
 
-        currentPluginTone.store (nullptr);
-        pluginDetachedAtCallback = (juce::int64) callbackCount.load();
-        if (deviceRunning)
-            return;   // 次のタイマーで、オーディオスレッドが使い終わったのを確かめてから準備する
+        if (slot.detachedAtCallback < 0)
+        {
+            // デバイスのサンプルレートやバッファが変わったら、準備し直す。
+            // プラグインの準備 (prepareToPlay) は、オーディオスレッドが使っている間にはできないので、まず外す
+            const bool changed = ! juce::approximatelyEqual (slot.owned->getSampleRate(), sampleRate)
+                              || slot.owned->getBlockSize() < blockSize;
+            if (! changed)
+                continue;
+
+            slot.current.store (nullptr);
+            slot.detachedAtCallback = (juce::int64) callbackCount.load();
+            if (deviceRunning)
+                continue;   // 次のタイマーで、オーディオスレッドが使い終わったのを確かめてから準備する
+        }
+
+        // 外してからコールバックが2回進めば (またはデバイスが止まっていれば)、もう使われていない
+        if (deviceRunning && (juce::int64) callbackCount.load() <= slot.detachedAtCallback + 1)
+            continue;
+
+        slot.owned->prepare (sampleRate, blockSize);
+        slot.detachedAtCallback = -1;
+        slot.current.store (slot.owned.get());
     }
-
-    // 外してからコールバックが2回進めば (またはデバイスが止まっていれば)、もう使われていない
-    if (deviceRunning && (juce::int64) callbackCount.load() <= pluginDetachedAtCallback + 1)
-        return;
-
-    ownedPluginTone->prepare (sampleRate, blockSize);
-    pluginDetachedAtCallback = -1;
-    currentPluginTone.store (ownedPluginTone.get());
 }
 
 void AudioEngine::installNamTone (NamSlot& slot, std::shared_ptr<NamTone> newTone)
@@ -515,13 +610,7 @@ void AudioEngine::processGuitar (const float* input, int numSamples, int toneTyp
     if ((ToneType) toneType == ToneType::plugin)
     {
         // VST3 プラグイン。準備し直している最中 (外している間) は、音色なしでそのまま出す
-        auto* pluginTone = currentPluginTone.load();
-        if (pluginTone != nullptr && juce::approximatelyEqual (pluginTone->getSampleRate(), deviceSampleRate.load()))
-        {
-            const auto block = pluginTone->getBlockSize();
-            for (int start = 0; start < numSamples; start += block)
-                pluginTone->process (buffer + start, juce::jmin (block, numSamples - start));
-        }
+        processPlugins (buffer, numSamples);
     }
     else if ((ToneType) toneType == ToneType::nam)
     {
@@ -539,6 +628,55 @@ void AudioEngine::processGuitar (const float* input, int numSamples, int toneTyp
         for (int i = 0; i < numSamples; ++i)
             buffer[i] = applySimpleTone (buffer[i], toneType);
     }
+}
+
+void AudioEngine::processPlugins (float* buffer, int numSamples) noexcept
+{
+    const auto sampleRate = deviceSampleRate.load();
+    const auto usable = [sampleRate] (PluginTone* t)
+    {
+        return t != nullptr && juce::approximatelyEqual (t->getSampleRate(), sampleRate);
+    };
+    const auto run = [] (PluginTone* t, float* samples, int count)
+    {
+        const auto block = t->getBlockSize();
+        for (int start = 0; start < count; start += block)
+            t->process (samples + start, juce::jmin (block, count - start));
+    };
+
+    // スロットが切り替わった: 前のスロットの音から、短くつなぐ (音が途切れたり、ぷつっと鳴ったりしないように)
+    const auto active = juce::jlimit (0, numPluginSlots - 1, activePluginSlot.load());
+    if (active != audioPluginSlot)
+    {
+        fadeFromSlot = audioPluginSlot;
+        audioPluginSlot = active;
+        fadeSamplesLeft = pluginFadeSamples;
+    }
+
+    auto* activeTone = pluginSlots[(size_t) active].current.load();
+    auto* previous = fadeSamplesLeft > 0 && fadeFromSlot >= 0 ? pluginSlots[(size_t) fadeFromSlot].current.load() : nullptr;
+    const bool fading = usable (previous) && numSamples <= (int) pluginFadeBuffer.size();
+
+    if (fading)
+        juce::FloatVectorOperations::copy (pluginFadeBuffer.data(), buffer, numSamples);   // 前のスロットに通す分
+
+    if (usable (activeTone))
+        run (activeTone, buffer, numSamples);
+
+    if (fading)
+    {
+        run (previous, pluginFadeBuffer.data(), numSamples);
+        for (int i = 0; i < numSamples; ++i)
+        {
+            const auto left = juce::jmax (0, fadeSamplesLeft - i);
+            const auto oldGain = (float) left / (float) pluginFadeSamples;
+            buffer[i] = buffer[i] * (1.0f - oldGain) + pluginFadeBuffer[(size_t) i] * oldGain;
+        }
+    }
+
+    fadeSamplesLeft = juce::jmax (0, fadeSamplesLeft - numSamples);
+    if (fadeSamplesLeft == 0)
+        fadeFromSlot = -1;
 }
 
 bool AudioEngine::processNam (const NamSlot& slot, float* buffer, int numSamples) noexcept

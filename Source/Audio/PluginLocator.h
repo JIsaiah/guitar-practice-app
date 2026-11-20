@@ -41,4 +41,13 @@ namespace PluginLocator
     {
         return findVst3 ("TONE3000");
     }
+
+    // 同時に2つ作ると落ちるプラグイン (作者の PC で確かめた: Archetype Misha Mansoor X は、2つ目ができた直後に落ちる。
+    // Archetype Gojira・NeuralAmpModeler は3つでも落ちない。Misha と別のプラグインの組み合わせも落ちない)。
+    // 同じ作りの「Archetype ... X」も、念のため同じ扱いにする。これらは1つだけ作り、プリセットの間で使い回す
+    inline bool isSingleInstance (const juce::File& vst3)
+    {
+        const auto name = vst3.getFileNameWithoutExtension();
+        return name.startsWithIgnoreCase ("Archetype ") && name.endsWithIgnoreCase (" X");
+    }
 }

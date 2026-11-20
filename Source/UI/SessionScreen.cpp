@@ -703,9 +703,9 @@ void SessionScreen::applySessionToEngine()
     engine.setNoiseGateDb ((float) session.noiseGateDb);
     loadNamTone();
 
-    // TONE3000 を使うセッションなら、プラグインを読み込み、保存した状態 (選んだ音色・つまみ) に戻す
-    if (session.tonePresetId == pluginTonePresetId || session.pluginPath.isNotEmpty())
-        loadPluginTone();
+    // VST を使うセッションなら、プラグインを読み込み、保存した状態 (選んだ音色・つまみ) に戻す。
+    // プリセット 1・2・3 の VST も、すべて読み込んでおく (押したときに、すぐ切り替わるように)
+    setUpPluginSlots();
     applySourceGain();
     applyGuitarGain();
     engine.setMetronomeGain ((float) session.mixMetronome);
@@ -1320,11 +1320,16 @@ void SessionScreen::updateScoreUi()
 void SessionScreen::updatePdfUi()
 {
     const auto pdf = session.isPdfScore();
-    const auto layoutChanged = pdf != pdfSpeedSlider.isVisible();
+    const auto hasScore = session.scorePath.isNotEmpty();
+    const auto layoutChanged = pdf != pdfSpeedSlider.isVisible() || hasScore != leadButton.isVisible();
     pdfSpeedLabel.setVisible (pdf);
     pdfSpeedSlider.setVisible (pdf);
     // PDF のときは「小節を同じ幅に」を隠す (使えないうえに、「速さ」の欄のぶん幅が足りず、「ここから流す」が見えなくなるため)
-    equalBarsButton.setVisible (! pdf);
+    equalBarsButton.setVisible (hasScore && ! pdf);
+    // タブ譜が無いときは、タブ譜のためのボタンを出さない (作者の指示: 今のセッションと関係ないボタンは隠す)。
+    // タブ譜を読み込んだら出す
+    for (auto* b : std::initializer_list<juce::Component*> { &leadButton, &backingButton, &scoreStartButton, &scoreRemoveButton })
+        b->setVisible (hasScore);
 
     if (pdf)
     {
@@ -2801,6 +2806,14 @@ void SessionScreen::pressPreset (int slot)
         return;
 
     const auto part = session.backingActive ? "バッキング"_jp : "リード"_jp;
+
+    // VST を選んでいるときの、空のプリセット 2・3: VST を選んでもらう (作者の指示。1 は最初に選んだ VST になる)
+    if (session.toneSlots[(size_t) slot - 1].isEmpty() && isPluginToneSelected() && slot >= 2)
+    {
+        chooseVstForPreset (slot);
+        return;
+    }
+
     if (session.toneSlots[(size_t) slot - 1].isEmpty())
     {
         savePreset (slot);
@@ -2877,7 +2890,11 @@ void SessionScreen::savePreset (int slot)
     // プラグインのつまみは、今の状態を保存する (セッションの保存を待たずに)
     if (session.tonePresetId == pluginTonePresetId)
         if (auto* tone = engine.getPluginTone())
+        {
             s.pluginState = tone->getState().toBase64Encoding();
+            if (pluginSlotForPreset (slot) == engine.getActivePluginSlot())
+                pluginSlotOwner[(size_t) engine.getActivePluginSlot()] = slot;   // 今鳴らしているものが、このプリセット
+        }
 
     updatePresetButtons();
 }
@@ -2906,10 +2923,147 @@ void SessionScreen::applyPreset (int slot)
     {
         session.pluginPath = s.pluginPath;
         session.pluginState = s.pluginState;
-        loadPluginTone();
+        activatePresetPlugin (slot);   // 読み込んであれば、鳴らすスロットを切り替えるだけ
     }
 
     updateToneSummary();
+}
+
+//==============================================================================
+// VST の複数プリセット
+int SessionScreen::pluginSlotForPreset (int preset) const
+{
+    const auto& s = session.toneSlots[(size_t) preset - 1];
+    const juce::File file (s.pluginPath);
+
+    // 同時に2つ作れないプラグイン: すでにあるスロット、または前のプリセットと同じスロットを使い回す
+    if (PluginLocator::isSingleInstance (file))
+    {
+        for (int slot = 0; slot < AudioEngine::numPluginSlots; ++slot)
+            if (auto* tone = engine.getPluginTone (slot); tone != nullptr && tone->getFile() == file)
+                return slot;
+
+        for (int q = 1; q < preset; ++q)
+        {
+            const auto& other = session.toneSlots[(size_t) q - 1];
+            if (other.tonePresetId == pluginTonePresetId && juce::File (other.pluginPath) == file)
+                return pluginSlotForPreset (q);
+        }
+    }
+    return preset - 1;
+}
+
+int SessionScreen::directPluginSlot() const
+{
+    // 今のパートのプリセットがこの VST なら、そのスロット。そうでなければ、VST のプリセットが使っていないスロット
+    const auto current = currentPartPresetValue();
+    if (current > 0)
+    {
+        const auto& s = session.toneSlots[(size_t) current - 1];
+        if (s.tonePresetId == pluginTonePresetId && s.pluginPath == session.pluginPath)
+            return pluginSlotForPreset (current);
+    }
+
+    for (int slot = 0; slot < AudioEngine::numPluginSlots; ++slot)
+        if (session.toneSlots[(size_t) slot].tonePresetId != pluginTonePresetId || session.toneSlots[(size_t) slot].pluginPath.isEmpty())
+            return slot;
+    return 0;
+}
+
+void SessionScreen::setUpPluginSlots()
+{
+    const bool usesPlugin = session.tonePresetId == pluginTonePresetId || session.pluginPath.isNotEmpty();
+
+    // 鳴らすスロットを先に決める (今の VST の読み込み・編集画面は、このスロットのもの)
+    if (usesPlugin)
+    {
+        const auto slot = directPluginSlot();
+        engine.setActivePluginSlot (slot);
+        const auto current = currentPartPresetValue();
+        pluginSlotOwner[(size_t) slot] = current > 0 && pluginSlotForPreset (current) == slot ? current : 0;
+        loadPluginTone();
+    }
+
+    // プリセットの VST を、それぞれのスロットに読み込む (保存した設定で)。今鳴らしているスロットは上で読み込んだ
+    for (int preset = 1; preset <= Session::numToneSlots; ++preset)
+    {
+        const auto& s = session.toneSlots[(size_t) preset - 1];
+        if (s.tonePresetId != pluginTonePresetId || s.pluginPath.isEmpty() || ! juce::File (s.pluginPath).exists())
+            continue;
+
+        const auto slot = pluginSlotForPreset (preset);
+        if (slot != preset - 1)
+            continue;   // 使い回し (同時に2つ作れないプラグイン): 設定は、そのプリセットを押したときに入れる
+        if (usesPlugin && slot == engine.getActivePluginSlot())
+            continue;
+
+        juce::MemoryBlock state;
+        if (s.pluginState.isNotEmpty())
+            state.fromBase64Encoding (s.pluginState);
+        pluginSlotOwner[(size_t) slot] = preset;
+        engine.loadPluginToneAsync (slot, juce::File (s.pluginPath), state, nullptr);
+    }
+}
+
+void SessionScreen::activatePresetPlugin (int preset)
+{
+    const auto slot = pluginSlotForPreset (preset);
+    const juce::File file (session.toneSlots[(size_t) preset - 1].pluginPath);
+    const bool windowOpen = pluginCard.isWindowShowing();
+    auto* tone = engine.getPluginTone (slot);
+
+    if (tone != nullptr && tone->getFile() == file && pluginSlotOwner[(size_t) slot] == preset)
+    {
+        // 読み込んであり、このプリセットの設定のまま: 鳴らすスロットを切り替えるだけ
+        engine.setActivePluginSlot (slot);
+        pluginBaselineState = tone->getState().toBase64Encoding();
+        pluginCard.setState (PluginToneCard::State::ready);
+    }
+    else
+    {
+        // 使い回しのスロットで、ほかのプリセットの設定が入っている: その設定 (つまみを動かした分も) を
+        // 元のプリセットに残してから、このプリセットの設定を入れる
+        const auto owner = pluginSlotOwner[(size_t) slot];
+        if (tone != nullptr && owner > 0 && owner != preset
+            && juce::File (session.toneSlots[(size_t) owner - 1].pluginPath) == tone->getFile())
+            session.toneSlots[(size_t) owner - 1].pluginState = tone->getState().toBase64Encoding();
+
+        engine.setActivePluginSlot (slot);
+        pluginSlotOwner[(size_t) slot] = preset;
+        loadPluginTone();   // 同じプラグインなら設定だけ入れる。違えば作る (今のスロットに)
+    }
+
+    if (windowOpen)
+        pluginCard.requestOpenWindow();   // 開いていたら、新しいプリセットのプラグインの画面を開く
+}
+
+void SessionScreen::chooseVstForPreset (int preset)
+{
+    const auto folders = PluginLocator::getVst3Folders();
+    fileChooser = std::make_unique<juce::FileChooser> ("プリセット "_jp + juce::String (preset) + " の VST3 プラグインを選ぶ"_jp,
+                                                       folders.getFirst(), "*.vst3");
+    fileChooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles
+                                  | juce::FileBrowserComponent::canSelectDirectories,
+                              [safe = juce::Component::SafePointer (this), preset] (const juce::FileChooser& chooser)
+    {
+        const auto file = chooser.getResult();
+        if (safe == nullptr || file == juce::File())
+            return;
+
+        // 今の音色の設定 (入力の大きさなど) で、選んだ VST のプリセットを作る。プラグインの設定は、保存のときに入る
+        auto& s = safe->session.toneSlots[(size_t) preset - 1];
+        s = {};
+        s.tonePresetId = pluginTonePresetId;
+        s.pluginPath = file.getFullPathName();
+        s.inputGainDb = safe->session.inputGainDb;
+        s.noiseGateDb = safe->session.noiseGateDb;
+
+        safe->currentPartPreset() = preset;
+        safe->applyPreset (preset);
+        safe->updatePresetButtons();
+        safe->setStatus ("プリセット "_jp + juce::String (preset) + " に "_jp + file.getFileNameWithoutExtension()
+                         + " を入れました。プリセットを押すと、すぐに切り替わります"_jp);
+    });
 }
 
 void SessionScreen::clearPreset (int slot)
@@ -3248,6 +3402,7 @@ void SessionScreen::choosePluginFile()
 
         safe->session.pluginPath = file.getFullPathName();
         safe->session.pluginState = {};   // 別のプラグインなので、前の状態は使わない
+        safe->pluginSlotOwner[(size_t) safe->engine.getActivePluginSlot()] = 0;   // プリセットの VST ではなくなる
         safe->loadPluginTone();
     });
 }
@@ -3265,6 +3420,18 @@ void SessionScreen::capturePluginState()
         session.pluginState = state;
         pluginBaselineState = state;
         pluginStateChanged = false;
+    }
+
+    // VST のプリセット: 読み込んであるものは、今の設定 (つまみを動かした分も) をプリセットに残す
+    for (int slot = 0; slot < AudioEngine::numPluginSlots; ++slot)
+    {
+        const auto owner = pluginSlotOwner[(size_t) slot];
+        auto* tone = engine.getPluginTone (slot);
+        if (owner <= 0 || tone == nullptr)
+            continue;
+        auto& s = session.toneSlots[(size_t) owner - 1];
+        if (s.tonePresetId == pluginTonePresetId && juce::File (s.pluginPath) == tone->getFile())
+            s.pluginState = tone->getState().toBase64Encoding();
     }
 }
 
@@ -4028,26 +4195,31 @@ void SessionScreen::resized()
     {
         // PDF のときは「タブ譜が流れる速度」の欄が入るので、ボタンを少し細くする (文字は収まる幅)
         const bool pdf = session.isPdfScore();
+        const bool hasScore = session.scorePath.isNotEmpty();   // 無ければ、タブ譜のためのボタンは隠している (updatePdfUi)
         const int partWidth = pdf ? 76 : 90;
-        auto partsArea = scoreHeader.removeFromLeft (partWidth + 6 + partWidth);
-        leadButton.setBounds (partsArea.removeFromLeft (partWidth).reduced (0, 2));
-        partsArea.removeFromLeft (6);
-        backingButton.setBounds (partsArea.removeFromLeft (partWidth).reduced (0, 2));
-        scoreHeader.removeFromLeft (pdf ? 8 : 12);
-
-        scoreRemoveButton.setBounds (scoreHeader.removeFromRight (pdf ? 96 : 110).reduced (0, 2));
-        scoreHeader.removeFromRight (6);
-        scoreChooseButton.setBounds (scoreHeader.removeFromRight (pdf ? 96 : 110).reduced (0, 2));
-        scoreHeader.removeFromRight (6);
-        swapButton.setBounds (scoreHeader.removeFromRight (pdf ? 108 : 120).reduced (0, 2));
-        scoreHeader.removeFromRight (6);
-        if (! pdf)
+        if (hasScore)
         {
-            equalBarsButton.setBounds (scoreHeader.removeFromRight (120).reduced (0, 2));
-            scoreHeader.removeFromRight (6);
+            auto partsArea = scoreHeader.removeFromLeft (partWidth + 6 + partWidth);
+            leadButton.setBounds (partsArea.removeFromLeft (partWidth).reduced (0, 2));
+            partsArea.removeFromLeft (6);
+            backingButton.setBounds (partsArea.removeFromLeft (partWidth).reduced (0, 2));
+            scoreHeader.removeFromLeft (pdf ? 8 : 12);
         }
-        scoreStartButton.setBounds (scoreHeader.removeFromRight (pdf ? 100 : 120).reduced (0, 2));   // 「ここから流す」(作者のレイアウト)
-        scoreHeader.removeFromRight (8);
+
+        // 右から並べる。隠しているボタンは詰める
+        const auto placeRight = [&scoreHeader] (juce::Component& c, int width)
+        {
+            if (! c.isVisible())
+                return;
+            c.setBounds (scoreHeader.removeFromRight (width).reduced (0, 2));
+            scoreHeader.removeFromRight (6);
+        };
+        placeRight (scoreRemoveButton, pdf ? 96 : 110);
+        placeRight (scoreChooseButton, pdf ? 96 : 110);
+        placeRight (swapButton, pdf ? 108 : 120);
+        placeRight (equalBarsButton, 120);
+        placeRight (scoreStartButton, pdf ? 100 : 120);   // 「ここから流す」(作者のレイアウト)
+        scoreHeader.removeFromRight (2);
 
         // PDF のときは、リード・バッキングの右に「タブ譜が流れる速度」とスライダー (ミキサーと同じ形)。
         // 名前は文字の幅、スライダーは残りの幅 (広いときは 220 まで)

@@ -25,6 +25,7 @@ public:
        #if JUCE_DEBUG
         // 開発用の起動では、作者の動作ログに書かない
         if (commandLine.contains (DevSnapshots::commandLineFlag) || commandLine.contains (DevAudioCheck::pluginWindowTestFlag)
+            || commandLine.contains (DevAudioCheck::pluginSlotsTestFlag)
             || commandLine.contains (DevAudioCheck::commandLineFlag))
             AppLog::setEnabled (false);
 
@@ -51,6 +52,13 @@ public:
             DevSnapshots::renderAll (juce::File (commandLine.fromFirstOccurrenceOf (DevSnapshots::commandLineFlag, false, false)
                                                             .trim().unquoted()));
             quit();
+            return;
+        }
+
+        // 開発用: プラグインのスロット (VST の複数プリセット) を確かめて終わる (DevAudioCheck.h)
+        if (commandLine.contains (DevAudioCheck::pluginSlotsTestFlag))
+        {
+            devTest = DevAudioCheck::startPluginSlotsTest (commandLine, [this] { quit(); });
             return;
         }
 

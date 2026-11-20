@@ -226,6 +226,7 @@ private:
     void showPresetMenu (int slot);
     void updatePresetButtons();
     int& currentPartPreset() { return session.backingActive ? session.backingPreset : session.leadPreset; }
+    int currentPartPresetValue() const { return session.backingActive ? session.backingPreset : session.leadPreset; }
 
     // ラジアルメニュー (マウスの左右を同時に、または真ん中のボタンを押し続ける)。並べる操作は開くたびに作る (ミュート中かなどで文字が変わる)
     std::unique_ptr<RadialMenu> radialMenu;
@@ -388,6 +389,16 @@ private:
     void clearSourceRange (bool start);
     void updateSourceRangeButtons();
     double getPlayStart() const;                  // 再生の始まり (開始位置。無ければ 0)
+
+    // VST の複数プリセット (作者の指示): プリセット 1・2・3 にそれぞれ別のプラグインを持たせ、全部読み込んでおいて、
+    // 押したときは鳴らすプラグイン (エンジンのスロット) を切り替えるだけにする (作り直さないので速く、音が途切れない)。
+    // プリセット p はスロット p-1 を使う。同時に2つ作れないプラグイン (Misha など) は1つを使い回し、設定だけを入れ替える
+    std::array<int, AudioEngine::numPluginSlots> pluginSlotOwner { 0, 0, 0 };   // スロットの設定が、どのプリセットのものか (0 = プリセットでない)
+    int pluginSlotForPreset (int preset) const;
+    int directPluginSlot() const;              // プリセットを使っていないときに、VST を入れるスロット
+    void setUpPluginSlots();                   // セッションを開いたとき: プリセットの VST を全部読み込む
+    void activatePresetPlugin (int preset);    // そのプリセットの VST を鳴らす
+    void chooseVstForPreset (int preset);      // VST を選んでいるときに空のプリセット 2・3 を押した: VST を選んでもらう
     double getPlayEnd (double length) const;      // 再生の終わり (終了位置。無ければ長さ)
     bool hasSourceRange() const noexcept { return session.sourceStartMs > 0 || session.sourceEndMs > 0; }
 

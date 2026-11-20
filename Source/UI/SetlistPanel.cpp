@@ -110,7 +110,9 @@ void SetlistPanel::layoutCards()
     if (ids != saved)
         settings.setExpandedSetlists (ids);
 
-    const auto width = viewport.getMaximumVisibleWidth();
+    // スクロールバーの分の幅は、出ていないときも空けておく (作者の指示: スクロールバーが出たり消えたりしても、
+    // カードの幅・右の端が変わらないように。たたむアニメーションの途中で出入りしても、カードが揺れない)
+    const auto width = juce::jmax (0, viewport.getWidth() - viewport.getScrollBarThickness());
     int y = 0;
 
     for (const auto& card : cards)
