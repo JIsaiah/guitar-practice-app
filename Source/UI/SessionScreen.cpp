@@ -172,6 +172,8 @@ SessionScreen::SessionScreen (AudioEngine& e, SessionStore& s, ThemeManager& t, 
     youtube.onClicked = [this] { if (isSwapped()) perform (Command::togglePlay); grabKeyboardFocus(); };
     scoreView.onClicked = [this] { if (isSwapped()) perform (Command::togglePlay); };
     timeline.onSeek = [this] (double seconds) { if (sourceReady) seekTo (seconds); };
+    timeline.onRightClick = [this] (double seconds) { showToneChangeMenu (seconds); };
+    updateToneMarks();
 
     //==== 境目 (引っ張ると右のパネルの幅が変わる) と、隠す・出すタブ ====
     splitter.onDragStart = [this] (int) { sidePanelWidthAtDragStart = settings.getSidePanelWidth(); };
@@ -1531,9 +1533,29 @@ bool SessionScreen::isDirty() const
     return juce::JSON::toString (session.toVar()) != savedSnapshot || pluginStateChanged || ! scoreEdits.empty();
 }
 
+Session SessionScreen::sessionForDisk() const
+{
+    auto s = session;
+    if (toneBeforeAuto.has_value())
+    {
+        // 音色とプリセットの選び方だけを、自動で切り替える前のものにする (プリセットの中身・ほかの設定は今のまま)
+        const auto& manual = *toneBeforeAuto;
+        s.tonePresetId = manual.tonePresetId;
+        s.namModelPath = manual.namModelPath;
+        s.irPath = manual.irPath;
+        s.inputGainDb = manual.inputGainDb;
+        s.noiseGateDb = manual.noiseGateDb;
+        s.pluginPath = manual.pluginPath;
+        s.pluginState = manual.pluginState;
+        s.leadPreset = manual.leadPreset;
+        s.backingPreset = manual.backingPreset;
+    }
+    return s;
+}
+
 bool SessionScreen::writeToDisk()
 {
-    auto split = settingsResolver.split (session);
+    auto split = settingsResolver.split (sessionForDisk());
 
     // セットリストで弾いているときは、ファイルの更新日時を変えない (作者の指示: セットリストの曲が、
     // 一覧の並び (最後の練習日。開いたことが無いセッションは更新日時で代える) を変えないように)
@@ -2339,6 +2361,110 @@ void SessionScreen::clearSourceRange (bool start)
     updateSourceRangeButtons();
 }
 
+//==============================================================================
+// 音色の自動切り替え (作者の指示)
+void SessionScreen::showToneChangeMenu (double clickedSeconds)
+{
+    const auto position = getPosition();
+    const auto near = timeline.toneMarkNear (clickedSeconds);
+    enum { presetBase = 100, removeId = 1, removeAllId = 2 };
+
+    juce::PopupMenu presets;
+    bool anyPreset = false;
+    for (int p = 1; p <= Session::numToneSlots; ++p)
+    {
+        const auto& s = session.toneSlots[(size_t) p - 1];
+        anyPreset = anyPreset || ! s.isEmpty();
+        // 中身を一緒に出す (VST ならプラグインの名前も。どのプリセットの VST かが分かるように)
+        presets.addItem (presetBase + p, juce::String (p) + ": " + (s.isEmpty() ? "(空き)"_jp : describeToneSlot (s)), ! s.isEmpty());
+    }
+
+    juce::PopupMenu menu;
+    menu.addSectionHeader ("音色の自動切り替え"_jp);
+    menu.addSubMenu ("現在位置 ("_jp + formatTime (position) + ") から音色を変える"_jp, presets, sourceReady && anyPreset);
+    if (! anyPreset)
+        menu.addItem (0, "先に音色のプリセット 1・2・3 を作ってください"_jp, false);
+    if (near >= 0)
+        menu.addItem (removeId, "この切り替え ("_jp + formatTime (session.toneChanges[(size_t) near].ms / 1000.0) + " → プリセット "_jp
+                                    + juce::String (session.toneChanges[(size_t) near].preset) + ") を消す"_jp);
+    menu.addItem (removeAllId, "音色の切り替えをすべて消す"_jp, ! session.toneChanges.empty());
+
+    menu.showMenuAsync (juce::PopupMenu::Options().withMousePosition(),
+                        [safe = juce::Component::SafePointer (this), position, near] (int result)
+    {
+        if (safe == nullptr || result == 0)
+            return;
+
+        auto& changes = safe->session.toneChanges;
+        if (result > presetBase)
+        {
+            const auto preset = result - presetBase;
+            Session::addToneChange (changes, { juce::roundToInt (position * 1000.0), preset });
+            safe->setStatus (formatTime (position) + " から、音色をプリセット "_jp + juce::String (preset) + " にします"_jp);
+        }
+        else if (result == removeId && juce::isPositiveAndBelow (near, (int) changes.size()))
+        {
+            changes.erase (changes.begin() + near);
+        }
+        else if (result == removeAllId)
+        {
+            changes.clear();
+        }
+
+        safe->lastToneChangeIndex = -2;   // 次のタイマーで、今の位置で効いているものを当て直す (再生中なら)
+        safe->updateToneMarks();
+    });
+}
+
+void SessionScreen::updateToneMarks()
+{
+    std::vector<TimelineView::ToneMark> marks;
+    for (const auto& c : session.toneChanges)
+        marks.push_back ({ c.ms / 1000.0, c.preset });
+    timeline.setToneMarks (std::move (marks));
+}
+
+void SessionScreen::applyToneChanges (double position, bool playing)
+{
+    // 再生中だけ切り替える。止まっている間に動かした分は、再生を始めたときに当てる
+    if (session.toneChanges.empty() || ! playing)
+        return;
+
+    const auto index = Session::toneChangeAt (session.toneChanges, juce::roundToInt (position * 1000.0));
+    if (index == lastToneChangeIndex)
+        return;   // 同じ区間 (途中で手でプリセットを押したら、次の切り替えまではそのまま)
+
+    lastToneChangeIndex = index;
+    if (index < 0)
+        return;   // 最初の切り替えより前
+
+    const auto preset = session.toneChanges[(size_t) index].preset;
+    if (preset == currentPartPresetValue() || session.toneSlots[(size_t) preset - 1].isEmpty())
+        return;
+
+    // 自動で切り替える前の、自分で選んだ音色を覚えておく (保存のときは、こちらを書く。作者の指示)。
+    // VST なら、つまみを動かした分も残すため、今の設定を読んでおく
+    if (! toneBeforeAuto.has_value())
+    {
+        toneBeforeAuto = session;
+        if (isPluginToneSelected())
+            if (auto* tone = engine.getPluginTone())
+            {
+                toneBeforeAuto->pluginPath = tone->getFile().getFullPathName();
+                toneBeforeAuto->pluginState = tone->getState().toBase64Encoding();
+            }
+    }
+
+    // 自動の切り替えは、セッションの変更として扱わない (保存しますか？と聞かれないように。switchPart と同じ)
+    const auto wasDirty = isDirty();
+    applyPreset (preset);
+    currentPartPreset() = preset;
+    updatePresetButtons();
+    if (! wasDirty)
+        savedSnapshot = juce::JSON::toString (session.toVar());
+    setStatus ("音色をプリセット "_jp + juce::String (preset) + " に切り替えました ("_jp + formatTime (position) + ")"_jp);
+}
+
 void SessionScreen::updateSourceRangeButtons()
 {
     sourceStartButton.setEnabled (sourceReady);
@@ -2666,6 +2792,9 @@ void SessionScreen::chooseParts (bool required)
 
 void SessionScreen::switchPart (bool backing, bool fromUser)
 {
+    if (fromUser)
+        toneBeforeAuto.reset();   // 自分でパートを切り替えた (そのパートのプリセットの音色になる): これを保存する
+
     // リード・バッキングの切り替え (と、それに合わせたプリセットの音色) は、セッションの変更として扱わない (作者の指示)。
     // 切り替えるだけで「保存しますか？」と聞かれないよう、ほかに変更が無ければ「保存済み」のままにする
     const auto wasDirty = isDirty();
@@ -2804,6 +2933,8 @@ void SessionScreen::pressPreset (int slot)
 {
     if (! juce::isPositiveAndBelow (slot - 1, Session::numToneSlots))
         return;
+
+    toneBeforeAuto.reset();   // 自分で選んだ: これを保存する
 
     const auto part = session.backingActive ? "バッキング"_jp : "リード"_jp;
 
@@ -3058,6 +3189,7 @@ void SessionScreen::chooseVstForPreset (int preset)
         s.inputGainDb = safe->session.inputGainDb;
         s.noiseGateDb = safe->session.noiseGateDb;
 
+        safe->toneBeforeAuto.reset();   // 自分で選んだ: これを保存する
         safe->currentPartPreset() = preset;
         safe->applyPreset (preset);
         safe->updatePresetButtons();
@@ -3286,6 +3418,9 @@ void SessionScreen::showOverlay (juce::Component* panel)
 // 音色
 void SessionScreen::selectTone (int index, bool fromUser)
 {
+    if (fromUser)
+        toneBeforeAuto.reset();   // 自分で音色を選んだ: これを保存する
+
     index = juce::jlimit (0, (int) toneButtons.size() - 1, index);
     toneButtons[(size_t) index].setToggleState (true, juce::dontSendNotification);
 
@@ -3311,6 +3446,15 @@ void SessionScreen::selectTone (int index, bool fromUser)
         // ウィンドウは、カードの「ウィンドウを開く」ボタンで開く
         if (fromUser)
             pluginScrollPending = true;
+
+        // 選んだ VST を、プリセット 1 にする (作者の指示)。まだ読み込み中なら、読み込めたときに
+        if (fromUser)
+        {
+            if (engine.getPluginTone() != nullptr && ! engine.isPluginToneLoading())
+                adoptVstAsPreset1();
+            else
+                adoptAsPreset1Pending = true;
+        }
 
         resized();
     }
@@ -3373,6 +3517,7 @@ void SessionScreen::loadPluginTone()
 
         if (! succeeded)
         {
+            safe->adoptAsPreset1Pending = false;
             safe->pluginCard.setState (PluginToneCard::State::error, error);
             return;
         }
@@ -3383,7 +3528,31 @@ void SessionScreen::loadPluginTone()
         if (auto* tone = safe->engine.getPluginTone())
             safe->pluginBaselineState = tone->getState().toBase64Encoding();
         safe->pluginStateChanged = false;
+
+        if (safe->adoptAsPreset1Pending)
+            safe->adoptVstAsPreset1();
     });
+}
+
+// 選んだ VST を、プリセット 1 にして選ぶ (作者の指示: 選んだ VST がそのままプリセット 1 になり、1 が選ばれる)。
+// プリセット 1 にほかの音色 (クリーン・NAM など) が入っているとき、プリセット 2・3 の VST を鳴らしているときは変えない
+void SessionScreen::adoptVstAsPreset1()
+{
+    adoptAsPreset1Pending = false;
+    if (! isPluginToneSelected() || engine.getPluginTone() == nullptr)
+        return;
+
+    const auto current = currentPartPresetValue();
+    const auto& first = session.toneSlots[0];
+    const bool firstIsThisSlot = first.tonePresetId == pluginTonePresetId && pluginSlotForPreset (1) == engine.getActivePluginSlot();
+    if ((current != 0 && current != 1) || ! (first.isEmpty() || firstIsThisSlot))
+        return;
+
+    savePreset (1);   // 今の VST とその設定を入れる (鳴らしているスロットが、プリセット 1 のものになる)
+    currentPartPreset() = 1;
+    updatePresetButtons();
+    setStatus ("選んだ VST ("_jp + engine.getPluginTone()->getFile().getFileNameWithoutExtension()
+               + ") をプリセット 1 にしました"_jp);
 }
 
 void SessionScreen::choosePluginFile()
@@ -3403,6 +3572,8 @@ void SessionScreen::choosePluginFile()
         safe->session.pluginPath = file.getFullPathName();
         safe->session.pluginState = {};   // 別のプラグインなので、前の状態は使わない
         safe->pluginSlotOwner[(size_t) safe->engine.getActivePluginSlot()] = 0;   // プリセットの VST ではなくなる
+        safe->adoptAsPreset1Pending = true;   // 読み込めたら、プリセット 1 にする (作者の指示)
+        safe->toneBeforeAuto.reset();          // 自分で選んだ: これを保存する
         safe->loadPluginTone();
     });
 }
@@ -3635,6 +3806,7 @@ void SessionScreen::timerCallback()
     updateMetronomeStart();
     updateScoreStartButton();
     updateSourceRangeButtons();
+    applyToneChanges (position, playing);
 
     // 小節・拍 (一定テンポ + ずらし。設計書 3.1)。動画モードでメトロノームの開始位置があれば、そこが 1小節目
     const auto beats = (position - getMetronomeOffsetSeconds()) * session.bpm / 60.0;

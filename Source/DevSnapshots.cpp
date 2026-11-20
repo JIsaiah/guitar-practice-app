@@ -271,6 +271,14 @@ juce::String DevSnapshots::renderAll (const juce::File& folder)
                 SessionScreen practice (engine, store, theme, appSettings, youtube, scoreViewer, session);
                 snap (practice, 1280, 800, "practice" + suffix);
                 snap (practice, 1280, 720, "practice_small" + suffix);   // いちばん小さいウィンドウ: 下の帯が2段になるか
+
+                // 音色の自動切り替えの印 (再生バーの上の「↓番号」)。音源が無いと長さが 0 で描かれないので、再生バーだけを写す
+                {
+                    TimelineView bar;
+                    bar.setState (90.0, 300.0, 0.0, 0.0, false);
+                    bar.setToneMarks ({ { 0.0, 1 }, { 60.0, 2 }, { 150.0, 3 } });
+                    snap (bar, 820, 56, "timeline_tonemarks" + suffix);
+                }
                 snap (practice, 1920, 1080, "practice_wide" + suffix);   // 大きな画面: 下の帯の余白がグループの間に分かれるか
                 practice.setSize (1280, 800);
 

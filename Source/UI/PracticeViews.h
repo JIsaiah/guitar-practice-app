@@ -172,6 +172,24 @@ public:
 
     bool isZoomed() const noexcept { return zoomed; }
 
+    // 音色の自動切り替えの印 (作者の指示): 位置 (秒) と、切り替えるプリセットの番号。再生バーの上に「↓1」のように出す
+    struct ToneMark { double seconds; int preset; };
+    void setToneMarks (std::vector<ToneMark> marks)
+    {
+        toneMarks = std::move (marks);
+        repaint();
+    }
+    // 右クリック (練習画面がメニューを出す)。押した場所の時刻も渡す (印の近くなら、その印を消せるように)
+    std::function<void (double seconds)> onRightClick;
+    // x の近く (8px) にある音色の印の番号 (toneMarks の中)。無ければ -1
+    int toneMarkNear (double seconds) const
+    {
+        for (int i = 0; i < (int) toneMarks.size(); ++i)
+            if (std::abs (xFor (toneMarks[(size_t) i].seconds) - xFor (seconds)) <= 8.0f)
+                return i;
+        return -1;
+    }
+
     // 音源の開始・終了位置 (作者の指示)。マイナスなら、その側は指定なし
     void setRange (double startSeconds, double endSeconds)
     {
@@ -264,6 +282,21 @@ public:
         if (markerSeconds >= 0.0)
             drawMarker (g, xFor (markerSeconds), bar.getY());
 
+        // 音色の自動切り替えの印: バーの上に、下向きの矢印とプリセットの番号
+        for (const auto& mark : toneMarks)
+        {
+            const auto x = xFor (mark.seconds);
+            const auto tip = bar.getY() - 1.0f;
+            juce::Path arrow;
+            arrow.addTriangle (x - 4.5f, tip - 7.0f, x + 4.5f, tip - 7.0f, x, tip);
+            g.setColour (findColour (ThemeColourIds::accent));
+            g.fillPath (arrow);
+            g.fillRect (x - 0.75f, tip - 12.0f, 1.5f, 6.0f);
+            g.setFont (AppLookAndFeel::scaled (juce::FontOptions (11.0f, juce::Font::bold)));
+            g.drawText (juce::String (mark.preset), juce::Rectangle<float> (x - 10.0f, tip - 24.0f, 20.0f, 12.0f),
+                        juce::Justification::centred);
+        }
+
         // 現在位置の針。形は変えずに、太さ・長さ・色だけを変える
         //   ふだん: 細い針 (2px)  /  バーの上: 太い針 (4px, アクセント色)  /  針の近く・ドラッグ中: さらに太く長い針 (6px)
         const bool grabbing = dragging || nearKnob;
@@ -301,6 +334,13 @@ public:
     {
         if (length <= 0.0 || e.x > getBarArea().getRight())
             return;
+
+        if (e.mods.isPopupMenu())
+        {
+            if (onRightClick != nullptr)
+                onRightClick (secondsAt (e.x));
+            return;
+        }
 
         // ダブルクリックの2回目: 押し続けたら拡大する (すぐに離したら何もしない。1回目で、もうそこへ移動している)
         if (e.getNumberOfClicks() >= 2)
@@ -542,7 +582,8 @@ private:
     bool hovering = false, nearKnob = false, dragging = false;
     double dragSeconds = 0.0;
     double markerSeconds = -1.0;
-    double rangeStart = -1.0, rangeEnd = -1.0;   // 音源の開始・終了位置 (マイナス = 指定なし)
+    double rangeStart = -1.0, rangeEnd = -1.0;
+    std::vector<ToneMark> toneMarks;   // 音源の開始・終了位置 (マイナス = 指定なし)
 
     // 拡大モード
     bool waitingForHold = false, zoomed = false, fineDrag = false;

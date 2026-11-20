@@ -87,6 +87,14 @@ struct Session
     static constexpr int numToneSlots = 3;
     std::array<ToneSlot, numToneSlots> toneSlots;   // 音色のプリセット 1・2・3
 
+    // 音色の自動切り替え (作者の指示): 再生がこの位置 (音源の時刻) に来たら、このプリセットの音色にする。位置の順に並ぶ
+    struct ToneChange { int ms = 0; int preset = 1; };
+    std::vector<ToneChange> toneChanges;
+    // 切り替えを足す。同じ位置 (前後 0.2 秒) にあれば置き換える。位置の順に並べる
+    static void addToneChange (std::vector<ToneChange>& changes, ToneChange change);
+    // position (ms) で効いている切り替え (その位置より前で、いちばん後ろのもの)。無ければ -1
+    static int toneChangeAt (const std::vector<ToneChange>& changes, int positionMs);
+
     double bpm = 120.0;
     TempoOrigin tempoOrigin = TempoOrigin::manual;
     // メトロノームの拍子 (作者の指示: .gp が無いときに手で決める。例: 8/9 → 1小節 8 拍、1拍目を強く)。

@@ -388,6 +388,17 @@ private:
     void setSourceRangeHere (bool start);
     void clearSourceRange (bool start);
     void updateSourceRangeButtons();
+
+    // 音色の自動切り替え (作者の指示): 再生バーの右クリックで「現在位置から音色を変える」→ プリセットを選ぶ。
+    // 再生中にその位置に来たら (移動したときも、その位置で効いているものに) 切り替える。再生バーに「↓番号」を出す
+    void showToneChangeMenu (double clickedSeconds);
+    void updateToneMarks();
+    void applyToneChanges (double position, bool playing);   // タイマーから
+    int lastToneChangeIndex = -1;   // 最後に当てた切り替え (session.toneChanges の番号)
+    // 自動の切り替えで変わった音色・プリセットは保存しない (作者の指示)。最初に自動で切り替える前の、
+    // 自分で選んだ音色とプリセットを覚えておき、保存のときはこちらを書く。自分で音色・プリセットを選んだら捨てる
+    std::optional<Session> toneBeforeAuto;
+    Session sessionForDisk() const;   // ファイルに書く中身 (自動で変わった分を、自分で選んだものに戻す)
     double getPlayStart() const;                  // 再生の始まり (開始位置。無ければ 0)
 
     // VST の複数プリセット (作者の指示): プリセット 1・2・3 にそれぞれ別のプラグインを持たせ、全部読み込んでおいて、
@@ -398,7 +409,10 @@ private:
     int directPluginSlot() const;              // プリセットを使っていないときに、VST を入れるスロット
     void setUpPluginSlots();                   // セッションを開いたとき: プリセットの VST を全部読み込む
     void activatePresetPlugin (int preset);    // そのプリセットの VST を鳴らす
-    void chooseVstForPreset (int preset);      // VST を選んでいるときに空のプリセット 2・3 を押した: VST を選んでもらう
+    void chooseVstForPreset (int preset);
+    // 選んだ VST を、プリセット 1 にして選ぶ (作者の指示)。読み込み中なら、読み込めたときに行う
+    void adoptVstAsPreset1();
+    bool adoptAsPreset1Pending = false;      // VST を選んでいるときに空のプリセット 2・3 を押した: VST を選んでもらう
     double getPlayEnd (double length) const;      // 再生の終わり (終了位置。無ければ長さ)
     bool hasSourceRange() const noexcept { return session.sourceStartMs > 0 || session.sourceEndMs > 0; }
 

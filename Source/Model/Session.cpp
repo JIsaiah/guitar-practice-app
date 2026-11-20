@@ -116,6 +116,14 @@ juce::var Session::toVar() const
                                     { "lead_track", leadTrack }, { "backing_track", backingTrack },
                                     { "active", backingActive ? "backing" : "lead" },
                                     { "lead_preset", leadPreset }, { "backing_preset", backingPreset } }) },
+        { "tone_changes", [this]
+            {
+                // 音色の自動切り替え: [位置 (ms), プリセット] の並び
+                juce::Array<juce::var> list;
+                for (const auto& c : toneChanges)
+                    list.add (juce::Array<juce::var> { c.ms, c.preset });
+                return juce::var (list);
+            }() },
         { "tone_slots", [this]
             {
                 // 音色のプリセット 1・2・3 (空きは null)
@@ -238,6 +246,12 @@ Session Session::fromVar (const juce::var& value)
     s.leadPreset = juce::jlimit (0, numToneSlots, getOr<int> (parts["lead_preset"], 0));
     s.backingPreset = juce::jlimit (0, numToneSlots, getOr<int> (parts["backing_preset"], 0));
 
+    if (const auto* changes = value["tone_changes"].getArray())
+        for (const auto& item : *changes)
+            if (const auto* c = item.getArray(); c != nullptr && c->size() >= 2)
+                if (const int preset = (int) (*c)[1]; preset >= 1 && preset <= numToneSlots)
+                    addToneChange (s.toneChanges, { juce::jmax (0, (int) (*c)[0]), preset });
+
     if (const auto* slots = value["tone_slots"].getArray())
         for (int i = 0; i < juce::jmin (numToneSlots, slots->size()); ++i)
         {
@@ -297,4 +311,22 @@ bool Session::addPdfRepeat (std::vector<PdfRepeat>& repeats, PdfRepeat repeat)
     repeats.push_back (repeat);
     std::sort (repeats.begin(), repeats.end(), [] (const PdfRepeat& a, const PdfRepeat& b) { return a.start < b.start; });
     return true;
+}
+
+void Session::addToneChange (std::vector<ToneChange>& changes, ToneChange change)
+{
+    changes.erase (std::remove_if (changes.begin(), changes.end(),
+                                   [&change] (const ToneChange& c) { return std::abs (c.ms - change.ms) <= 200; }),
+                   changes.end());
+    changes.push_back (change);
+    std::sort (changes.begin(), changes.end(), [] (const ToneChange& a, const ToneChange& b) { return a.ms < b.ms; });
+}
+
+int Session::toneChangeAt (const std::vector<ToneChange>& changes, int positionMs)
+{
+    int found = -1;
+    for (int i = 0; i < (int) changes.size(); ++i)
+        if (changes[(size_t) i].ms <= positionMs)
+            found = i;
+    return found;
 }

@@ -31,6 +31,27 @@ public:
             expectEquals (old.meterDenominator, 4);
         }
 
+        beginTest ("Tone changes: sorted, replaced at the same place, saved, and found by position");
+        {
+            Session s;
+            Session::addToneChange (s.toneChanges, { 30000, 2 });
+            Session::addToneChange (s.toneChanges, { 10000, 1 });
+            Session::addToneChange (s.toneChanges, { 30100, 3 });   // 0.2 秒以内: 置き換え
+            expectEquals ((int) s.toneChanges.size(), 2);
+            expectEquals (s.toneChanges[0].ms, 10000);
+            expectEquals (s.toneChanges[1].preset, 3);
+
+            expectEquals (Session::toneChangeAt (s.toneChanges, 5000), -1);    // 最初より前
+            expectEquals (Session::toneChangeAt (s.toneChanges, 10000), 0);
+            expectEquals (Session::toneChangeAt (s.toneChanges, 29999), 0);
+            expectEquals (Session::toneChangeAt (s.toneChanges, 60000), 1);
+
+            const auto loaded = Session::fromVar (s.toVar());
+            expectEquals ((int) loaded.toneChanges.size(), 2);
+            expectEquals (loaded.toneChanges[1].ms, 30100);
+            expectEquals (loaded.toneChanges[1].preset, 3);
+        }
+
         beginTest ("A setlist entry keeps its own start/end, separate from the session");
         {
             Session stored;
