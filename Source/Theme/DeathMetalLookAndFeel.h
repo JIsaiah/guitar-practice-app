@@ -47,6 +47,19 @@ public:
     void fillTextEditorBackground (juce::Graphics&, int width, int height, juce::TextEditor&) override;
     void drawTextEditorOutline (juce::Graphics&, int width, int height, juce::TextEditor&) override;
 
+    // 右クリックのメニュー (作者の指示: 大きくして見やすく、見た目をアプリに揃える)。
+    // 行を高く・文字を大きく、角の丸い面と細い枠、選んでいる行は一覧と同じ角の丸い塗り。影は付けない
+    void getIdealPopupMenuItemSize (const juce::String& text, bool isSeparator, int standardMenuItemHeight,
+                                    int& idealWidth, int& idealHeight) override;
+    void drawPopupMenuBackground (juce::Graphics&, int width, int height) override;
+    void drawPopupMenuItem (juce::Graphics&, const juce::Rectangle<int>& area, bool isSeparator, bool isActive,
+                            bool isHighlighted, bool isTicked, bool hasSubMenu, const juce::String& text,
+                            const juce::String& shortcutKeyText, const juce::Drawable* icon,
+                            const juce::Colour* textColour) override;
+    void drawPopupMenuSectionHeader (juce::Graphics&, const juce::Rectangle<int>& area, const juce::String& sectionName) override;
+    int getPopupMenuBorderSize() override { return 6; }
+    int getMenuWindowFlags() override { return 0; }   // 影なし (設計書 v0.7 4.9)
+
     // ポップアップ (確認・お知らせ): アイコン (「？」「！」) を描かず、角の丸い面と細い枠だけにする (作者の指示)
     void drawAlertBox (juce::Graphics&, juce::AlertWindow&, const juce::Rectangle<int>& textArea, juce::TextLayout&) override;
 

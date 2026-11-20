@@ -152,7 +152,8 @@ private:
     void setScoreOffset (int ms);   // タブ譜だけ
     // タブ譜の拍の起点 = 拍の位置 + タブ譜だけ + タブ譜の開始位置 (「ここから流す」。音源があるときだけ)
     double getScoreOffsetSeconds() const noexcept { return (session.syncOffsetMs + session.scoreOffsetMs + getScoreStartMs()) / 1000.0; }
-    int getScoreStartMs() const noexcept { return hasSource() ? session.scoreStartMs : 0; }
+    // タブ譜の1小節目を合わせる音源の位置。「ここから流す」が無ければ、音源の開始位置に合わせる (作者の指示)
+    int getScoreStartMs() const noexcept { return ! hasSource() ? 0 : session.scoreStartMs > 0 ? session.scoreStartMs : session.sourceStartMs; }
     void seekToBar (double barStartBeats);
     void handlePageKey (const juce::String& key);   // WebView (タブ譜・動画) の上で押されたキー
     void toggleSwap();
@@ -233,6 +234,7 @@ private:
     std::vector<RadialMenu::Item> makeRadialItems();
     void stepPreset (int direction);   // 中身のある音色のプリセットを、右 (+1)・左 (-1) に1つ進める
     juce::String describeToneSlot (const ToneSlot& slot) const;
+    juce::String shortToneSlotName (const ToneSlot& slot) const;   // プリセットのボタンに出す短い名前
 
     AudioEngine& engine;
     SessionStore& store;

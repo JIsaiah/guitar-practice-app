@@ -94,7 +94,8 @@ SessionScreen::SessionScreen (AudioEngine& e, SessionStore& s, ThemeManager& t, 
     for (size_t i = 0; i < presetButtons.size(); ++i)
     {
         const auto slot = (int) i + 1;
-        presetButtons[i].setButtonText (juce::String (slot));
+        presetButtons[i].setButtonText (juce::String (slot));   // 名前は updatePresetButtons で「1：プリセット名」にする
+        presetButtons[i].getProperties().set ("fontHeight", 13.0f);
         presetButtons[i].onClick = [this, slot] { pressPreset (slot); };
         presetButtons[i].onRightClick = [this, slot] { showPresetMenu (slot); };
     }
@@ -229,11 +230,23 @@ SessionScreen::SessionScreen (AudioEngine& e, SessionStore& s, ThemeManager& t, 
         button.onClick = [this, i] { if (toneButtons[i].getToggleState()) selectTone ((int) i, true); };
     }
     toneButtons[1].setTooltip ("アプリに入っているアンプのモデル (NAM) で歪ませます"_jp);
+    for (auto& b : toneButtons)   // 作者のレイアウト: 大きなボタンに太い文字
+    {
+        b.getProperties().set ("fontHeight", 17.0f);
+        b.getProperties().set ("fontBold", true);
+    }
     toneButtons[namToneIndex].setTooltip ("NAM のアンプのモデル (.nam) とキャビネットの IR (.wav) で鳴らします"_jp);
     toneButtons[pluginToneIndex].setTooltip ("VST3 プラグイン (TONE3000、Neural DSP など) で鳴らします。プラグインの画面は別のウィンドウで開きます"_jp);
 
     //==== 右: TONE3000 プラグインのカード ====
     pluginCard.onChooseFile = [this] { choosePluginFile(); };
+    pluginCard.onStatus = [this] (const juce::String& text) { setStatus (text); };
+    // プラグインの画面を左の大きな枠に出す・消す (作者の指示): タブ譜・動画のページを隠す・出す
+    pluginCard.onPlaceChanged = [this]
+    {
+        resized();
+        placeWebViews();
+    };
     pluginCard.onRescan = [this]
     {
         // 前に選んだファイルが無くなっていたら、標準の置き場所から探し直す
@@ -405,7 +418,7 @@ SessionScreen::SessionScreen (AudioEngine& e, SessionStore& s, ThemeManager& t, 
     scoreStartButton.onRightClick = [this]
     {
         if (session.scoreStartMs <= 0)
-            return;
+            return;   // 音源の開始位置に合わせているだけのときは、音源の「開始位置」のほうで解除する
 
         juce::PopupMenu menu;
         menu.addItem (1, "開始位置を解除 (音源の頭から流す)"_jp);
@@ -418,7 +431,7 @@ SessionScreen::SessionScreen (AudioEngine& e, SessionStore& s, ThemeManager& t, 
             if (result == 1)
                 safe->clearScoreStart();
             if (result == 2 && safe->sourceReady)
-                safe->seekTo (safe->session.scoreStartMs / 1000.0);
+                safe->seekTo (safe->getScoreStartMs() / 1000.0);
         });
     };
     offsetLabel.setTooltip ("メトロノームとタブ譜を、音源に対してずらします"_jp);
@@ -595,6 +608,7 @@ SessionScreen::SessionScreen (AudioEngine& e, SessionStore& s, ThemeManager& t, 
         sideContent.addAndMakeVisible (c);
 
     sideContent.addChildComponent (pluginCard);
+    addChildComponent (pluginCard.getMainView());   // プラグインの画面を左の大きな枠に出すときの部品 (作者の指示)
     sideScroll.setViewedComponent (&sideContent, false);
     sideScroll.setScrollBarsShown (true, false);   // 縦だけ (必要なときだけ出る)
     sideScroll.onScrolled = [this] { updatePluginEditorVisibility(); };
@@ -2344,6 +2358,10 @@ void SessionScreen::setSourceRangeHere (bool start)
         session.sourceStartMs = ms;
         if (session.sourceEndMs > 0 && session.sourceEndMs <= ms)
             session.sourceEndMs = 0;
+
+        // タブ譜もこの位置から流す (作者の指示: 音源の開始位置を手で決めても、タブ譜の流れるタイミングをそれに合わせる)。
+        // 前に「ここから流す」で決めた位置は、新しい開始位置に置き換える
+        session.scoreStartMs = 0;
     }
     else
     {
@@ -2352,8 +2370,14 @@ void SessionScreen::setSourceRangeHere (bool start)
             session.sourceStartMs = 0;
     }
 
-    setStatus ((start ? "音源の開始位置を "_jp : "音源の終了位置を "_jp) + formatTime (ms / 1000.0) + " にしました"_jp);
+    setStatus ((start ? "音源の開始位置を "_jp : "音源の終了位置を "_jp) + formatTime (ms / 1000.0) + " にしました"_jp
+               + (start && ! scoreViewer.getBarStartBeats().empty() ? "。タブ譜もここから流します"_jp : juce::String()));
     updateSourceRangeButtons();
+    if (start)
+    {
+        updateScoreStartButton();
+        updateMetronomeStart();   // タブ譜モードでは、メトロノームの起点も変わる
+    }
 }
 
 void SessionScreen::clearSourceRange (bool start)
@@ -2361,6 +2385,11 @@ void SessionScreen::clearSourceRange (bool start)
     (start ? session.sourceStartMs : session.sourceEndMs) = 0;
     setStatus (start ? "音源の開始位置を解除しました"_jp : "音源の終了位置を解除しました"_jp);
     updateSourceRangeButtons();
+    if (start)
+    {
+        updateScoreStartButton();   // タブ譜も、音源の頭 (か「ここから流す」の位置) から流す
+        updateMetronomeStart();
+    }
 }
 
 //==============================================================================
@@ -2525,7 +2554,8 @@ void SessionScreen::setScoreStartHere()
 void SessionScreen::clearScoreStart()
 {
     session.scoreStartMs = 0;
-    setStatus ("タブ譜の開始位置を解除しました (音源の頭から流します)"_jp);
+    setStatus (session.sourceStartMs > 0 ? "タブ譜の開始位置を解除しました (音源の開始位置から流します)"_jp
+                                         : "タブ譜の開始位置を解除しました (音源の頭から流します)"_jp);
     updateScoreStartButton();
     updateMetronomeStart();
 }
@@ -2534,8 +2564,9 @@ void SessionScreen::updateScoreStartButton()
 {
     const bool hasScore = ! scoreViewer.getBarStartBeats().empty();
     scoreStartButton.setEnabled (hasSource() && sourceReady && hasScore);
-    scoreStartButton.setButtonText (session.scoreStartMs > 0 ? formatTime (session.scoreStartMs / 1000.0) + " から"_jp
-                                                             : "ここから流す"_jp);
+    // 音源の開始位置に合わせているときも、その時刻を出す (タブ譜がどこから流れるか分かるように)
+    const auto startMs = getScoreStartMs();
+    scoreStartButton.setButtonText (startMs > 0 ? formatTime (startMs / 1000.0) + " から"_jp : "ここから流す"_jp);
     scoreStartButton.setTooltip (hasSource()
         ? "再生バーで、タブ譜の1小節目が始まる位置を選んでから押すと、そこからタブ譜が流れます。右クリックで解除・移動"_jp
         : "音源があるときに使えます"_jp);
@@ -2931,6 +2962,16 @@ juce::String SessionScreen::describeToneSlot (const ToneSlot& slot) const
     return juce::String::fromUTF8 (getTonePresets()[(size_t) findTonePresetIndex (slot.tonePresetId)].name);
 }
 
+juce::String SessionScreen::shortToneSlotName (const ToneSlot& slot) const
+{
+    // 「VST: 」「NAM: 」は付けない (ボタンの幅が狭いため。中身の詳しい説明はツールチップ)
+    if (slot.tonePresetId == namTonePresetId)
+        return slot.namModelPath.isEmpty() ? juce::String ("NAM") : juce::File (slot.namModelPath).getFileNameWithoutExtension();
+    if (slot.tonePresetId == pluginTonePresetId)
+        return slot.pluginPath.isEmpty() ? juce::String ("VST") : juce::File (slot.pluginPath).getFileNameWithoutExtension();
+    return describeToneSlot (slot);
+}
+
 void SessionScreen::pressPreset (int slot)
 {
     if (! juce::isPositiveAndBelow (slot - 1, Session::numToneSlots))
@@ -3144,7 +3185,7 @@ void SessionScreen::activatePresetPlugin (int preset)
 {
     const auto slot = pluginSlotForPreset (preset);
     const juce::File file (session.toneSlots[(size_t) preset - 1].pluginPath);
-    const bool windowOpen = pluginCard.isWindowShowing();
+    const auto openPlace = pluginCard.getPlace();   // 開いていた場所 (左の大きな枠・別のウィンドウ)
     auto* tone = engine.getPluginTone (slot);
 
     if (tone != nullptr && tone->getFile() == file && pluginSlotOwner[(size_t) slot] == preset)
@@ -3168,8 +3209,8 @@ void SessionScreen::activatePresetPlugin (int preset)
         loadPluginTone();   // 同じプラグインなら設定だけ入れる。違えば作る (今のスロットに)
     }
 
-    if (windowOpen)
-        pluginCard.requestOpenWindow();   // 開いていたら、新しいプリセットのプラグインの画面を開く
+    if (openPlace != PluginToneCard::Place::none)
+        pluginCard.requestOpen (openPlace);   // 開いていたら、新しいプリセットのプラグインの画面を同じ場所に開く
 }
 
 void SessionScreen::chooseVstForPreset (int preset)
@@ -3252,6 +3293,8 @@ void SessionScreen::updatePresetButtons()
 
         button.setToggleState (slot == current, juce::dontSendNotification);
         button.setAlpha (s.isEmpty() ? 0.6f : 1.0f);   // 空きは薄く
+        // 作者のレイアウト: 「1：プリセット名」(VST はプラグインの名前、NAM はモデルの名前)
+        button.setButtonText (juce::String (slot) + "："_jp + (s.isEmpty() ? "空き"_jp : shortToneSlotName (s)));
         button.setTooltip (s.isEmpty()
             ? "プリセット "_jp + juce::String (slot) + " (空き)。押すと今の音色を保存して、"_jp + part + "に割り当てます"_jp
             : "プリセット "_jp + juce::String (slot) + ": "_jp + describeToneSlot (s) + "。押すと"_jp + part
@@ -3621,21 +3664,13 @@ void SessionScreen::capturePluginState()
 
 void SessionScreen::updatePluginEditorVisibility()
 {
-    // プラグインの画面は Windows の別の窓として描かれ、ほかの部品の上にはみ出す。
-    // チューナーなどを重ねているとき、右のパネルを隠しているとき、スクロールで一部が隠れているときは出さない
-    bool allowed = pluginCard.isVisible() && sidePanelVisible
-                && tunerPanel == nullptr && tonePanel == nullptr && ! dimOverlay.isVisible();
-
-    // 上下が見えているかで判断する (幅は、パネルを広げて収めてある。収まらないときは別のウィンドウで開いている)
-    if (allowed)
-    {
-        const auto editorInContent = pluginCard.getEditorBounds().translated (pluginCard.getX(), pluginCard.getY());
-        const auto view = sideScroll.getViewArea();
-        allowed = ! editorInContent.isEmpty()
-               && editorInContent.getY() >= view.getY() && editorInContent.getBottom() <= view.getBottom();
-    }
-
-    pluginCard.setEditorAllowed (allowed);
+    // 左の大きな枠に出したプラグインの画面は Windows の別の窓として描かれ、ほかの部品の上に出る。
+    // チューナー・音色の設定・暗くする幕を重ねているとき、読み込み中は隠す (WebView と同じ)
+    const bool allowed = pluginCard.isMainOpen() && tunerPanel == nullptr && tonePanel == nullptr
+                      && ! dimOverlay.isVisible() && ! loading;
+    auto& mainView = pluginCard.getMainView();
+    if (mainView.isVisible() != allowed)
+        mainView.setVisible (allowed);
 }
 
 void SessionScreen::loadNamTone()
@@ -3951,8 +3986,10 @@ void SessionScreen::placeWebViews()
     // 音源のカードをたたんでいるときは、そこに重ねるもの (ふだんは動画、入れ替え中はタブ譜) を出さない
     // たたむ・広げる動きの間も出さない (ページを毎回動かすと、ガタついて見えるため)。着いたら出す
     const bool cardOpen = ! videoCardCollapsed && ! videoFold.isAnimating();
-    const bool videoTargetVisible = swapped || (sidePanelVisible && cardOpen);
-    const bool scoreTargetVisible = ! swapped || (sidePanelVisible && cardOpen);
+    // 左の大きな枠にプラグインの画面を出しているときは、そこに重ねるもの (ふだんはタブ譜、入れ替え中は動画) を出さない
+    const bool mainFree = ! pluginCard.isMainOpen();
+    const bool videoTargetVisible = swapped ? mainFree : (sidePanelVisible && cardOpen);
+    const bool scoreTargetVisible = ! swapped ? mainFree : (sidePanelVisible && cardOpen);
 
     if (isYouTube() && canShow && videoTargetVisible)
         youtube.placeOver (videoTarget);
@@ -4117,15 +4154,8 @@ void SessionScreen::resized()
     sideCards.clear();
     auto panelWidth = juce::jmin (settings.getSidePanelWidth(), area.getWidth() / 2);
 
-    // TONE3000 のカードを出しているときは、プラグインの画面が入るよう、右のパネルを広げる (画面の幅の 6 割まで)。
-    // 6 割でも入らない画面は別のウィンドウで開くので、広げない
+    // VST のカード (プラグインの名前とボタン) は音色の枠の中。プラグインの画面は左の大きな枠か、別のウィンドウに出す
     const bool showPlugin = isPluginToneSelected();
-    if (showPlugin && ! pluginCard.getEditorNaturalSize().isEmpty())
-    {
-        const auto wanted = pluginCard.getEditorNaturalSize().getWidth() + 24 + sideScroll.getScrollBarThickness() + 4;
-        if (wanted <= juce::roundToInt (area.getWidth() * 0.62f))
-            panelWidth = juce::jmax (panelWidth, wanted);
-    }
 
     // スクロールする部分 (sideScroll) の中の部品は、sideScroll ごと隠せばよい
     for (auto* c : std::initializer_list<juce::Component*> {
@@ -4151,7 +4181,9 @@ void SessionScreen::resized()
 
         // 中身の高さ (動画以外)
         constexpr int headingHeight = 24, rowHeight = 32;
-        constexpr int toneHeight = headingHeight + 36 + 4 + 28 + 30;   // 音色のボタン、NAM のモデル名・プラグインの名前、プリセット
+        // 音色 (作者のレイアウト): 見出し、音色のボタン、区切り線、名前 (NAM のモデル。VST はカードの中)、プリセット
+        constexpr int toneButtonHeight = 44, toneDividerHeight = 17, toneNameHeight = 26, presetRowHeight = 34;
+        const int toneHeight = 20 + 6 + toneButtonHeight + toneDividerHeight + (showPlugin ? 0 : toneNameHeight) + 8 + presetRowHeight;
         const int tabRows = (hasLeadTab() ? 1 : 0) + (hasBackingTab() ? 1 : 0);   // タブ譜の音 (MIDI) の行
         const int mixerHeight = headingHeight + (3 + tabRows) * rowHeight;
         tabRowsShown = tabRows > 0;
@@ -4166,22 +4198,6 @@ void SessionScreen::resized()
         const auto videoFor16by9 = juce::roundToInt ((float) (panelWidth - 24) * 9.0f / 16.0f);
         auto videoHeight = juce::jlimit (minVideoHeight, juce::jmax (minVideoHeight, videoFor16by9),
                                          right.getHeight() - (sourceExtra + cardChrome) - minScrollHeight);
-
-        // TONE3000: プラグインの画面がスクロールする枠に丸ごと入るか調べる。
-        // 入るなら、その高さを空けるために動画を小さくする。入らなければ、カードは別のウィンドウで開く形になる
-        if (showPlugin)
-        {
-            const auto scrollHeightAtMost = right.getHeight() - (minVideoHeight + sourceExtra + cardChrome);
-            const auto contentWidthAtLeast = panelWidth - 24 - sideScroll.getScrollBarThickness() - 2;
-            pluginCard.setAvailableSpace (contentWidthAtLeast, scrollHeightAtMost - 16);
-
-            if (pluginCard.hasEditor() && ! pluginCard.isUsingWindow())
-            {
-                const auto pluginCardHeight = pluginCard.getPreferredHeight() + 16;
-                videoHeight = juce::jlimit (minVideoHeight, 260,
-                                            juce::jmin (videoFor16by9, right.getHeight() - (sourceExtra + cardChrome) - pluginCardHeight));
-            }
-        }
 
         // 音源: 見出し (右上にたたむボタン)、動画 (16:9)、その下に URL かファイル名と、外すボタン。
         // たたんでいるときは見出しだけ
@@ -4255,36 +4271,49 @@ void SessionScreen::resized()
 
             // 音色 (作者のレイアウト: 見出しの右に歯車、ボタン、その下に NAM のモデル名・プラグインの名前。
             // VST を選んでいるときは、プラグインのカードもこの枠の中に続けて置く)
-            const auto pluginHeight = showPlugin ? pluginCard.getPreferredHeight() + 4 : 0;
+            // 音色 (作者のレイアウト, 2026年11月の画像):
+            //   見出し「音色」と右に歯車
+            //   クリーン・歪み・NAM・VST の大きなボタン (同じ幅)
+            //   真ん中に区切り線
+            //   VST のとき: プラグインの名前と「プラグインを開く」「VSTを選択」「別ウィンドウで開く」(プラグインのカード)
+            //   ほかのとき: NAM のモデル・IR の名前
+            //   「1：プリセット名」「2：…」「3：…」(同じ幅)
+            sideContent.lines.clear();
+            const auto pluginHeight = showPlugin ? pluginCard.getPreferredHeight() : 0;
             auto tone = contentCard (toneHeight + pluginHeight);
             auto toneHeadingRow = tone.removeFromTop (20);
-            toneDetailButton.setBounds (toneHeadingRow.removeFromRight (40).withSizeKeepingCentre (40, 26));   // 歯車が「…」にならない幅
+            toneDetailButton.setBounds (toneHeadingRow.removeFromRight (40).withSizeKeepingCentre (40, 30));   // 歯車が「…」にならない幅
             toneHeading.setBounds (toneHeadingRow);
-            tone.removeFromTop (4);
-            auto toneRow = tone.removeFromTop (36);
-            const auto toneWidth = (toneRow.getWidth() - 4 * (int) (toneButtons.size() - 1)) / (int) toneButtons.size();
+            tone.removeFromTop (6);
+
+            auto toneRow = tone.removeFromTop (toneButtonHeight);
+            constexpr int toneGap = 8;
+            const auto toneWidth = (toneRow.getWidth() - toneGap * (int) (toneButtons.size() - 1)) / (int) toneButtons.size();
             for (auto index : { 0, 1, namToneIndex, pluginToneIndex })   // 作者のレイアウトの順: クリーン・歪み・NAM・VST
             {
-                toneButtons[(size_t) index].setBounds (toneRow.removeFromLeft (toneWidth));
-                toneRow.removeFromLeft (4);
+                toneButtons[(size_t) index].setBounds (index == pluginToneIndex ? toneRow : toneRow.removeFromLeft (toneWidth));
+                toneRow.removeFromLeft (toneGap);
             }
 
-            tone.removeFromTop (4);
-            toneSummaryLabel.setBounds (tone.removeFromTop (28));
+            // 区切り線 (真ん中に、幅の 6 割)
+            auto dividerRow = tone.removeFromTop (toneDividerHeight);
+            sideContent.lines.push_back (dividerRow.withSizeKeepingCentre (juce::roundToInt (dividerRow.getWidth() * 0.6f), 1));
 
-            // プリセット 1・2・3 (右寄せ)
-            auto presetRow = tone.removeFromTop (30).withTrimmedTop (2);
-            for (int i = (int) presetButtons.size() - 1; i >= 0; --i)
-            {
-                presetButtons[(size_t) i].setBounds (presetRow.removeFromRight (30));
-                presetRow.removeFromRight (4);
-            }
-            presetLabel.setBounds (presetRow.removeFromRight (80));
-
+            toneSummaryLabel.setVisible (! showPlugin);
             if (showPlugin)
-            {
-                tone.removeFromTop (4);
                 pluginCard.setBounds (tone.removeFromTop (pluginCard.getPreferredHeight()));
+            else
+                toneSummaryLabel.setBounds (tone.removeFromTop (toneNameHeight));
+
+            // プリセット 1・2・3 (同じ幅で横いっぱい)
+            tone.removeFromTop (8);
+            auto presetRow = tone.removeFromTop (presetRowHeight);
+            presetLabel.setVisible (false);   // 「プリセット」の文字は、ボタンの「1：…」で分かるので出さない
+            const auto presetWidth = (presetRow.getWidth() - toneGap * (int) (presetButtons.size() - 1)) / (int) presetButtons.size();
+            for (size_t i = 0; i < presetButtons.size(); ++i)
+            {
+                presetButtons[i].setBounds (i + 1 == presetButtons.size() ? presetRow : presetRow.removeFromLeft (presetWidth));
+                presetRow.removeFromLeft (toneGap);
             }
 
             // ミキサー。「音源」の行の右端にミュート (ほかの行も同じ幅を空けて、スライダーの長さを揃える)
@@ -4432,6 +4461,14 @@ void SessionScreen::resized()
     area.removeFromBottom (8);
     scoreView.setBounds (area);
     updateEmptyPrompt();
+
+    // プラグインの画面 (左の大きな枠に出しているとき) は、タブ譜の枠と同じ場所に重ねる
+    {
+        auto& mainView = pluginCard.getMainView();
+        mainView.setBounds (area);
+        if (pluginCard.isMainOpen())
+            mainView.toFront (false);
+    }
 
     dimOverlay.setBounds (getLocalBounds());
     loadingOverlay.setBounds (getLocalBounds());

@@ -711,6 +711,7 @@ class CardColumn final : public juce::Component
 {
 public:
     std::vector<juce::Rectangle<int>> cards;   // 面を描く場所 (この部品の中の座標)
+    std::vector<juce::Rectangle<int>> lines;   // カードの中の区切り線 (音色のボタンの下など)
 
     void paint (juce::Graphics& g) override
     {
@@ -721,6 +722,10 @@ public:
             g.setColour (findColour (ThemeColourIds::border));
             g.drawRoundedRectangle (card.toFloat().reduced (0.5f), 8.0f, 1.0f);
         }
+
+        g.setColour (findColour (ThemeColourIds::border));
+        for (const auto& line : lines)
+            g.fillRect (line);
     }
 };
 

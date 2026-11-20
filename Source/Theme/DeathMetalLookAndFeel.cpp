@@ -44,6 +44,12 @@ void AppLookAndFeel::applyPalette (const Palette& p)
     setColour (juce::ComboBox::outlineColourId, p.border);
     setColour (juce::ComboBox::arrowColourId, p.textMuted);
     setColour (juce::ScrollBar::thumbColourId, p.border.brighter (0.2f));
+    // メニューの面は角を丸く描くので、窓を「不透明ではない」にする (色の透明度で JUCE が決める。塗りは drawPopupMenuBackground)
+    setColour (juce::PopupMenu::backgroundColourId, p.panel.withAlpha (0.99f));
+    setColour (juce::PopupMenu::textColourId, p.text);
+    setColour (juce::PopupMenu::highlightedBackgroundColourId, p.listSelection);
+    setColour (juce::PopupMenu::highlightedTextColourId, p.text);
+    setColour (juce::PopupMenu::headerTextColourId, p.textMuted);
 
     setColour (ThemeColourIds::listSelection, p.listSelection);
     setColour (ThemeColourIds::timelineProgress, p.timelineProgress);
@@ -79,6 +85,10 @@ juce::Font AppLookAndFeel::getTextButtonFont (juce::TextButton& button, int butt
     if (button.getProperties()["segmentedTab"])
         return scaledFont (juce::jmin (18.0f, (float) buttonHeight * 0.5f), juce::Font::bold);
 
+    // 文字の大きさを決めてあるボタン (幅の狭いボタンを3つ並べるところなど)
+    if (const auto* height = button.getProperties().getVarPointer ("fontHeight"))
+        return scaledFont ((float) *height, button.getProperties()["fontBold"] ? juce::Font::bold : juce::Font::plain);
+
     return scaledFont (juce::jmin (15.0f, (float) buttonHeight * 0.6f));
 }
 
@@ -87,7 +97,7 @@ juce::Font AppLookAndFeel::getComboBoxFont (juce::ComboBox& box)
     return scaledFont (juce::jmin (15.0f, (float) box.getHeight() * 0.6f));
 }
 
-juce::Font AppLookAndFeel::getPopupMenuFont()          { return scaledFont (15.0f); }
+juce::Font AppLookAndFeel::getPopupMenuFont()          { return scaledFont (17.0f); }   // 前は 15 (作者の指示: 小さくて見づらい)
 juce::Font AppLookAndFeel::getAlertWindowMessageFont() { return scaledFont (15.0f); }
 juce::Font AppLookAndFeel::getAlertWindowTitleFont()   { return scaledFont (18.0f, juce::Font::bold); }
 juce::Font AppLookAndFeel::getAlertWindowFont()        { return scaledFont (14.0f); }
@@ -266,4 +276,106 @@ juce::Typeface::Ptr DeathMetalLookAndFeel::getTypefaceForFont (const juce::Font&
         return typeface;
 
     return LookAndFeel_V4::getTypefaceForFont (font);
+}
+
+//==============================================================================
+// 右クリックのメニュー (作者の指示: 大きくして見やすく、見た目をアプリに揃える)
+namespace
+{
+    constexpr int menuItemHeight = 36;      // 前は 15 × 1.3 ≒ 20
+    constexpr int menuSeparatorHeight = 11;
+    constexpr int menuSidePadding = 14;     // 文字の左右の余白
+    constexpr int menuTickWidth = 22;       // チェックの印の場所 (印が無い行も同じだけ空けて、文字の頭を揃える)
+}
+
+void AppLookAndFeel::getIdealPopupMenuItemSize (const juce::String& text, bool isSeparator, int standardMenuItemHeight,
+                                                int& idealWidth, int& idealHeight)
+{
+    if (isSeparator)
+    {
+        idealWidth = 50;
+        idealHeight = menuSeparatorHeight;
+        return;
+    }
+
+    const auto font = getPopupMenuFont();
+    idealHeight = juce::jmax (standardMenuItemHeight, juce::roundToInt ((float) menuItemHeight * juce::jmax (1.0f, textScale)));
+    idealWidth = juce::GlyphArrangement::getStringWidthInt (font, text) + menuSidePadding * 2 + menuTickWidth + 24;
+    idealWidth = juce::jmax (idealWidth, 180);
+}
+
+void AppLookAndFeel::drawPopupMenuBackground (juce::Graphics& g, int width, int height)
+{
+    const auto bounds = juce::Rectangle<int> (width, height).toFloat().reduced (0.5f);
+    g.setColour (findColour (ThemeColourIds::panel));
+    g.fillRoundedRectangle (bounds, 8.0f);
+    g.setColour (findColour (ThemeColourIds::border));
+    g.drawRoundedRectangle (bounds, 8.0f, 1.0f);
+}
+
+void AppLookAndFeel::drawPopupMenuItem (juce::Graphics& g, const juce::Rectangle<int>& area, bool isSeparator, bool isActive,
+                                        bool isHighlighted, bool isTicked, bool hasSubMenu, const juce::String& text,
+                                        const juce::String& shortcutKeyText, const juce::Drawable* icon,
+                                        const juce::Colour* textColourToUse)
+{
+    if (isSeparator)
+    {
+        g.setColour (findColour (ThemeColourIds::border));
+        g.fillRect (area.reduced (menuSidePadding, 0).withSizeKeepingCentre (area.getWidth() - menuSidePadding * 2, 1));
+        return;
+    }
+
+    auto textColour = textColourToUse != nullptr ? *textColourToUse : findColour (juce::PopupMenu::textColourId);
+
+    // マウスを乗せた行: 一覧の行と同じ、角の丸い塗り
+    if (isHighlighted && isActive)
+        fillListHighlight (g, area.reduced (2, 0), findColour (ThemeColourIds::listSelection));
+
+    g.setColour (textColour.withMultipliedAlpha (isActive ? 1.0f : 0.4f));
+
+    auto r = area.reduced (menuSidePadding, 0);
+    auto tickArea = r.removeFromLeft (menuTickWidth).toFloat();
+
+    if (icon != nullptr)
+    {
+        icon->drawWithin (g, tickArea.reduced (2.0f), juce::RectanglePlacement::centred | juce::RectanglePlacement::onlyReduceInSize, 1.0f);
+    }
+    else if (isTicked)
+    {
+        // 選んでいるもの: アクセントの色のチェック
+        g.setColour (findColour (ThemeColourIds::accent).withMultipliedAlpha (isActive ? 1.0f : 0.4f));
+        auto tick = getTickShape (1.0f);
+        g.fillPath (tick, tick.getTransformToScaleToFit (tickArea.withSizeKeepingCentre (13.0f, 13.0f), true));
+        g.setColour (textColour.withMultipliedAlpha (isActive ? 1.0f : 0.4f));
+    }
+
+    if (hasSubMenu)
+    {
+        // 右向きの「›」
+        const auto arrow = r.removeFromRight (14).toFloat();
+        const auto cx = arrow.getCentreX(), cy = arrow.getCentreY();
+        juce::Path path;
+        path.startNewSubPath (cx - 2.5f, cy - 5.0f);
+        path.lineTo (cx + 2.5f, cy);
+        path.lineTo (cx - 2.5f, cy + 5.0f);
+        g.strokePath (path, juce::PathStrokeType (1.8f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+    }
+
+    auto font = getPopupMenuFont();
+    g.setFont (font);
+    g.drawFittedText (text, r, juce::Justification::centredLeft, 1);
+
+    if (shortcutKeyText.isNotEmpty())
+    {
+        g.setColour (findColour (ThemeColourIds::textMuted));
+        g.setFont (font.withHeight (font.getHeight() * 0.8f));
+        g.drawText (shortcutKeyText, r, juce::Justification::centredRight, true);
+    }
+}
+
+void AppLookAndFeel::drawPopupMenuSectionHeader (juce::Graphics& g, const juce::Rectangle<int>& area, const juce::String& sectionName)
+{
+    g.setColour (findColour (ThemeColourIds::textMuted));
+    g.setFont (scaledFont (13.0f, juce::Font::bold));
+    g.drawFittedText (sectionName, area.reduced (menuSidePadding, 0).withTrimmedTop (4), juce::Justification::bottomLeft, 1);
 }

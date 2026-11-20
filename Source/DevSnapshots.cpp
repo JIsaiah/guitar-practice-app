@@ -450,8 +450,48 @@ juce::String DevSnapshots::renderAll (const juce::File& folder)
                 {
                     Session pluginSession = session;
                     pluginSession.tonePresetId = pluginTonePresetId;
+                    // プリセットのボタンの「1：名前」を見るため (ファイルは読まない。名前だけ)
+                    pluginSession.toneSlots[0].tonePresetId = pluginTonePresetId;
+                    pluginSession.toneSlots[0].pluginPath = "C:\\Program Files\\Common Files\\VST3\\Archetype Gojira X.vst3";
+                    pluginSession.toneSlots[1].tonePresetId = namTonePresetId;
+                    pluginSession.toneSlots[1].namModelPath = "C:\\NAM\\Plexi Crunch.nam";
+                    pluginSession.leadPreset = 1;
                     SessionScreen pluginPractice (engine, store, theme, appSettings, youtube, scoreViewer, pluginSession);
-                    snap (pluginPractice, 1280, 800, "practice_tone3000.png");
+                    snap (pluginPractice, 1280, 1000, "practice_tone3000.png");   // 音色の枠の下 (プリセット) まで見えるよう高く
+                }
+
+                // 右クリックのメニュー (作者の指示: 大きく、アプリの見た目に揃える)。LookAndFeel の描き方で、窓を出さずに描く
+                {
+                    auto& lf = practice.getLookAndFeel();
+                    const juce::StringArray items { "開始位置を解除 (音源の頭から流す)"_jp, "開始位置へ移動"_jp, "-", "この切り替えを消す"_jp };
+                    int width = 0, height = 0;
+                    for (const auto& text : items)
+                    {
+                        int w = 0, h = 0;
+                        lf.getIdealPopupMenuItemSize (text, text == "-", -1, w, h);
+                        width = juce::jmax (width, w);
+                        height += h;
+                    }
+                    const auto border = lf.getPopupMenuBorderSize();
+                    juce::Image menu (juce::Image::ARGB, width + border * 2 + 40, height + border * 2 + 40, true);
+                    {
+                        juce::Graphics g (menu);
+                        g.fillAll (theme.getPalette().background);
+                        g.setOrigin (20, 20);
+                        lf.drawPopupMenuBackground (g, width + border * 2, height + border * 2);
+                        int y = border;
+                        for (int i = 0; i < items.size(); ++i)
+                        {
+                            const auto& text = items[i];
+                            int w = 0, h = 0;
+                            lf.getIdealPopupMenuItemSize (text, text == "-", -1, w, h);
+                            lf.drawPopupMenuItem (g, { border, y, width, h }, text == "-", i != 3, i == 1, i == 0, false,
+                                                  text, {}, nullptr, nullptr);
+                            y += h;
+                        }
+                    }
+                    if (savePng (menu, folder.getChildFile ("popup_menu.png")))
+                        log << "wrote popup_menu.png\n";
                 }
 
                 // チューナーを開いたとき (後ろが暗くなる)
