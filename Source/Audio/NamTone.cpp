@@ -69,7 +69,9 @@ namespace
             return cache;
 
         // キャビネットの IR は短い。長いファイルでも 1 秒までにする (処理を軽く保つため)
-        const auto length = (int) juce::jmin<juce::int64> (reader->lengthInSamples, (juce::int64) reader->sampleRate);
+        // ファイルに書かれたサンプルレートが、作り変えでとても大きくても、大きなメモリを取らないように 384 kHz までで数える
+        const auto oneSecond = (juce::int64) juce::jlimit (1.0, 384000.0, reader->sampleRate);
+        const auto length = (int) juce::jmin<juce::int64> (reader->lengthInSamples, oneSecond);
         juce::AudioBuffer<float> buffer (1, length);
         reader->read (&buffer, 0, length, 0, true, false);   // 左 (1チャンネル目) だけ。ギターは1チャンネルのため
 
@@ -133,6 +135,11 @@ NamTone::LoadResult NamTone::load (const juce::File& ampModel, const juce::File&
     {
         if (ampModel != juce::File())
         {
+            // 大きすぎる .nam は読まない (人から受け取ったセッションで、とても大きいファイルを指されても、メモリを使い切らないように)。
+            // ふつうのモデルは 1 MB もない
+            if (ampModel.getSize() > 64LL * 1024 * 1024)
+                throw std::runtime_error ("model file is too large");
+
             d.amp = nam::get_dsp (toPath (ampModel));
             if (d.amp == nullptr)
                 throw std::runtime_error ("model is empty");

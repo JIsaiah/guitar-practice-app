@@ -3,6 +3,7 @@
 #include <optional>
 #include <vector>
 #include "Session.h"
+#include "SessionTrust.h"
 
 // セッションファイル (.gppractice) の一覧・読み書き
 // 保存先: ドキュメント\suguhiku\Sessions (AppPaths.h。前は ドキュメント\GuitarPractice)
@@ -31,7 +32,18 @@ public:
     };
 
     SessionStore();
-    explicit SessionStore (const juce::File& directory);   // テスト用: 保存先を指定する
+    // テスト用: 保存先を指定する。trustRecord を省くと、保存先の隣の「(フォルダ名)-known.json」に記録する
+    explicit SessionStore (const juce::File& directory, const juce::File& trustRecord = {});
+
+    // セキュリティ (SessionTrust.h): この PC で保存したセッションか。人から受け取ったファイルや、アプリの外で書き換えたファイルは false。
+    // 作者が「保存」したとき (save) だけ「この PC のもの」になる。一覧での星・詳細の変更、ID の付け足し、名前の付け直しなど、
+    // アプリが自動で書き直すときは、書き直す前の状態を引き継ぐ (外から来たファイルを、書き直しただけで信じないように)
+    bool isFromThisPc (const juce::String& id) const;
+    void trustSession (const juce::String& id);   // 確認で「信頼して開く」を選んだ
+
+    // 練習画面で開いたことを記録する (last_opened を今にする)。この PC のものかは変えない。
+    // ファイル名を曲名の名前に直すことがあるので、新しいファイル名 (id) を返す (書けなければ元の id)
+    juce::String markOpened (const juce::String& id);
 
     std::vector<Entry> list() const;  // 新しい順。ファイルは書き換えない
     std::optional<Session> load (const juce::String& id);   // session_id が無ければ付けて保存し直す
@@ -67,6 +79,10 @@ public:
 private:
     juce::File fileFor (const juce::String& id) const;
     juce::String ensureSessionId (const juce::File& file, juce::var& parsed);
+    bool saveImpl (Session& session, bool markTrusted);
+    // アプリが自動で書き直す: 書く前に「この PC のもの」だったときだけ、書いたあとも「この PC のもの」にする
+    bool rewriteKeepingTrust (const juce::File& from, const juce::File& to, const juce::String& text);
 
     juce::File directory;
+    SessionTrust trust;
 };

@@ -4,14 +4,54 @@
 #include "../Library/SessionFormat.h"
 
 SessionStore::SessionStore()
-    : SessionStore (AppPaths::documentsFolder().getChildFile ("Sessions"))
+    : SessionStore (AppPaths::documentsFolder().getChildFile ("Sessions"),
+                    // 「この PC で保存したセッション」の記録は、アプリの設定の場所に置く (セッションのフォルダとは別。SessionTrust.h)
+                    juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
+                        .getChildFile ("GuitarPractice").getChildFile ("known-sessions.json"))
 {
 }
 
-SessionStore::SessionStore (const juce::File& dir)
-    : directory (dir)
+SessionStore::SessionStore (const juce::File& dir, const juce::File& trustRecord)
+    : directory (dir),
+      trust (trustRecord != juce::File() ? trustRecord : dir.getSiblingFile (dir.getFileName() + "-known.json"))
 {
     directory.createDirectory();
+
+    // この仕組みが入る前の版から上げたとき: 今あるセッションは、すべて作者のものとみなして記録する
+    if (trust.isFirstRun())
+        trust.rememberAll (directory.findChildFiles (juce::File::findFiles, false, juce::String ("*") + fileExtension));
+}
+
+bool SessionStore::isFromThisPc (const juce::String& id) const
+{
+    return trust.isKnown (fileFor (id));
+}
+
+void SessionStore::trustSession (const juce::String& id)
+{
+    trust.remember (fileFor (id));
+}
+
+juce::String SessionStore::markOpened (const juce::String& id)
+{
+    if (auto updated = update (id, [] (Session& s) { s.lastOpened = juce::Time::getCurrentTime(); }))
+        return updated->id;
+    return id;
+}
+
+bool SessionStore::rewriteKeepingTrust (const juce::File& from, const juce::File& to, const juce::String& text)
+{
+    const auto wasTrusted = trust.isKnown (from);
+    if (! to.replaceWithText (text))
+        return false;
+
+    if (from != to)
+        trust.forget (from);
+    if (wasTrusted)
+        trust.remember (to);
+    else
+        trust.forget (to);
+    return true;
 }
 
 std::vector<SessionStore::Entry> SessionStore::list() const
@@ -65,6 +105,11 @@ std::optional<Session> SessionStore::load (const juce::String& id)
 
 bool SessionStore::save (Session& session)
 {
+    return saveImpl (session, true);   // 作者が保存した = この PC のもの
+}
+
+bool SessionStore::saveImpl (Session& session, bool markTrusted)
+{
     if (session.sessionId.isEmpty())
         session.sessionId = juce::Uuid().toString();
 
@@ -81,7 +126,15 @@ bool SessionStore::save (Session& session)
         return false;
 
     if (oldId.isNotEmpty() && oldId != newId)
+    {
         fileFor (oldId).deleteFile();
+        trust.forget (fileFor (oldId));
+    }
+
+    if (markTrusted)
+        trust.remember (fileFor (newId));
+    else
+        trust.forget (fileFor (newId));
 
     session.id = newId;
     return true;
@@ -164,7 +217,7 @@ void SessionStore::renameToReadableNames()
             object->setProperty ("created", session.created.toISO8601 (true));
 
         const auto target = fileFor (newId);
-        if (target.replaceWithText (juce::JSON::toString (parsed)))
+        if (rewriteKeepingTrust (file, target, juce::JSON::toString (parsed)))
         {
             target.setLastModificationTime (modified);   // 一覧の並び (更新日時の新しい順) を変えない
             if (target != file)
@@ -175,6 +228,7 @@ void SessionStore::renameToReadableNames()
 
 bool SessionStore::remove (const juce::String& id)
 {
+    trust.forget (fileFor (id));
     return fileFor (id).deleteFile();
 }
 
@@ -185,9 +239,10 @@ std::optional<Session> SessionStore::update (const juce::String& id, const std::
         return std::nullopt;
 
     const auto modified = fileFor (id).getLastModificationTime();
+    const auto wasTrusted = trust.isKnown (fileFor (id));   // 一覧での変更は、この PC のものかを変えない
 
     change (*session);
-    if (! save (*session))   // 曲名を変えたときは、ファイル名 (session->id) も変わる
+    if (! saveImpl (*session, wasTrusted))   // 曲名を変えたときは、ファイル名 (session->id) も変わる
         return std::nullopt;
 
     fileFor (session->id).setLastModificationTime (modified);   // 並び順を変えない
@@ -204,11 +259,45 @@ std::optional<Session> SessionStore::openForPractice (const juce::String& id)
 
 void SessionStore::assignMissingSessionIds()
 {
+    // ID ごとのファイル。同じ ID のファイルが2つ以上あると、セットリストがどちらを開くか決まらず、
+    // 人から受け取ったセッションが、作者のセッションの代わりに開かれることがある (セキュリティ)
+    std::map<juce::String, juce::Array<juce::File>> byId;
+
     for (const auto& file : directory.findChildFiles (juce::File::findFiles, false, juce::String ("*") + fileExtension))
     {
         auto parsed = juce::JSON::parse (file.loadFileAsString());
         if (parsed.isObject())
-            ensureSessionId (file, parsed);
+            byId[ensureSessionId (file, parsed).toLowerCase()].add (file);
+    }
+
+    // 同じ ID が重なっていたら、この PC のもの (無ければ最初の1つ) を残し、ほかには新しい ID を付ける
+    for (auto& [id, files] : byId)
+    {
+        if (files.size() < 2)
+            continue;
+
+        int keep = 0;
+        for (int i = 0; i < files.size(); ++i)
+            if (trust.isKnown (files[i]))
+            {
+                keep = i;
+                break;
+            }
+
+        for (int i = 0; i < files.size(); ++i)
+        {
+            if (i == keep)
+                continue;
+
+            auto parsed = juce::JSON::parse (files[i].loadFileAsString());
+            if (auto* object = parsed.getDynamicObject())
+            {
+                object->setProperty ("session_id", juce::Uuid().toString());
+                const auto modified = files[i].getLastModificationTime();
+                if (rewriteKeepingTrust (files[i], files[i], juce::JSON::toString (parsed)))
+                    files[i].setLastModificationTime (modified);
+            }
+        }
     }
 }
 
@@ -228,7 +317,7 @@ juce::String SessionStore::ensureSessionId (const juce::File& file, juce::var& p
 
         // 一覧は更新日時の新しい順に並ぶ。ID を付けただけで順番が変わらないよう、更新日時を戻す
         const auto modified = file.getLastModificationTime();
-        if (file.replaceWithText (juce::JSON::toString (parsed)))
+        if (rewriteKeepingTrust (file, file, juce::JSON::toString (parsed)))
             file.setLastModificationTime (modified);
     }
 

@@ -2,6 +2,7 @@
 #include "../Model/TonePresets.h"
 #include "../Model/YouTubeUrl.h"
 #include "../Audio/PluginLocator.h"
+#include "../Library/SessionRisk.h"
 #include "../Audio/BuiltInTones.h"
 #include "../Platform/WindowOwner.h"
 #include "../AppLog.h"
@@ -236,7 +237,8 @@ SessionScreen::SessionScreen (AudioEngine& e, SessionStore& s, ThemeManager& t, 
     pluginCard.onRescan = [this]
     {
         // 前に選んだファイルが無くなっていたら、標準の置き場所から探し直す
-        if (session.pluginPath.isNotEmpty() && ! juce::File (session.pluginPath).exists())
+        if (session.pluginPath.isNotEmpty() && ! SessionRisk::isNetworkPath (session.pluginPath)
+            && ! juce::File (session.pluginPath).exists())
             session.pluginPath = {};
         loadPluginTone();
     };
@@ -3119,7 +3121,9 @@ void SessionScreen::setUpPluginSlots()
     for (int preset = 1; preset <= Session::numToneSlots; ++preset)
     {
         const auto& s = session.toneSlots[(size_t) preset - 1];
-        if (s.tonePresetId != pluginTonePresetId || s.pluginPath.isEmpty() || ! juce::File (s.pluginPath).exists())
+        // ネットワークの場所のプラグインは読み込まない。あるかも見に行かない (セキュリティ。SessionRisk.h)
+        if (s.tonePresetId != pluginTonePresetId || s.pluginPath.isEmpty() || SessionRisk::isNetworkPath (s.pluginPath)
+            || ! juce::File (s.pluginPath).exists())
             continue;
 
         const auto slot = pluginSlotForPreset (preset);
@@ -3490,6 +3494,15 @@ bool SessionScreen::isPluginToneSelected() const noexcept
 
 void SessionScreen::loadPluginTone()
 {
+    // ネットワークの場所のプラグインは読み込まない。あるかも見に行かない (見に行くだけで、ログインの情報が送られるため。SessionRisk.h)
+    if (SessionRisk::isNetworkPath (session.pluginPath))
+    {
+        pluginCard.setState (PluginToneCard::State::error,
+                             "ネットワークの場所にあるプラグインは、安全のため読み込みません: "_jp + session.pluginPath
+                                 + "\n「VST3 を選ぶ…」で、このパソコンに入れた .vst3 を選んでください。"_jp);
+        return;
+    }
+
     // セッションで選んであるファイル。なければ、標準の置き場所から TONE3000 を探す
     auto file = session.pluginPath.isNotEmpty() ? juce::File (session.pluginPath) : PluginLocator::findTone3000();
 

@@ -16,10 +16,44 @@ namespace
         std::vector<Session::PdfRepeat> repeats;
         if (const auto* list = value.getArray())
             for (const auto& item : *list)
-                if (const auto* r = item.getArray(); r != nullptr && r->size() >= 3)
+                if (repeats.size() >= (size_t) Session::maxListItems)
+                    break;   // 多すぎる (作り変えたファイル) ときは、それ以上読まない
+                else if (const auto* r = item.getArray(); r != nullptr && r->size() >= 3
+                         && std::isfinite ((double) (*r)[0]) && std::isfinite ((double) (*r)[1]))
                     Session::addPdfRepeat (repeats, { (double) (*r)[0], (double) (*r)[1], (int) (*r)[2] });
         return repeats;
     }
+}
+
+// 読み込んだ値を、画面で選べる範囲に収める (セキュリティ: 人から受け取ったセッションに、とても大きい音量などを書かれても、
+// 耳や機材を傷めるような音にならないように)。数でないもの (無限大など) は初めの値にする
+void Session::limitValues()
+{
+    const auto limit = [] (double& v, double lo, double hi, double fallback)
+    {
+        v = std::isfinite (v) ? juce::jlimit (lo, hi, v) : fallback;
+    };
+
+    limit (mixSource, 0.0, 1.0, 1.0);           // 音源は 100% まで (スライダーと同じ)
+    limit (mixGuitar, 0.0, 1.5, 1.0);
+    limit (mixMetronome, 0.0, 1.5, 0.8);
+    limit (mixLeadTab, 0.0, 1.5, 1.0);
+    limit (mixBackingTab, 0.0, 1.5, 1.0);
+    limit (inputGainDb, minInputGainDb, maxInputGainDb, 0.0);
+    limit (noiseGateDb, minNoiseGateDb, maxNoiseGateDb, minNoiseGateDb);
+    for (auto& slot : toneSlots)
+    {
+        limit (slot.inputGainDb, minInputGainDb, maxInputGainDb, 0.0);
+        limit (slot.noiseGateDb, minNoiseGateDb, maxNoiseGateDb, minNoiseGateDb);
+    }
+
+    limit (bpm, 20.0, 400.0, 120.0);            // メトロノームが鳴らせる範囲 (AudioEngine::setBpm と同じ)
+    limit (lengthSeconds, 0.0, 24.0 * 3600.0, 0.0);
+    speedPercent = juce::jlimit (50, 200, speedPercent);   // 下の「速度」のスライダーと同じ
+    syncOffsetMs = juce::jlimit (-maxOffsetMs, maxOffsetMs, syncOffsetMs);
+    scoreOffsetMs = juce::jlimit (-maxOffsetMs, maxOffsetMs, scoreOffsetMs);
+    loopStartMs = juce::jmax (0, loopStartMs);
+    loopEndMs = juce::jmax (0, loopEndMs);
 }
 
 namespace
@@ -248,7 +282,9 @@ Session Session::fromVar (const juce::var& value)
 
     if (const auto* changes = value["tone_changes"].getArray())
         for (const auto& item : *changes)
-            if (const auto* c = item.getArray(); c != nullptr && c->size() >= 2)
+            if (s.toneChanges.size() >= (size_t) maxListItems)
+                break;   // 多すぎる (作り変えたファイル) ときは、それ以上読まない
+            else if (const auto* c = item.getArray(); c != nullptr && c->size() >= 2)
                 if (const int preset = (int) (*c)[1]; preset >= 1 && preset <= numToneSlots)
                     addToneChange (s.toneChanges, { juce::jmax (0, (int) (*c)[0]), preset });
 
@@ -276,6 +312,7 @@ Session Session::fromVar (const juce::var& value)
         s.pluginState = getOr<juce::String> (plugin["state"], {});
     }
 
+    s.limitValues();
     return s;
 }
 

@@ -133,6 +133,13 @@ struct Session
     double inputGainDb = 0.0;                  // ギターの入力の大きさ (dB)
     double noiseGateDb = -90.0;                // ノイズゲートのしきい値 (dB。-90 = オフ)
 
+    // 読み込んだ値を、画面で選べる範囲に収める (fromVar が呼ぶ。人から受け取ったセッションの、範囲の外の値を防ぐ)
+    void limitValues();
+    static constexpr double minInputGainDb = -24.0, maxInputGainDb = 24.0;    // 「音色の設定」の入力のスライダーと同じ
+    static constexpr double minNoiseGateDb = -90.0, maxNoiseGateDb = -20.0;   // ノイズゲートのスライダーと同じ (-90 = オフ)
+    static constexpr int maxOffsetMs = 600000;   // ずらしの上限 (10 分)
+    static constexpr int maxListItems = 500;     // 音色の切り替え・PDF の繰り返しの数の上限
+
     juce::var toVar() const;
     static Session fromVar (const juce::var& value);
 };

@@ -1,6 +1,8 @@
 #include "MainComponent.h"
 #include <juce_audio_utils/juce_audio_utils.h>
 #include "../Text.h"
+#include "../Audio/PluginLocator.h"
+#include "../Library/SessionRisk.h"
 #include "SessionListScreen.h"
 #include "SessionScreen.h"
 #include "SessionSetupScreen.h"
@@ -71,13 +73,14 @@ void MainComponent::showList()
 
     screen->onNewSession = [this] { navigate ([] (MainComponent& m) { m.showSetup(); }); };
     screen->onOpenSettings = [this] { openSettings(); };
+    // ここでは読むだけ。最後に開いた日時は、確かめて開くと決めてから記録する (openSessionLater)
     screen->onOpenSession = [this] (const juce::String& id)
     {
-        openSessionLater ([id] (MainComponent& m) { return m.store.openForPractice (id); });   // 最後に開いた日時も記録する
+        openSessionLater ([id] (MainComponent& m) { return m.store.load (id); });
     };
     screen->onOpenSessionById = [this] (const juce::String& sessionId)
     {
-        openSessionLater ([sessionId] (MainComponent& m) { return m.library.openForPractice (sessionId); });
+        openSessionLater ([sessionId] (MainComponent& m) { return m.library.load (sessionId); });
     };
     screen->onPlaySetlist = [this] (const juce::String& setlistId, int entryIndex)
     {
@@ -102,16 +105,78 @@ void MainComponent::openSessionLater (std::function<std::optional<Session> (Main
     const auto clickedAt = TimingLog::now();
     navigate ([load = std::move (load), clickedAt] (MainComponent& m)
     {
-        if (auto session = load (m))
+        auto session = load (m);
+        if (! session.has_value())
         {
-            m.showSession (std::move (*session));
-            m.pendingPaintMark = PendingMark { "3. 開く → 練習画面の表示"_jp, clickedAt, false };
-            m.sessionOpenedAtMs = clickedAt;
-        }
-        else
             juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::NoIcon,
                                                     "開けませんでした"_jp,
                                                     "セッションファイルが壊れているか、見つかりません。"_jp);
+            return;
+        }
+
+        // 人から受け取ったセッションなら、危ないものを確かめてから開く (セキュリティ。SessionRisk.h)
+        m.checkBeforeOpening (std::move (*session), [mp = &m, clickedAt] (Session s)
+        {
+            // 開くと決めてから、最後に開いた日時を記録する (ファイル名が曲名の名前に変わることがあるので、新しい名前を使う)
+            s.id = mp->store.markOpened (s.id);
+            s.lastOpened = juce::Time::getCurrentTime();
+            mp->showSession (std::move (s));
+            mp->pendingPaintMark = PendingMark { "3. 開く → 練習画面の表示"_jp, clickedAt, false };
+            mp->sessionOpenedAtMs = clickedAt;
+        });
+    });
+}
+
+// この PC で保存していないセッション (人から受け取った・アプリの外で書き換えた) に、危ないもの (プラグイン・ネットワークの場所・
+// プラグインの状態) があれば、開く前に聞く (セキュリティ。SessionTrust.h・SessionRisk.h)。
+// この PC のセッションや、危ないものが無いセッションは、聞かずに proceed を呼ぶ。「開かない」なら何もしない (今の画面のまま)
+void MainComponent::checkBeforeOpening (Session session, std::function<void (Session)> proceed)
+{
+    if (session.id.isEmpty() || store.isFromThisPc (session.id))
+    {
+        proceed (std::move (session));
+        return;
+    }
+
+    const auto folders = PluginLocator::getVst3Folders();
+    const auto risks = SessionRisk::collect (session, folders);
+    if (risks.empty())
+    {
+        proceed (std::move (session));
+        return;
+    }
+
+    const auto title = session.title.isNotEmpty() ? session.title : "(無題)"_jp;
+    auto options = juce::MessageBoxOptions()
+                       .withIconType (juce::MessageBoxIconType::WarningIcon)
+                       .withTitle ("人から受け取ったセッションです"_jp)
+                       .withMessage ("「"_jp + title + "」は、このパソコンで保存したセッションではありません"
+                                     " (人から受け取った、またはアプリの外で書き換えたファイル)。次のものが含まれています。\n\n"_jp
+                                     + SessionRisk::describe (risks)
+                                     + "\n\n「安全に開く」: これらを外して開きます。外したものは、あとで自分で選び直せます。\n"
+                                       "「信頼して開く」: このまま開きます。作った人を信頼できるときだけ選んでください。"_jp)
+                       .withButton ("安全に開く"_jp)
+                       .withButton ("信頼して開く"_jp)
+                       .withButton ("開かない"_jp)
+                       .withAssociatedComponent (this);
+
+    // 3ボタンの戻り値: 1番目 = 1、2番目 = 2、3番目 = 0
+    juce::AlertWindow::showAsync (options, [safe = juce::Component::SafePointer (this), session, folders,
+                                            proceed = std::move (proceed)] (int result)
+    {
+        if (safe == nullptr || result == 0)
+            return;
+
+        if (result == 1)
+        {
+            auto cleaned = session;
+            SessionRisk::makeSafe (cleaned, folders);   // ファイルは、保存するまで変わらない
+            proceed (std::move (cleaned));
+            return;
+        }
+
+        safe->store.trustSession (session.id);   // 次からは聞かない
+        proceed (session);
     });
 }
 
@@ -129,27 +194,34 @@ void MainComponent::openSetlistEntryLater (const juce::String& setlistId, int en
             // そのため、開いた日時を記録する openForPractice ではなく、読むだけの load を使う
             if (auto session = m.library.load (entry.sessionId))
             {
-                // 通し再生なので、ループ (くり返し) は外して開く (作者の指示)
-                PlaybackSettingsResolver resolver (entry.overrides);
-                auto working = resolver.makeWorkingCopy (*session, true);
-                m.showSession (std::move (working), SessionOpenContext::forSetlist (setlistId, entry.entryId), std::move (resolver));
-
-                // 次の曲は、待っている間に読み込む (読み込みが間に合わなければ「読み込み中…」のあとに始まる)
-                if (auto* screen = dynamic_cast<SessionScreen*> (m.currentScreen.get()))
+                // 人から受け取ったセッションなら、危ないものを確かめてから開く (セキュリティ。「開かない」なら今の画面のまま)
+                m.checkBeforeOpening (std::move (*session),
+                                      [mp = &m, setlistId, entry, startDelaySeconds, clickedAt] (Session checked)
                 {
-                    m.connectSetlist (*screen, setlistId, entry.entryId);
+                    auto& m2 = *mp;
 
-                    // 前の曲のメトロノーム・右のパネルの状態を引き継ぐ (曲間でも保つ。作者の指示)
-                    if (m.setlistCarryOver.has_value())
-                        screen->applySetlistCarryOver (*m.setlistCarryOver);
-                    m.setlistCarryOver.reset();
+                    // 通し再生なので、ループ (くり返し) は外して開く (作者の指示)
+                    PlaybackSettingsResolver resolver (entry.overrides);
+                    auto working = resolver.makeWorkingCopy (checked, true);
+                    m2.showSession (std::move (working), SessionOpenContext::forSetlist (setlistId, entry.entryId), std::move (resolver));
 
-                    if (startDelaySeconds >= 0.0)
-                        screen->startAutomatically (startDelaySeconds);
-                }
+                    // 次の曲は、待っている間に読み込む (読み込みが間に合わなければ「読み込み中…」のあとに始まる)
+                    if (auto* screen = dynamic_cast<SessionScreen*> (m2.currentScreen.get()))
+                    {
+                        m2.connectSetlist (*screen, setlistId, entry.entryId);
 
-                m.pendingPaintMark = PendingMark { "3. 開く → 練習画面の表示"_jp, clickedAt, false };
-                m.sessionOpenedAtMs = clickedAt;
+                        // 前の曲のメトロノーム・右のパネルの状態を引き継ぐ (曲間でも保つ。作者の指示)
+                        if (m2.setlistCarryOver.has_value())
+                            screen->applySetlistCarryOver (*m2.setlistCarryOver);
+                        m2.setlistCarryOver.reset();
+
+                        if (startDelaySeconds >= 0.0)
+                            screen->startAutomatically (startDelaySeconds);
+                    }
+
+                    m2.pendingPaintMark = PendingMark { "3. 開く → 練習画面の表示"_jp, clickedAt, false };
+                    m2.sessionOpenedAtMs = clickedAt;
+                });
                 return;
             }
         }

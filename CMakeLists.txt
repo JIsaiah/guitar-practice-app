@@ -197,6 +197,7 @@ target_link_libraries(GuitarPractice
         GuitarPracticeData
         juce::juce_audio_utils
         juce::juce_gui_extra
+        juce::juce_cryptography   # セッションのファイルのハッシュ (SessionTrust.h)
     PUBLIC
         juce::juce_recommended_config_flags
         juce::juce_recommended_lto_flags
@@ -230,6 +231,8 @@ target_sources(GuitarPracticeTests PRIVATE
     Tests/SessionFormatTests.cpp
     Tests/SpatialNavigationTests.cpp
     Tests/GpScoreEditTests.cpp
+    Tests/SessionTrustTests.cpp
+    Tests/SessionRiskTests.cpp
     Source/Web/GpScoreEdit.cpp
     Source/Model/Session.cpp
     Source/Model/SessionStore.cpp
@@ -254,6 +257,7 @@ target_link_libraries(GuitarPracticeTests
         juce::juce_core
         juce::juce_events
         juce::juce_data_structures
+        juce::juce_cryptography
     PUBLIC
         juce::juce_recommended_config_flags
         juce::juce_recommended_warning_flags)

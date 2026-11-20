@@ -52,9 +52,31 @@ namespace ScoreFileData
         return out.getMemoryBlock();
     }
 
-    // ページに渡すデータ。音声入りの .gp は音声を抜き、それ以外はファイルをそのまま読む
+    // 大きさの上限 (セキュリティ: 人から受け取ったセッションで、とても大きいファイルや、展開すると何 GB にもなる zip
+    // (zip 爆弾) を指されても、メモリを使い切って固まらないように)
+    inline constexpr juce::int64 maxFileBytes = 512LL * 1024 * 1024;        // ファイルそのもの (音声入りの .gp は 100 MB くらい)
+    inline constexpr juce::int64 maxUnpackedScoreBytes = 64LL * 1024 * 1024;   // zip の中の、音声以外を展開した合計 (楽譜はふつう数 MB)
+
+    // 読んでよい大きさか。zip なら、中の音声以外を展開した大きさも見る (zip でなければ、ファイルの大きさだけ)
+    inline bool isWithinLimits (const juce::File& file)
+    {
+        if (file.getSize() > maxFileBytes)
+            return false;
+
+        juce::ZipFile zip (file);
+        juce::int64 unpacked = 0;
+        for (int i = 0; i < zip.getNumEntries(); ++i)
+            if (const auto* entry = zip.getEntry (i); ! isEmbeddedAsset (entry->filename))
+                unpacked += entry->uncompressedSize;
+        return unpacked <= maxUnpackedScoreBytes;
+    }
+
+    // ページに渡すデータ。音声入りの .gp は音声を抜き、それ以外はファイルをそのまま読む。大きすぎるものは読まない (false)
     inline bool load (const juce::File& file, juce::MemoryBlock& data)
     {
+        if (! isWithinLimits (file))
+            return false;
+
         if (auto stripped = withoutEmbeddedAssets (file))
         {
             data = std::move (*stripped);

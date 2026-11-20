@@ -36,6 +36,8 @@ private:
     void connectSetlist (SessionScreen& screen, const juce::String& setlistId, const juce::String& entryId);
     std::optional<SetlistPlayer> makeSetlistPlayer (const juce::String& setlistId, const juce::String& entryId);
     void openSessionLater (std::function<std::optional<Session> (MainComponent&)> load);
+    // 人から受け取ったセッションの危ないものを、開く前に確かめる (セキュリティ)。開くと決まったら proceed を呼ぶ
+    void checkBeforeOpening (Session session, std::function<void (Session)> proceed);
     void openSettings();
     void openLogoTuner();
     void openDebugLog();   // 動作ログ・クラッシュの記録 (設定画面のボタンから)

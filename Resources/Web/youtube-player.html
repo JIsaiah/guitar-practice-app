@@ -2,6 +2,13 @@
 <html lang="ja" data-theme="dark">
 <head>
 <meta charset="utf-8">
+<!-- セキュリティ: このページはアプリとつながっている (window.__JUCE__) ので、読み込めるものを決めておく。
+     スクリプトは同梱のものと YouTube の公式プレイヤー API だけ、動画の枠は YouTube だけ。それ以外の場所からは読み込めず、送れない -->
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' 'unsafe-inline' https://www.youtube.com https://s.ytimg.com;
+               frame-src https://www.youtube.com https://www.youtube-nocookie.com; style-src 'self' 'unsafe-inline';
+               img-src 'self' data: https://i.ytimg.com; connect-src 'self' https://www.youtube.com;
+               object-src 'none'; base-uri 'none'; form-action 'none'">
 <!-- YouTube の埋め込み再生 (設計書 v0.7 3.2、PoC-4)
      このページはアプリに同梱し、https://juce.backend/ の住所で開く。
      パソコン内のファイルとして開くと、YouTube に埋め込み先が伝わらず、再生を拒否される (エラー 153) -->

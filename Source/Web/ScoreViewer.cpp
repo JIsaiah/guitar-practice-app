@@ -1,6 +1,7 @@
 #include "ScoreViewer.h"
 #include "WebResources.h"
 #include "ScoreFileData.h"
+#include "LockedWebBrowser.h"
 
 namespace
 {
@@ -41,7 +42,7 @@ void ScoreViewer::prepare()
                        .withResourceProvider ([this] (const juce::String& path) { return provide (path); })
                        .withEventListener ("score", [this] (const juce::var& event) { handleEvent (event); });
 
-    browser = std::make_unique<juce::WebBrowserComponent> (options);
+    browser = std::make_unique<LockedWebBrowser> (options);   // 同梱のページからほかへ移れないように (LockedWebBrowser.h)
     addAndMakeVisible (*browser);
     browser->setBounds (getLocalBounds());
     browser->goToURL (juce::WebBrowserComponent::getResourceProviderRoot() + "score-view.html");

@@ -2,6 +2,13 @@
 <html lang="ja" data-theme="dark">
 <head>
 <meta charset="utf-8">
+<!-- セキュリティ: このページが読み込めるのは、アプリに同梱したもの ('self' = https://juce.backend/) だけ。ネットには出ない。
+     blob: は alphaTab がタブ譜の音 (シンセ) の処理を、自分で作った blob の URL で動かすため。
+     タブ譜・PDF のファイル (人から受け取ったものもある) の中身に何かが仕込まれていても、外へ送ったり、ほかのスクリプトを読んだりできない -->
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' 'unsafe-inline' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline';
+               img-src 'self' data: blob:; font-src 'self' data: blob:; connect-src 'self' data: blob:; media-src 'self' data: blob:;
+               object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'">
 <!-- タブ譜の表示 (設計書 #5、PoC-3)。alphaTab (MPL-2.0) で描く。ファイルはすべてアプリに同梱し、ネットから読まない -->
 <link rel="stylesheet" href="tokens.css">
 <style>

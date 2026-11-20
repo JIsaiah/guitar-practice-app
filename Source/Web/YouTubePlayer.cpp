@@ -1,5 +1,6 @@
 #include "YouTubePlayer.h"
 #include "WebResources.h"
+#include "LockedWebBrowser.h"
 #include <cstdlib>
 #include "../Text.h"
 
@@ -41,7 +42,7 @@ void YouTubePlayer::prepare()
                        .withResourceProvider (provideResource)
                        .withEventListener ("player", [this] (const juce::var& event) { handleEvent (event); });
 
-    browser = std::make_unique<juce::WebBrowserComponent> (options);
+    browser = std::make_unique<LockedWebBrowser> (options);   // 同梱のページからほかへ移れないように (LockedWebBrowser.h)
     addAndMakeVisible (*browser);
     browser->setBounds (getLocalBounds());
     browser->goToURL (juce::WebBrowserComponent::getResourceProviderRoot());
