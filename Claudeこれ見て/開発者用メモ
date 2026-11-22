@@ -177,3 +177,7 @@ AIは単一スレッド前提のシンプルな実装を出しがちで、複数
 ・残っているもの:
 　- YouTube は、動画が再生できる状態になるまで 2〜4 秒かかる（timing.log の「3b」）。YouTube 側の読み込みなので、アプリでは短くしにくい
 　- ローカルの音源（mp3 など）は、全体を展開してから再生できるようになる。開発用の Debug ビルドは最適化されていないので、長い曲だと配布版より遅いことがある（まだ測っていない。遅いと感じたら測る）
+
+配布用の .zip を作る（バージョンは CMakeLists.txt の project(... VERSION x.y.z) を先に上げる）:
+powershell -ExecutionPolicy Bypass -File release\make-release.ps1
+→ dist\suguhiku-v<バージョン>-windows-x64.zip ができる
