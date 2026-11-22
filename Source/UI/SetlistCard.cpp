@@ -27,7 +27,7 @@ SetlistCard::SetlistCard (Setlist s, SessionLibrary& l, SetlistStore& st, ThemeM
     menuButton.setMouseCursor (juce::MouseCursor::PointingHandCursor);
     menuButton.onClick = [this] { showHeaderMenu(); };
     addAndMakeVisible (menuButton);
-    setAlpha (setlist.finished ? 0.5f : 1.0f);   // ライブが終わったセットリストは薄く (作者の指示)
+    updateAlpha();   // ライブが終わったセットリストは、たたんでいる間は薄く (作者の指示)
 
     entryList.onPlay = [this] (int index) { if (onPlay != nullptr) onPlay (index); };
     entryList.onOpenSession = [this] (const juce::String& id) { if (onOpenSession != nullptr) onOpenSession (id); };
@@ -45,7 +45,11 @@ SetlistCard::SetlistCard (Setlist s, SessionLibrary& l, SetlistStore& st, ThemeM
         if (onLayoutChanged != nullptr)
             onLayoutChanged();
     };
-    openFold.onFinished = [this] { entryList.setVisible (expanded); };
+    openFold.onFinished = [this]
+    {
+        entryList.setVisible (expanded);
+        updateAlpha();   // たたみ終わってから薄くする (作者の指示)
+    };
 }
 
 void SetlistCard::updatePlayButton()
@@ -60,11 +64,17 @@ void SetlistCard::setExpanded (bool shouldBeExpanded)
         return;
 
     expanded = shouldBeExpanded;
+    // ライブが終わったものも、開いている間は濃く (開くときはすぐ)。たたむときは、たたみ終わってから薄く (作者の指示: openFold.onFinished)
+    if (expanded)
+        updateAlpha();
     if (expanded)
         entryList.setVisible (true);   // たたむときは、たたみ終わってから隠す (openFold.onFinished)
     openFold.setTarget (expanded);     // 画面に出ていないとき (作ったとき) は、すぐにその高さ
     if (! openFold.isAnimating())
+    {
         entryList.setVisible (expanded);
+        updateAlpha();
+    }
     repaint();
 
     if (onLayoutChanged != nullptr)
@@ -215,7 +225,10 @@ void SetlistCard::resized()
     playButton.setBounds (header.removeFromRight (168).reduced (0, 12));
 
     // 曲順は、開いたときの高さのまま置く (たたむ途中は、カードの外にはみ出す分が見えないだけ)
-    entryList.setBounds (area.getX(), area.getY(), area.getWidth(), entryList.getPreferredHeight());
+    // 高さはカードの中に見えている分まで (行の場所は変わらないので、たたむ途中は下から隠れていく)。
+    // 開いたときの高さのまま置くと、薄くしたカード (setAlpha) では、はみ出した分が描かれてしまう
+    // (JUCE は、透明度のある部品の子を、その部品の外でも描くため)
+    entryList.setBounds (area.getX(), area.getY(), area.getWidth(), juce::jmin (entryList.getPreferredHeight(), area.getHeight()));
 }
 
 void SetlistCard::mouseMove (const juce::MouseEvent& e)
@@ -448,7 +461,7 @@ void SetlistCard::setFinished (bool shouldBeFinished)
 {
     setlist.finished = shouldBeFinished;
     save();
-    setAlpha (setlist.finished ? 0.5f : 1.0f);
+    updateAlpha();
     if (onFinishedChanged != nullptr)
         onFinishedChanged();
 }
@@ -472,4 +485,10 @@ void SetlistCard::requestDelete()
         if (safe->onDeleted != nullptr)
             safe->onDeleted();
     });
+}
+
+void SetlistCard::updateAlpha()
+{
+    // ライブが終わったセットリストは薄く。ただし開いている間は、曲を見やすいように濃く (作者の指示)
+    setAlpha (setlist.finished && ! expanded ? 0.5f : 1.0f);
 }

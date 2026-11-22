@@ -12,6 +12,7 @@ namespace Icons
     inline constexpr const char* toStart      = "media-backward-end-svgrepo-com.svg";
     inline constexpr const char* toEnd        = "media-forward-end-svgrepo-com.svg";
     inline constexpr const char* menuHorizontal = "menu-horizontal-svgrepo-com.svg";
+    inline constexpr const char* marker       = "marker-svgrepo-com.svg";
     inline constexpr const char* backward     = "media-backward-svgrepo-com.svg";
     inline constexpr const char* forward      = "media-forward-svgrepo-com.svg";
     inline constexpr const char* play         = "media-play-svgrepo-com.svg";

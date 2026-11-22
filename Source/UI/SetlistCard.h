@@ -58,6 +58,7 @@ private:
     void rename();
     void editLiveDate();   // ライブの日を変える (作者の指示。空にすると、決めていないに戻る)
     void setFinished (bool shouldBeFinished);
+    void updateAlpha();   // ライブが終わったもの: たたんでいる間は 50%、開いている間は 100%
     void requestDelete();
     juce::String describeSummary();   // 「8曲・34:12」
 

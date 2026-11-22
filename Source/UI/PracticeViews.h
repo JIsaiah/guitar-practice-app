@@ -282,19 +282,20 @@ public:
         if (markerSeconds >= 0.0)
             drawMarker (g, xFor (markerSeconds), bar.getY());
 
-        // 音色の自動切り替えの印: バーの上に、下向きの矢印とプリセットの番号
+        // 音色の自動切り替えの印: マーカー (svg icons/marker。地図のピンの形) の先をバーの上に置き、
+        // 丸い頭の中にプリセットの番号を重ねる (作者の指示: 再生バーの枠の高さに収まるように。前は数字が上にはみ出していた)
         for (const auto& mark : toneMarks)
         {
             const auto x = xFor (mark.seconds);
-            const auto tip = bar.getY() - 1.0f;
-            juce::Path arrow;
-            arrow.addTriangle (x - 4.5f, tip - 7.0f, x + 4.5f, tip - 7.0f, x, tip);
-            g.setColour (findColour (ThemeColourIds::accent));
-            g.fillPath (arrow);
-            g.fillRect (x - 0.75f, tip - 12.0f, 1.5f, 6.0f);
-            g.setFont (AppLookAndFeel::scaled (juce::FontOptions (11.0f, juce::Font::bold)));
-            g.drawText (juce::String (mark.preset), juce::Rectangle<float> (x - 10.0f, tip - 24.0f, 20.0f, 12.0f),
-                        juce::Justification::centred);
+            const auto tip = bar.getY() + 1.0f;                                    // ピンの先 (バーに触れる)
+            const auto size = juce::jlimit (14.0f, 22.0f, tip - 2.0f);           // 枠の上の端からはみ出さない大きさ
+            const auto pin = juce::Rectangle<float> (x - size * 0.5f, tip - size, size, size);
+            Icons::draw (g, Icons::marker, pin, findColour (ThemeColourIds::accent));
+
+            // ピンの丸い頭 (形の上から 0〜7 割ほど) の真ん中に番号
+            g.setColour (findColour (ThemeColourIds::onAccent));
+            g.setFont (AppLookAndFeel::scaled (juce::FontOptions (size * 0.5f, juce::Font::bold)));
+            g.drawText (juce::String (mark.preset), pin.withHeight (size * 0.7f), juce::Justification::centred, false);
         }
 
         // 現在位置の針。形は変えずに、太さ・長さ・色だけを変える
