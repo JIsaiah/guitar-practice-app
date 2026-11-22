@@ -173,6 +173,21 @@ bool SessionListScreen::isAnimating() const
     return navVisible && (now - navMoveStartMs < navMoveDurationMs || navAlpha < 1.0f);
 }
 
+#if JUCE_DEBUG
+// 開発用: ログに書く画面の情報 (ガタつきの原因を見分けるため)。モニターの大きさ・倍率・描き方 (GPU か CPU か)
+juce::String SessionListScreen::describeScreenForLog() const
+{
+    juce::String text;
+    if (const auto* display = juce::Desktop::getInstance().getDisplays().getDisplayForRect (getScreenBounds()))
+        text << "画面 " << display->logicalBounds.getWidth() << "x" << display->logicalBounds.getHeight()
+             << " 倍率 " << juce::String (display->scale, 2);
+    if (auto* peer = getPeer())
+        text << " / 描き方 " << peer->getAvailableRenderingEngines()[peer->getCurrentRenderingEngine()]
+             << " / ウィンドウ " << getTopLevelComponent()->getWidth() << "x" << getTopLevelComponent()->getHeight();
+    return text;
+}
+#endif
+
 void SessionListScreen::onFrame (double timestampSec)
 {
     // 合図が渡す時刻 (ミリ秒にすると Time::getMillisecondCounterHiRes() と同じ基準) で、動きを決める
@@ -207,7 +222,8 @@ void SessionListScreen::onFrame (double timestampSec)
                                  + " / 間隔の平均 " + juce::String (average, 1) + " ms (" + juce::String (1000.0 / average, 0) + " Hz)"
                                  + " / 間隔の最大 " + juce::String (s.intervalMax, 1) + " ms"
                                  + " / 届くまでの遅れの最大 " + juce::String (s.lagMax, 1) + " ms"
-                                 + " / 描画の最大 " + juce::String (s.paintMax, 1) + " ms");
+                                 + " / 描画の最大 " + juce::String (s.paintMax, 1) + " ms"
+                                 + " / " + describeScreenForLog());
             }
         }
     }

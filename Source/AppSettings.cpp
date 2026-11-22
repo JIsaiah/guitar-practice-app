@@ -36,6 +36,16 @@ AppSettings::AppSettings (juce::PropertiesFile& f)
     libraryTab = juce::jlimit (0, 1, file.getIntValue (libraryTabKey, 0));
 }
 
+bool AppSettings::getGpuRendering() const
+{
+    return file.getBoolValue ("gpuRendering", true);
+}
+
+void AppSettings::setGpuRendering (bool useGpu)
+{
+    file.setValue ("gpuRendering", useGpu);   // 描き方を変えるのは画面の側 (RenderingMode::apply)
+}
+
 void AppSettings::setLibraryTab (int tab)
 {
     // 一覧のタブを押したときだけ変わるので、知らせは出さずに保存する

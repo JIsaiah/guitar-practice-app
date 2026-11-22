@@ -71,6 +71,7 @@ private:
     juce::ToggleButton deathMetalToggle;
     juce::TextButton logoTunerButton;
     juce::TextButton debugLogButton;
+    juce::ToggleButton gpuToggle;   // 画面を CPU で描く (オンで CPU。ふだんはオフ = GPU)
     juce::TextButton feedbackButton;   // いちばん上の「フィードバックを送る」(真ん中・白い文字)
     juce::Label feedbackNote;          // ボタンの下の「(外部のブラウザで開きます)」
 

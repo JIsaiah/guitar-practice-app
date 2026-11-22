@@ -1,4 +1,5 @@
 #include "SettingsPanel.h"
+#include "RenderingMode.h"
 #include "../Text.h"
 
 namespace
@@ -134,6 +135,18 @@ SettingsPanel::SettingsPanel (AppSettings& s, ThemeManager& t, juce::AudioDevice
     debugLogButton.setTooltip ("アプリの動きの記録と、落ちたときの記録を表示します"_jp);
     debugLogButton.onClick = [this] { if (onOpenDebugLog != nullptr) onOpenDebugLog(); };
     addAndMakeVisible (debugLogButton);
+
+    // 画面の描き方: アニメーションがガタつく画面 (144Hz のモニターなど) では、オフ (CPU) のほうがなめらかなことがある
+    // ふだんは GPU で描く (なめらか)。表示がおかしいとき (古いドライバーなど) の逃げ道として、CPU で描くこともできる (作者の指示)
+    gpuToggle.setButtonText ("画面を CPU で描く (表示がおかしいときだけ。ふだんはオフの GPU のほうがなめらか)"_jp);
+    gpuToggle.setToggleState (! settings.getGpuRendering(), juce::dontSendNotification);
+    gpuToggle.onClick = [this]
+    {
+        const auto useGpu = ! gpuToggle.getToggleState();
+        settings.setGpuRendering (useGpu);
+        RenderingMode::apply (useGpu);
+    };
+    addAndMakeVisible (gpuToggle);
 
     addAndMakeVisible (audioSelector);
 
@@ -363,6 +376,8 @@ void SettingsPanel::resized()
 
     area.removeFromTop (6);
     debugLogButton.setBounds (area.removeFromTop (32).removeFromLeft (300));
+    area.removeFromTop (6);
+    gpuToggle.setBounds (area.removeFromTop (28).removeFromLeft (560));
 
     area.removeFromTop (10);
     audioHeading.setBounds (area.removeFromTop (24));

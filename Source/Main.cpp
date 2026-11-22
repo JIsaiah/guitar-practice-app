@@ -10,6 +10,7 @@
 #include "Library/SessionLibrary.h"
 #include "Library/SetlistStore.h"
 #include "Theme/ThemeManager.h"
+#include "UI/RenderingMode.h"
 #include "UI/MainComponent.h"
 #include "UI/Icons.h"
 
@@ -176,6 +177,7 @@ private:
             setResizeLimits (1280, 720, 10000, 10000);   // いちばん小さくて 1280x720 (作者の指示)
             centreWithSize (getWidth(), getHeight());
             setVisible (true);
+            RenderingMode::apply (settings.getGpuRendering());   // 画面の描き方 (GPU か CPU か。設定)
 
             applyThemeToTitleBar();
             TitleBar::hideIconAndTitle (getWindowHandle());

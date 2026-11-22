@@ -274,7 +274,13 @@ std::optional<juce::Rectangle<float>> SessionListScreen::findNavTargetBounds()
 {
     for (const auto& t : collectNavTargets())
         if (t.id == navId)
+        {
+            // スクロールする入れ物 (セッションの一覧・セットリストの欄) の中なら、その入れ物の見えている範囲だけに描く
+            // (作者の報告: 下へスクロールすると、枠が一覧の外の「セッション｜セットリスト」の後ろまで出ていた)
+            navClip = t.group != nullptr ? getLocalArea (t.group->getParentComponent(), t.group->getBounds()).toFloat()
+                                         : juce::Rectangle<float>();
             return t.bounds.toFloat();
+        }
 
     return std::nullopt;
 }
@@ -306,6 +312,7 @@ void SessionListScreen::selectNavTarget (const NavTarget& target)
     // 画面の書き換えの合図 (60 回/秒・144 回/秒など、画面に合わせた間隔) ごとに、経過時間から枠の場所を決める
     ensureFrameVBlank();
     stepNavigationRing (now);
+    repaint (navRing.getSmallestIntegerContainer().expanded (8));   // 出したばかりのとき (場所が変わらなくても描く)
 }
 
 void SessionListScreen::hideNavigation()
@@ -337,15 +344,13 @@ void SessionListScreen::stepNavigationRing (double now)
     // now は、合図が渡す書き換えの時刻 (onFrame)。呼ばれた時刻ではないので、合図が届くまでの遅れがばらついても、動きは揺れない
     const auto before = navRing;
 
-    // 経過時間で決める (はじめ速く、着く前にゆっくり: 3 次のイーズアウト)。間隔が揺れても、動きはなめらか
-    const auto t = (float) juce::jlimit (0.0, 1.0, (now - navMoveStartMs) / navMoveDurationMs);
-    const auto eased = 1.0f - std::pow (1.0f - t, 3.0f);
-    const auto lerp = [eased] (float a, float b) { return a + (b - a) * eased; };
-    navRing = { lerp (navMoveFrom.getX(), goal->getX()), lerp (navMoveFrom.getY(), goal->getY()),
-                lerp (navMoveFrom.getWidth(), goal->getWidth()), lerp (navMoveFrom.getHeight(), goal->getHeight()) };
-    navAlpha = (float) juce::jlimit (0.0, 1.0, (now - navShownAtMs) / 150.0);
+    // 枠は動かさず、すぐに選んだ場所に置き、すぐに濃く出す (作者の指示: 飛んでいく動きが、選んだ行の塗りに追いつかず、
+    // ずれて見えたため、動きをやめた)。スクロールで行が動いたときは、毎回その場所に合わせる
+    juce::ignoreUnused (now);
+    navRing = *goal;
+    navAlpha = 1.0f;
 
-    if (navRing != before || navAlpha < 1.0f || t < 1.0f)
+    if (navRing != before)
     {
         repaint (before.getSmallestIntegerContainer().expanded (8));
         repaint (navRing.getSmallestIntegerContainer().expanded (8));
@@ -356,6 +361,11 @@ void SessionListScreen::paintNavigationRing (juce::Graphics& g)
 {
     if (! navVisible)
         return;
+
+    // スクロールする入れ物の中の枠は、入れ物の外に描かない (枠の外側の光の分だけ広げる)
+    juce::Graphics::ScopedSaveState saved (g);
+    if (! navClip.isEmpty())
+        g.reduceClipRegion (navClip.expanded (4.0f).getSmallestIntegerContainer());
 
     // アクセントの色の細い枠と、外側のうっすらした光 (作者の指示で細くした)
     const auto accent = findColour (ThemeColourIds::accent).withMultipliedAlpha (navAlpha);
@@ -378,4 +388,35 @@ void SessionListScreen::showKeyboardNavigationForSnapshot()
     navShownAtMs -= 1000.0;
     stepNavigationRing (juce::Time::getMillisecondCounterHiRes());
     frameVBlank.reset();
+}
+
+void SessionListScreen::showNavigationOnFirstSession (int attempts)
+{
+    // 起動した直後は、ウィンドウがまだ出ていない・大きさが決まっていない (行の場所が分からない) ので、出るまで待つ
+    juce::Timer::callAfterDelay (50, [safe = juce::Component::SafePointer (this), attempts]
+    {
+        if (safe == nullptr)
+            return;
+
+        if (! safe->isShowing() || safe->listBox.getHeight() <= 0)
+        {
+            if (attempts > 0)
+                safe->showNavigationOnFirstSession (attempts - 1);
+            return;
+        }
+
+        // セッションのタブで、セッションがあり、まだ自分で枠を動かしていないときだけ
+        if (safe->currentTab != Tab::sessions || safe->entries.empty() || safe->navVisible)
+            return;
+
+        const auto firstId = "row:" + safe->entries.front().id;
+        for (const auto& target : safe->collectNavTargets())
+            if (target.id == firstId)
+            {
+                safe->selectNavTarget (target);
+                break;
+            }
+
+        safe->grabKeyboardFocus();   // Enter・矢印を、この画面で受け取る
+    });
 }

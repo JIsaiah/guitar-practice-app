@@ -78,6 +78,11 @@ public:
     int getLibraryTab() const noexcept { return libraryTab; }
     void setLibraryTab (int tab);
 
+    // 画面を GPU (Direct2D) で描くか。false なら CPU (ソフトウェア) で描く。
+    // 画面によっては (別の GPU につながったモニターなど) GPU のほうが遅く、アニメーションがガタつくことがあるため、選べるようにした
+    bool getGpuRendering() const;
+    void setGpuRendering (bool useGpu);
+
     // 選べる範囲
     static constexpr int minSkipSeconds = 1, maxSkipSeconds = 30;
 

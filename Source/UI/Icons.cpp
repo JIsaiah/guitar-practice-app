@@ -86,10 +86,16 @@ void Icons::draw (juce::Graphics& g, const char* fileName, juce::Rectangle<float
     if (icon == nullptr || area.isEmpty() || icon->area.isEmpty())
         return;
 
-    // 色を塗り替えた複製を描く
-    auto copy = icon->drawable->createCopy();
-    tint (*copy, colour);
-    copy->setTransform ({});   // 形の座標 (viewBox) から、そのまま area へ
+    // 色を塗り替えた複製を描く。複製は、アイコンと色ごとに1度だけ作って使い回す
+    // (前は描くたびに作っていた。一覧の見出しなどは、アニメーションの1コマごとに描き直すので重かった)
+    static std::map<std::pair<juce::String, juce::uint32>, std::unique_ptr<juce::Drawable>> tinted;
+    auto& copy = tinted[{ juce::String (fileName), colour.getARGB() }];
+    if (copy == nullptr)
+    {
+        copy = icon->drawable->createCopy();
+        tint (*copy, colour);
+        copy->setTransform ({});   // 形の座標 (viewBox) から、そのまま area へ
+    }
 
     const auto transform = juce::RectanglePlacement (juce::RectanglePlacement::centred).getTransformToFit (icon->area, area);
     copy->draw (g, 1.0f, transform);

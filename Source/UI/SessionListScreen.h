@@ -42,7 +42,13 @@ public:
     // キーボード操作 (作者の指示): 矢印で選ぶ場所を動かし、Enter で押す。選んでいる場所はアクセントの色の枠で囲み、
     // 動かすと枠がなめらかに次の場所へ飛ぶ。マウスを押すと枠は消える (次に矢印を押すと、また出る)
     bool keyPressed (const juce::KeyPress& key) override;
-    void showKeyboardNavigationForSnapshot();   // 開発用 (DevSnapshots): 選んでいる行に枠を出す
+    void showKeyboardNavigationForSnapshot();
+   #if JUCE_DEBUG
+    juce::String describeScreenForLog() const;
+   #endif   // 開発用 (DevSnapshots): 選んでいる行に枠を出す
+    // いちばん上のセッションの行に、キーボード操作の枠を出し、キーの入力を受け取る (アプリを起動したとき。Enter ですぐ開ける)。
+    // 画面がまだ出ていなければ、出るまで少しずつ待つ (attempts 回まで、0.05 秒ごと)
+    void showNavigationOnFirstSession (int attempts = 40);
 
 private:
     // ListBoxModel
@@ -150,6 +156,7 @@ private:
     bool navVisible = false;
     juce::String navId;
     juce::Rectangle<float> navRing;       // 今描いている枠
+    juce::Rectangle<float> navClip;       // 枠を描いてよい範囲 (スクロールする入れ物の中の枠は、入れ物の外に描かない)
     juce::Rectangle<float> navMoveFrom;   // 飛び始めた場所
     double navMoveStartMs = 0.0, navShownAtMs = 0.0;
     static constexpr double navMoveDurationMs = 180.0;   // 飛ぶのにかかる時間

@@ -91,12 +91,16 @@ void MainComponent::showList()
         openSetlistEntryLater (setlistId, entryIndex, -1.0);
     };
 
+    auto* listScreen = screen.get();
     setScreen (std::move (screen));
 
     if (! firstListShown)
     {
         firstListShown = true;
         pendingPaintMark = PendingMark { "1. 起動 → 一覧の表示"_jp, TimingLog::processStart(), true };
+
+        // アプリを起動したら、いちばん上のセッションにキーボード操作の枠を出しておく (作者の指示: すぐ Enter で開けるように)
+        listScreen->showNavigationOnFirstSession();
     }
 }
 
