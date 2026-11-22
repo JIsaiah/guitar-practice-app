@@ -4,6 +4,7 @@
 #include "../Theme/MetalLogo/FixedTextButton.h"
 #include "SetlistEntryList.h"
 #include "FoldAnimation.h"
+#include "Icons.h"
 
 // セットリストのカード (setlist-mode.md 4.2〜4.5)
 // - 見出し: 名前、曲数、合計時間、「通しで再生」(1曲目から)
@@ -30,6 +31,7 @@ public:
     std::function<void (const juce::String& sessionId)> onOpenSession; // 単体で開く
     std::function<void()> onRequestAdd;                               // 「＋ 曲を追加」
     std::function<void()> onDeleted;                                  // セットリストを削除した
+    std::function<void()> onFinishedChanged;                          // 「ライブ終わった」を付けた・外した (一覧が並べ直す)
 
     void paint (juce::Graphics& g) override;
     void resized() override;
@@ -54,6 +56,8 @@ private:
     void updatePlayButton();   // 開ける曲が無ければ「通しで再生」を押せなくする
     void showHeaderMenu();
     void rename();
+    void editLiveDate();   // ライブの日を変える (作者の指示。空にすると、決めていないに戻る)
+    void setFinished (bool shouldBeFinished);
     void requestDelete();
     juce::String describeSummary();   // 「8曲・34:12」
 
@@ -65,6 +69,7 @@ private:
 
     bool expanded = false, adding = false, addHover = false;
     FixedTextButton playButton;
+    IconButton menuButton { Icons::menuHorizontal };   // 「通しで再生」の右の「…」。右クリックと同じメニュー (作者の指示)
     SetlistEntryList entryList;
     FoldAnimation openFold { *this };   // 開く・たたむ動き (作者の指示: 上へたたむ)。0 = たたんだ、1 = 開いた
 };

@@ -20,6 +20,15 @@ SetlistCard::SetlistCard (Setlist s, SessionLibrary& l, SetlistStore& st, ThemeM
     };
     addAndMakeVisible (playButton);
 
+    // 「通しで再生」の右に、右クリックと同じメニューを出すボタン (作者の指示: 枠なし)
+    menuButton.setFrameless (true);
+    menuButton.setIconScale (0.6f);
+    menuButton.setTooltip ("名前・ライブの日の変更、ライブ終わった、削除"_jp);
+    menuButton.setMouseCursor (juce::MouseCursor::PointingHandCursor);
+    menuButton.onClick = [this] { showHeaderMenu(); };
+    addAndMakeVisible (menuButton);
+    setAlpha (setlist.finished ? 0.5f : 1.0f);   // ライブが終わったセットリストは薄く (作者の指示)
+
     entryList.onPlay = [this] (int index) { if (onPlay != nullptr) onPlay (index); };
     entryList.onOpenSession = [this] (const juce::String& id) { if (onOpenSession != nullptr) onOpenSession (id); };
     entryList.onChanged = [this] { changed(); };
@@ -146,7 +155,7 @@ void SetlistCard::paint (juce::Graphics& g)
     g.drawRoundedRectangle (bounds, 10.0f, 1.0f);
 
     auto header = getLocalBounds().removeFromTop (headerHeight).reduced (16, 0);
-    header.removeFromRight (playButton.getWidth() + 16);
+    header.setRight (playButton.getX() - 16);
 
     // 開閉の印 (作者のレイアウト): 開いているとき ▲、閉じているとき ▼
     const auto arrowArea = header.removeFromLeft (24).toFloat();
@@ -161,7 +170,10 @@ void SetlistCard::paint (juce::Graphics& g)
 
     g.setColour (findColour (juce::Label::textColourId));
     g.setFont (AppLookAndFeel::scaled (juce::FontOptions (18.0f, juce::Font::bold)));
-    g.drawText (setlist.name, header.withTrimmedBottom (headerHeight / 2 - 4).withTrimmedTop (10),
+    // 名前と、決めていればライブの日 (作者のレイアウト: 「セットリスト2　—　2026/11/21」)
+    const auto title = setlist.liveDate.isEmpty() ? setlist.name
+                                                  : setlist.name + "　—　"_jp + Setlist::formatLiveDate (setlist.liveDate);
+    g.drawText (title, header.withTrimmedBottom (headerHeight / 2 - 4).withTrimmedTop (10),
                 juce::Justification::bottomLeft, true);
 
     g.setColour (findColour (ThemeColourIds::textMuted));
@@ -196,7 +208,11 @@ void SetlistCard::resized()
 {
     auto area = getLocalBounds();
     auto header = area.removeFromTop (headerHeight);
-    playButton.setBounds (header.removeFromRight (200).reduced (16, 12));
+    // 右から「…」(枠なし)、少し空けて「通しで再生」
+    header.removeFromRight (12);
+    menuButton.setBounds (header.removeFromRight (36).withSizeKeepingCentre (36, 36));
+    header.removeFromRight (10);
+    playButton.setBounds (header.removeFromRight (168).reduced (0, 12));
 
     // 曲順は、開いたときの高さのまま置く (たたむ途中は、カードの外にはみ出す分が見えないだけ)
     entryList.setBounds (area.getX(), area.getY(), area.getWidth(), entryList.getPreferredHeight());
@@ -257,19 +273,22 @@ void SetlistCard::mouseDoubleClick (const juce::MouseEvent& e)
 
 juce::Rectangle<int> SetlistCard::getNameArea() const
 {
-    // paint と同じ計算: 見出しの左右の余白 16、右は「通しで再生」の分、左は開閉の印 (24) とその後ろの間 (24)
+    // paint と同じ計算: 見出しの左右の余白 16、右は「通しで再生」の 16 手前まで、左は開閉の印 (24) とその後ろの間 (24)
     auto header = getLocalBounds().removeFromTop (headerHeight).reduced (16, 0);
-    header.removeFromRight (playButton.getWidth() + 16);
+    header.setRight (playButton.getX() - 16);
     header.removeFromLeft (24 + 24);
     return header;
 }
 
 void SetlistCard::showHeaderMenu()
 {
+    // 作者の指示: 語尾の「…」は付けない。ライブの日の変更と「ライブ終わった」を足す
     juce::PopupMenu menu;
-    menu.addItem (1, "名前を変更…"_jp);
+    menu.addItem (1, "名前を変更"_jp);
+    menu.addItem (3, "ライブの日を変更"_jp);
+    menu.addItem (4, setlist.finished ? "ライブ前に戻す"_jp : "ライブ終わった"_jp);
     menu.addSeparator();
-    menu.addItem (2, "セットリストを削除…"_jp);
+    menu.addItem (2, "セットリストを削除"_jp);
 
     menu.showMenuAsync (juce::PopupMenu::Options().withMousePosition(),
                         [safe = juce::Component::SafePointer (this)] (int result)
@@ -279,6 +298,8 @@ void SetlistCard::showHeaderMenu()
 
         if (result == 1) safe->rename();
         if (result == 2) safe->requestDelete();
+        if (result == 3) safe->editLiveDate();
+        if (result == 4) safe->setFinished (! safe->setlist.finished);
     });
 }
 
@@ -304,6 +325,132 @@ void SetlistCard::rename()
                 safe->repaint();
             }
         }), true);
+}
+
+namespace
+{
+    // ライブの日の入力画面 (作者の指示)。アプリのウィンドウの中に重ねて出す (別のウィンドウを作らないので、すぐに出る)。
+    // OK で日付として読めなければ閉じずに、入力欄の下に知らせて、入れ直してもらう
+    class LiveDateDialog final : public juce::Component
+    {
+    public:
+        LiveDateDialog (const juce::String& initial, std::function<void (const juce::String& isoDate)> done)
+            : onDone (std::move (done))
+        {
+            title.setText ("ライブの日"_jp, juce::dontSendNotification);
+            title.setFont (AppLookAndFeel::scaled (juce::FontOptions (18.0f, juce::Font::bold)));
+            hint.setText ("YYYY/MM/DD・MM/DDのように入力してください"_jp, juce::dontSendNotification);
+            hint.setFont (AppLookAndFeel::scaled (juce::FontOptions (14.0f)));
+            error.setFont (AppLookAndFeel::scaled (juce::FontOptions (13.0f, juce::Font::bold)));
+
+            editor.setText (initial, false);
+            editor.setFont (AppLookAndFeel::scaled (juce::FontOptions (17.0f)));
+            editor.onReturnKey = [this] { submit(); };
+            editor.onEscapeKey = [this] { close(); };
+            editor.onTextChange = [this] { error.setText ({}, juce::dontSendNotification); };
+
+            okButton.setButtonText ("OK");
+            cancelButton.setButtonText ("キャンセル"_jp);
+            okButton.onClick = [this] { submit(); };
+            cancelButton.onClick = [this] { close(); };
+
+            for (auto* c : std::initializer_list<juce::Component*> { &title, &hint, &editor, &error, &okButton, &cancelButton })
+                addAndMakeVisible (c);
+        }
+
+        // owner のウィンドウいっぱいに重ねて出す (後ろは薄く暗くし、押せないようにする)
+        void showOver (juce::Component& owner)
+        {
+            auto* top = owner.getTopLevelComponent();
+            top->addAndMakeVisible (this);
+            setBounds (top->getLocalBounds());
+            error.setColour (juce::Label::textColourId, findColour (ThemeColourIds::accent));
+            enterModalState (true, nullptr, true);   // 閉じると消える (deleteWhenDismissed)
+            editor.grabKeyboardFocus();
+            editor.selectAll();
+        }
+
+        void paint (juce::Graphics& g) override
+        {
+            g.fillAll (juce::Colours::black.withAlpha (0.35f));
+            const auto box = getBox().toFloat();
+            g.setColour (findColour (ThemeColourIds::panel));
+            g.fillRoundedRectangle (box, 10.0f);
+            g.setColour (findColour (ThemeColourIds::border));
+            g.drawRoundedRectangle (box.reduced (0.5f), 10.0f, 1.0f);
+        }
+
+        void resized() override
+        {
+            auto area = getBox().reduced (20, 16);
+            title.setBounds (area.removeFromTop (28));
+            area.removeFromTop (4);
+            hint.setBounds (area.removeFromTop (22));
+            area.removeFromTop (8);
+            editor.setBounds (area.removeFromTop (36));
+            area.removeFromTop (4);
+            error.setBounds (area.removeFromTop (22));   // 入力欄の下に、読めなかったことを出す
+            auto buttons = area.removeFromBottom (36);
+            cancelButton.setBounds (buttons.removeFromRight (120));
+            buttons.removeFromRight (8);
+            okButton.setBounds (buttons.removeFromRight (120));
+        }
+
+        void inputAttemptWhenModal() override { editor.grabKeyboardFocus(); }
+
+    private:
+        juce::Rectangle<int> getBox() const { return getLocalBounds().withSizeKeepingCentre (480, 230); }
+
+        void submit()
+        {
+            const auto text = editor.getText().trim();
+            const auto date = Setlist::parseLiveDate (text);
+            if (text.isNotEmpty() && date.isEmpty())
+            {
+                // 閉じずに、入力欄の下に知らせて入れ直してもらう (作者の指示)
+                error.setText ("「"_jp + text + "」は日付として読めません。YYYY/MM/DD か MM/DD で入れてください"_jp,
+                               juce::dontSendNotification);
+                editor.grabKeyboardFocus();
+                editor.selectAll();
+                return;
+            }
+
+            auto done = onDone;
+            close();   // このあと消えるので、メンバーは使わない
+            if (done != nullptr)
+                done (date);
+        }
+
+        void close() { exitModalState (0); }   // deleteWhenDismissed なので、次のメッセージで消える
+
+        std::function<void (const juce::String&)> onDone;
+        juce::Label title, hint, error;
+        juce::TextEditor editor;
+        juce::TextButton okButton, cancelButton;
+    };
+}
+
+void SetlistCard::editLiveDate()
+{
+    auto* dialog = new LiveDateDialog (Setlist::formatLiveDate (setlist.liveDate),
+                                       [safe = juce::Component::SafePointer (this)] (const juce::String& date)
+    {
+        if (safe == nullptr || date == safe->setlist.liveDate)
+            return;
+        safe->setlist.liveDate = date;
+        safe->save();
+        safe->repaint();
+    });
+    dialog->showOver (*this);
+}
+
+void SetlistCard::setFinished (bool shouldBeFinished)
+{
+    setlist.finished = shouldBeFinished;
+    save();
+    setAlpha (setlist.finished ? 0.5f : 1.0f);
+    if (onFinishedChanged != nullptr)
+        onFinishedChanged();
 }
 
 void SetlistCard::requestDelete()

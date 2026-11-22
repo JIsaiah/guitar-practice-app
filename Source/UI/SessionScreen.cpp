@@ -1,4 +1,5 @@
 #include "SessionScreen.h"
+#include "../Platform/MouseState.h"
 #include "../Model/TonePresets.h"
 #include "../Model/YouTubeUrl.h"
 #include "../Audio/PluginLocator.h"
@@ -2258,12 +2259,12 @@ double SessionScreen::getMetronomeOffsetSeconds() const
     return (session.syncOffsetMs + start) / 1000.0;
 }
 
-void SessionScreen::setMetronomeStartHere()
+void SessionScreen::setMetronomeStartHere (double seconds)
 {
     if (! sourceReady)
         return;
 
-    session.metronomeStartMs = juce::jmax (1, juce::roundToInt (getPosition() * 1000.0));   // 0 は「指定なし」なので 1ms 以上
+    session.metronomeStartMs = juce::jmax (1, juce::roundToInt ((seconds >= 0.0 ? seconds : getPosition()) * 1000.0));   // 0 は「指定なし」なので 1ms 以上
     setStatus ("メトロノームを "_jp + formatTime (session.metronomeStartMs / 1000.0) + " から始めます"_jp);
     updateMetronomeStart();
 }
@@ -2346,12 +2347,12 @@ double SessionScreen::getPlayEnd (double length) const
     return session.sourceEndMs > 0 ? session.sourceEndMs / 1000.0 : length;
 }
 
-void SessionScreen::setSourceRangeHere (bool start)
+void SessionScreen::setSourceRangeHere (bool start, double seconds)
 {
     if (! sourceReady)
         return;
 
-    const auto ms = juce::jmax (1, juce::roundToInt (getPosition() * 1000.0));   // 0 は「指定なし」なので 1ms 以上
+    const auto ms = juce::jmax (1, juce::roundToInt ((seconds >= 0.0 ? seconds : getPosition()) * 1000.0));   // 0 は「指定なし」なので 1ms 以上
     // 開始は終了より前、終了は開始より後ろでないといけない。逆になったら、もう片方を外す
     if (start)
     {
@@ -2398,7 +2399,8 @@ void SessionScreen::showToneChangeMenu (double clickedSeconds)
 {
     const auto position = getPosition();
     const auto near = timeline.toneMarkNear (clickedSeconds);
-    enum { presetBase = 100, removeId = 1, removeAllId = 2 };
+    enum { presetBase = 100, removeId = 1, removeAllId = 2,
+           metronomeStartId = 10, metronomeClearId = 11, sourceStartId = 12, sourceEndId = 13, sourceStartClearId = 14, sourceEndClearId = 15 };
 
     juce::PopupMenu presets;
     bool anyPreset = false;
@@ -2410,7 +2412,24 @@ void SessionScreen::showToneChangeMenu (double clickedSeconds)
         presets.addItem (presetBase + p, juce::String (p) + ": " + (s.isEmpty() ? "(空き)"_jp : describeToneSlot (s)), ! s.isEmpty());
     }
 
+    // 再生バーの右クリックのメニュー (作者の指示: メトロノームの開始位置と、音源の開始・終了位置も、下の帯・音源のカードではなくここで)
     juce::PopupMenu menu;
+    const auto here = formatTime (position);
+    menu.addSectionHeader ("メトロノーム"_jp);
+    menu.addItem (metronomeStartId, "現在位置 ("_jp + here + ") をメトロノームの開始位置にする"_jp, sourceReady && ! isBarMode());
+    if (isBarMode())
+        menu.addItem (0, "タブ譜モードでは、タブ譜の小節に合わせて鳴ります"_jp, false);
+    if (session.metronomeStartMs > 0)
+        menu.addItem (metronomeClearId, "メトロノームの開始位置 ("_jp + formatTime (session.metronomeStartMs / 1000.0) + ") を解除"_jp);
+
+    menu.addSectionHeader ("音源の開始・終了位置"_jp);
+    menu.addItem (sourceStartId, "現在位置 ("_jp + here + ") を開始位置にする"_jp, sourceReady);
+    menu.addItem (sourceEndId, "現在位置 ("_jp + here + ") を終了位置にする"_jp, sourceReady);
+    if (session.sourceStartMs > 0)
+        menu.addItem (sourceStartClearId, "開始位置 ("_jp + formatTime (session.sourceStartMs / 1000.0) + ") を解除"_jp);
+    if (session.sourceEndMs > 0)
+        menu.addItem (sourceEndClearId, "終了位置 ("_jp + formatTime (session.sourceEndMs / 1000.0) + ") を解除"_jp);
+
     menu.addSectionHeader ("音色の自動切り替え"_jp);
     menu.addSubMenu ("現在位置 ("_jp + formatTime (position) + ") から音色を変える"_jp, presets, sourceReady && anyPreset);
     if (! anyPreset)
@@ -2425,6 +2444,17 @@ void SessionScreen::showToneChangeMenu (double clickedSeconds)
     {
         if (safe == nullptr || result == 0)
             return;
+
+        switch (result)
+        {
+            case metronomeStartId:   safe->setMetronomeStartHere (position); return;
+            case metronomeClearId:   safe->clearMetronomeStart(); return;
+            case sourceStartId:      safe->setSourceRangeHere (true, position); return;
+            case sourceEndId:        safe->setSourceRangeHere (false, position); return;
+            case sourceStartClearId: safe->clearSourceRange (true); return;
+            case sourceEndClearId:   safe->clearSourceRange (false); return;
+            default: break;
+        }
 
         auto& changes = safe->session.toneChanges;
         if (result > presetBase)
@@ -2531,7 +2561,9 @@ void SessionScreen::updateMetronomeStart()
         ? "今の位置から、メトロノームを始めます (それより前は鳴りません)。右クリックで解除"_jp
         : "動画モード (タブ譜がないとき・動画と入れ替えたとき) で使えます。タブ譜モードでは、タブ譜の小節に合わせて鳴ります"_jp);
 
-    // 再生バーには開始位置の印を出さない (作者の指示)。位置はボタンの「開始 01:23.4」で分かる
+    // 再生バーに開始位置の印 (緑の三角) を出す。下の帯のボタンをやめ、再生バーの右クリックで決めるようにしたので、
+    // どこにあるかを再生バーで分かるようにする (動画モードのときだけ。タブ譜モードでは使わないので出さない)
+    timeline.setMarker (isMetronomeStartActive() ? session.metronomeStartMs / 1000.0 : -1.0);
 }
 
 //==============================================================================
@@ -3800,6 +3832,12 @@ void SessionScreen::updateCursorHiding()
                        && isTopWindowAt (*this, mouse)
                        && ! juce::ModifierKeys::currentModifiers.isAnyMouseButtonDown();
     const bool hide = overMain && now - lastMouseMoveMs >= 3000.0;
+
+    // 隠している間は、Windows にもカーソル無しを頼み続ける (ページ (WebView) の上では CSS だけでは消えない。
+    // ページが何かのはずみでカーソルを戻しても、すぐ消す)。マウスを動かすと、上の lastMouseMoveMs で hide が false になる
+    if (hide)
+        MouseState::hideCursorUntilMoved();
+
     if (hide == mainCursorHidden)
         return;
 
@@ -4142,13 +4180,8 @@ void SessionScreen::resized()
             place (play, *b, unit);
     }
 
-    // 「ここから開始」は、見出しの行の「単体」の真上に小さく置く (下の帯の高さを増やさないため)
-    {
-        auto headingRow = metronomeHeading.getBounds();
-        const auto solo = metronomeSoloButton.getBounds();
-        metronomeStartButton.setBounds (solo.getX(), headingRow.getY(), solo.getWidth(), headingRow.getHeight() - 1);
-        metronomeHeading.setBounds (headingRow.withRight (solo.getX() - 4));
-    }
+    // 「ここから開始」は下の帯に出さない (作者の指示: 再生バーの右クリックで決める)
+    metronomeStartButton.setVisible (false);
 
     //==== 右のパネルと境目 ====
     sideCards.clear();
@@ -4188,7 +4221,7 @@ void SessionScreen::resized()
         const int mixerHeight = headingHeight + (3 + tabRows) * rowHeight;
         tabRowsShown = tabRows > 0;
         constexpr int tempoHeight = headingHeight + 3 * rowHeight + 2 * 4;   // BPM・タブ譜だけ・拍の位置
-        const int sourceExtra = headingHeight + 30 + (hasSource() ? 34 : 40);   // 音源があれば、開始・終了位置のボタンの行
+        const int sourceExtra = headingHeight + 30 + (hasSource() ? 0 : 40);   // 開始・終了位置は再生バーの右クリックで決める (作者の指示)
         constexpr int cardChrome = 16 + 8;   // カードの内側の余白と、カードの間
         constexpr int labelWidth = 84;       // 行の名前の列。狭くして、スライダーを長くする
 
@@ -4221,8 +4254,8 @@ void SessionScreen::resized()
         pasteUrlButton.setVisible (! hasSource() && sourceOpen);
         sourceInfoLabel.setVisible (hasSource() && sourceOpen);
         sourceRemoveButton.setVisible (hasSource() && sourceOpen);
-        sourceStartButton.setVisible (hasSource() && sourceOpen);
-        sourceEndButton.setVisible (hasSource() && sourceOpen);
+        sourceStartButton.setVisible (false);   // 再生バーの右クリックで決める (作者の指示)
+        sourceEndButton.setVisible (false);
 
         if (hasSource())
         {
@@ -4230,11 +4263,6 @@ void SessionScreen::resized()
             sourceRemoveButton.setBounds (row.removeFromRight (26));
             sourceInfoLabel.setBounds (row);
 
-            // リンク・ファイル名の下に「開始位置」「終了位置」(作者の指示)
-            auto rangeRow = source.removeFromTop (34).withTrimmedTop (4);
-            sourceStartButton.setBounds (rangeRow.removeFromLeft ((rangeRow.getWidth() - 8) / 2));
-            rangeRow.removeFromLeft (8);
-            sourceEndButton.setBounds (rangeRow);
         }
 
         // たたんでいる途中: カードの外に出た部品を隠す

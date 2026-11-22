@@ -120,6 +120,8 @@ juce::var Setlist::toVar() const
         { "name",          name },
         { "createdAt",     createdAt.toISO8601 (true) },
         { "updatedAt",     updatedAt.toISO8601 (true) },
+        { "liveDate",      liveDate },
+        { "finished",      finished },
         { "entries",       entryList },
     });
 }
@@ -134,6 +136,8 @@ std::optional<Setlist> Setlist::fromVar (const juce::var& value)
     s.name = value["name"].toString();
     s.createdAt = timeFromString (value["createdAt"].toString());
     s.updatedAt = timeFromString (value["updatedAt"].toString());
+    s.liveDate = parseLiveDate (value["liveDate"].toString());   // 手で書き換えられても、日付の形のものだけ
+    s.finished = value["finished"].isVoid() ? false : (bool) value["finished"];
 
     if (const auto* list = value["entries"].getArray())
     {
@@ -160,4 +164,31 @@ std::optional<Setlist> Setlist::fromVar (const juce::var& value)
     }
 
     return s;
+}
+
+juce::String Setlist::formatLiveDate (const juce::String& isoDate)
+{
+    return isoDate.replaceCharacter ('-', '/');
+}
+
+juce::String Setlist::parseLiveDate (const juce::String& text, int defaultYear)
+{
+    // 「2026/11/21」「2026-11-21」「2026.11.21」と、「11/21」(年は defaultYear。0 なら今年) を受け付ける。月・日は1桁でもよい
+    auto parts = juce::StringArray::fromTokens (text.trim(), "/-.", "");
+    if (parts.size() == 2)
+        parts.insert (0, juce::String (defaultYear > 0 ? defaultYear : juce::Time::getCurrentTime().getYear()));
+    if (parts.size() != 3 || ! parts[0].containsOnly ("0123456789") || ! parts[1].containsOnly ("0123456789")
+        || ! parts[2].containsOnly ("0123456789") || parts[0].length() != 4)
+        return {};
+
+    const auto year = parts[0].getIntValue(), month = parts[1].getIntValue(), day = parts[2].getIntValue();
+    if (year < 1900 || year > 2999 || month < 1 || month > 12 || day < 1)
+        return {};
+
+    static const int daysInMonth[] = { 31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
+    const bool leap = (year % 4 == 0 && year % 100 != 0) || year % 400 == 0;
+    if (day > daysInMonth[month - 1] || (month == 2 && day == 29 && ! leap))
+        return {};
+
+    return juce::String (year) + "-" + juce::String (month).paddedLeft ('0', 2) + "-" + juce::String (day).paddedLeft ('0', 2);
 }

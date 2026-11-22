@@ -41,8 +41,9 @@ private:
 
 //==============================================================================
 // 左の大きな枠 (タブ譜の場所) に、プラグインの編集画面を出す部品 (作者の指示)。
-// 上の帯にプラグインの名前と「別ウィンドウで開く」「閉じる」、その下の真ん中に編集画面。
-// 編集画面が枠より大きいときは縮める (大きさを変えられるプラグインは大きさを、変えられないものは表示の倍率を)。
+// 枠いっぱいに編集画面だけを出す (プラグインの名前・「別ウィンドウで開く」・「閉じる」の帯は出さない。作者の指示。
+// 閉じる・別ウィンドウは、音色のカードのボタンで行う)。
+// 編集画面は枠いっぱいに合わせる (大きさを変えられるプラグインは大きさを、変えられないものは表示の倍率を。倍率は 2 倍まで)。
 // それでも入らないとき (縮められないプラグイン) は、onDoesNotFit で別のウィンドウに移してもらう
 // (VST3 の画面は Windows の窓なので、枠からはみ出すと右のパネルの上に重なってしまうため)
 class PluginToneCard::MainView final : public juce::Component,
@@ -60,7 +61,7 @@ public:
 
         for (auto* c : std::initializer_list<juce::Component*> { &title, &windowButton, &closeButton })
         {
-            addAndMakeVisible (c);
+            addChildComponent (c);   // 帯は出さない (作者の指示)。部品は残しておく (呼び出し側の onClose などはそのまま)
             c->setMouseClickGrabsKeyboardFocus (false);
             c->setWantsKeyboardFocus (false);
         }
@@ -97,17 +98,10 @@ public:
         g.fillRoundedRectangle (bounds, 10.0f);
         g.setColour (findColour (ThemeColourIds::border));
         g.drawRoundedRectangle (bounds, 10.0f, 1.0f);
-        g.fillRect (getLocalBounds().reduced (1, 0).removeFromTop (barHeight).removeFromBottom (1));
     }
 
     void resized() override
     {
-        auto bar = getLocalBounds().removeFromTop (barHeight).reduced (12, 6);
-        closeButton.setBounds (bar.removeFromRight (80));
-        bar.removeFromRight (8);
-        windowButton.setBounds (bar.removeFromRight (150));
-        bar.removeFromRight (8);
-        title.setBounds (bar);
         fit();
     }
 
@@ -119,9 +113,9 @@ public:
     }
 
 private:
-    static constexpr int barHeight = 44;
+    static constexpr float maxScale = 2.0f;   // 小さい画面を大きくするときの上限 (ぼやけすぎないように)
 
-    juce::Rectangle<int> getEditorArea() const { return getLocalBounds().withTrimmedTop (barHeight).reduced (8); }
+    juce::Rectangle<int> getEditorArea() const { return getLocalBounds().reduced (2); }   // 枠の線の内側いっぱい
 
     void fit()
     {
@@ -130,22 +124,19 @@ private:
             return;
 
         fitting = true;
-        const bool tooBig = natural.getWidth() > area.getWidth() || natural.getHeight() > area.getHeight();
 
         if (editor->isResizable())
         {
-            // 大きさを変えられるプラグイン: 枠に入る大きさにする (元より大きくはしない。どこまで縮むかはプラグインが決める)
-            const auto w = juce::jmin (natural.getWidth(), area.getWidth());
-            const auto h = juce::jmin (natural.getHeight(), area.getHeight());
-            if (w != editor->getWidth() || h != editor->getHeight())
-                editor->setSize (w, h);
+            // 大きさを変えられるプラグイン: 枠いっぱいの大きさにする (どこまで変わるかはプラグインが決める)
+            if (area.getWidth() != editor->getWidth() || area.getHeight() != editor->getHeight())
+                editor->setSize (area.getWidth(), area.getHeight());
         }
-        else if (tooBig || ! juce::approximatelyEqual (scale, 1.0f))
+        else
         {
-            // 変えられないプラグイン: 表示の倍率で縮める (効くかはプラグイン次第。Misha は半分でも描けた)
-            const auto newScale = tooBig ? juce::jmin ((float) area.getWidth() / (float) natural.getWidth(),
-                                                       (float) area.getHeight() / (float) natural.getHeight())
-                                         : 1.0f;
+            // 変えられないプラグイン: 表示の倍率で、枠いっぱいに合わせる (縦横の比は変えない。効くかはプラグイン次第。Misha は半分でも描けた)
+            const auto newScale = juce::jlimit (0.1f, maxScale,
+                                                juce::jmin ((float) area.getWidth() / (float) natural.getWidth(),
+                                                            (float) area.getHeight() / (float) natural.getHeight()));
             if (! juce::approximatelyEqual (newScale, scale))
             {
                 scale = newScale;
@@ -326,7 +317,7 @@ void PluginToneCard::updateControls()
     openMainButton.setEnabled (ready);
     openWindowButton.setEnabled (ready);
     openMainButton.setButtonText (place == Place::main ? "プラグインを閉じる"_jp : "プラグインを開く"_jp);
-    openMainButton.setToggleState (place == Place::main, juce::dontSendNotification);
+    openMainButton.setToggleState (false, juce::dontSendNotification);   // 開いていても塗らない (作者の指示。文字が「閉じる」に変わる)
 
     resized();
     if (onSizeChanged != nullptr)
@@ -510,7 +501,7 @@ void PluginToneCard::setPlace (Place newPlace)
 
     place = newPlace;
     openMainButton.setButtonText (place == Place::main ? "プラグインを閉じる"_jp : "プラグインを開く"_jp);
-    openMainButton.setToggleState (place == Place::main, juce::dontSendNotification);
+    openMainButton.setToggleState (false, juce::dontSendNotification);   // 開いていても塗らない (作者の指示。文字が「閉じる」に変わる)
 
     if (onPlaceChanged != nullptr)
         onPlaceChanged();

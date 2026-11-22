@@ -80,6 +80,36 @@ public:
             expectEquals (standalone.makeWorkingCopy (stored).sourceEndMs, 5000);
         }
 
+        beginTest ("Setlist live date and finished flag");
+        {
+            expectEquals (Setlist::parseLiveDate ("2026/11/21"), juce::String ("2026-11-21"));
+            expectEquals (Setlist::parseLiveDate ("2026-1-5"), juce::String ("2026-01-05"));
+            expectEquals (Setlist::parseLiveDate (" 2024.02.29 "), juce::String ("2024-02-29"));   // うるう年
+            expect (Setlist::parseLiveDate ("2025/02/29").isEmpty());
+            expect (Setlist::parseLiveDate ("2026/13/01").isEmpty());
+            expect (Setlist::parseLiveDate ("あした").isEmpty());
+            expect (Setlist::parseLiveDate ("").isEmpty());
+            expectEquals (Setlist::parseLiveDate ("11/21", 2027), juce::String ("2027-11-21"));   // 月/日だけ: 年はその年
+            expectEquals (Setlist::parseLiveDate ("1/5").substring (4), juce::String ("-01-05"));     // 年を渡さなければ今年
+            expect (Setlist::parseLiveDate ("2/30", 2026).isEmpty());
+            expectEquals (Setlist::formatLiveDate ("2026-11-21"), juce::String ("2026/11/21"));
+
+            Setlist s;
+            s.setlistId = "id";
+            s.liveDate = "2026-11-21";
+            s.finished = true;
+            const auto loaded = Setlist::fromVar (s.toVar());
+            expect (loaded.has_value() && loaded->liveDate == "2026-11-21" && loaded->finished);
+
+            Setlist old;   // 前からのファイル (書いていない): ライブの日なし・終わっていない
+            old.setlistId = "old";
+            auto v = old.toVar();
+            v.getDynamicObject()->removeProperty ("liveDate");
+            v.getDynamicObject()->removeProperty ("finished");
+            const auto oldLoaded = Setlist::fromVar (v);
+            expect (oldLoaded.has_value() && oldLoaded->liveDate.isEmpty() && ! oldLoaded->finished);
+        }
+
         beginTest ("Adding a session to a setlist copies its start/end");
         {
             Session source;

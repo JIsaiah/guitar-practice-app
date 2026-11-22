@@ -5,6 +5,25 @@ namespace
 {
     constexpr int cardGap = 12;
     constexpr int newButtonSize = 44;   // 右下の「＋」(正方形)
+    constexpr int pastHeadingHeight = 24;   // 「過去のセトリ」の区切り
+}
+
+void SetlistPanel::PastHeading::paint (juce::Graphics& g)
+{
+    const auto text = "過去のセトリ"_jp;
+    const auto font = AppLookAndFeel::scaled (juce::FontOptions (13.0f, juce::Font::bold));
+    const auto textWidth = juce::GlyphArrangement::getStringWidthInt (juce::Font (font), text) + 24;
+    auto area = getLocalBounds().reduced (28, 0);
+    const auto centre = area.getCentreX();
+    const auto y = (float) area.getCentreY();
+
+    g.setColour (findColour (ThemeColourIds::border));
+    g.fillRect (juce::Rectangle<float>::leftTopRightBottom ((float) area.getX(), y, (float) (centre - textWidth / 2), y + 1.0f));
+    g.fillRect (juce::Rectangle<float>::leftTopRightBottom ((float) (centre + textWidth / 2), y, (float) area.getRight(), y + 1.0f));
+
+    g.setColour (findColour (ThemeColourIds::textMuted));
+    g.setFont (font);
+    g.drawText (text, area.withSizeKeepingCentre (textWidth, area.getHeight()), juce::Justification::centred);
 }
 
 SetlistPanel::SetlistPanel (SessionLibrary& l, SetlistStore& s, ThemeManager& t, AppSettings& a)
@@ -39,10 +58,19 @@ void SetlistPanel::refresh()
         card->onOpenSession = [this] (const juce::String& sessionId) { if (onOpenSession != nullptr) onOpenSession (sessionId); };
         card->onRequestAdd = [this, raw = card.get()] { if (onRequestAdd != nullptr) onRequestAdd (raw); };
         card->onDeleted = [this, id] { removeCardLater (id); };
+        // 「ライブ終わった」を付けた・外した: 並べ直す (カードのメニューの中から呼ばれるので、作り直しは次のメッセージで)
+        card->onFinishedChanged = [this]
+        {
+            juce::MessageManager::callAsync ([safe = juce::Component::SafePointer (this)] { if (safe != nullptr) safe->refresh(); });
+        };
 
         content.addAndMakeVisible (*card);
         cards.push_back (std::move (card));
     }
+
+    // ライブが終わったセットリストは、まだのものの後ろに並べる (それぞれの中の順はそのまま)
+    std::stable_partition (cards.begin(), cards.end(), [] (const auto& c) { return ! c->getSetlist().finished; });
+    content.addChildComponent (pastHeading);
 
     layoutCards();
 }
@@ -115,12 +143,22 @@ void SetlistPanel::layoutCards()
     const auto width = juce::jmax (0, viewport.getWidth() - viewport.getScrollBarThickness());
     int y = 0;
 
+    bool headingPlaced = false;
     for (const auto& card : cards)
     {
+        // ライブが終わったセットリストの前に「過去のセトリ」の区切り
+        if (card->getSetlist().finished && ! headingPlaced)
+        {
+            headingPlaced = true;
+            pastHeading.setBounds (0, y, width, pastHeadingHeight);
+            y += pastHeadingHeight + cardGap;
+        }
+
         const auto height = card->getPreferredHeight();
         card->setBounds (0, y, width, height);
         y += height + cardGap;
     }
+    pastHeading.setVisible (headingPlaced);
 
     // いちばん下のカードが「＋」に隠れないよう、下に「＋」の分の余白を足す
     content.setSize (width, juce::jmax (y + newButtonSize + 8, viewport.getHeight()));

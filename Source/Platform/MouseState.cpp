@@ -14,9 +14,11 @@
 bool MouseState::isLeftDown()  { return (GetAsyncKeyState (VK_LBUTTON) & 0x8000) != 0; }
 bool MouseState::isRightDown() { return (GetAsyncKeyState (VK_RBUTTON) & 0x8000) != 0; }
 bool MouseState::isMiddleDown() { return (GetAsyncKeyState (VK_MBUTTON) & 0x8000) != 0; }
+void MouseState::hideCursorUntilMoved() { SetCursor (nullptr); }
 
 #else
 bool MouseState::isLeftDown()  { return false; }
 bool MouseState::isRightDown() { return false; }
 bool MouseState::isMiddleDown() { return false; }
+void MouseState::hideCursorUntilMoved() {}
 #endif

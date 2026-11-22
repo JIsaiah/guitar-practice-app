@@ -102,9 +102,7 @@ void RadialMenu::timerCallback()
                 break;
             }
 
-            if (window->advance (1.0 / 60.0))
-                window->repaint();
-            break;
+            break;   // 開く動き・選ばれ具合は、ウィンドウが画面の書き換えの合図ごとに進める (Window::onFrame)
         }
 
         case Phase::waitRelease:
@@ -188,6 +186,16 @@ RadialMenu::Window::Window (std::vector<Item> newItems)
 {
     setOpaque (false);
     setInterceptsMouseClicks (false, false);
+
+    // 動きは、画面の書き換えの合図ごとに、その書き換えの時刻からの経過時間で進める (60 Hz でも 144 Hz でも同じ速さ・なめらか)。
+    // 前はタイマー (60 回/秒) ごとに決まった量だけ進めていたので、144 Hz の画面ではコマごとの動きがばらついていた
+    frameVBlank = std::make_unique<juce::VBlankAttachment> (this, [this] (double timestampSec)
+    {
+        const auto dt = lastFrameSec > 0.0 ? juce::jlimit (0.0, 0.05, timestampSec - lastFrameSec) : 1.0 / 60.0;
+        lastFrameSec = timestampSec;
+        if (advance (dt))
+            repaint();
+    });
 }
 
 void RadialMenu::Window::placeAround (juce::Point<int> mousePos)
@@ -233,14 +241,16 @@ bool RadialMenu::Window::advance (double dt)
         moving = true;
     }
 
-    // 選ばれ具合は、目標 (選んでいれば 1) に向かって、毎コマ 3割ずつ近づける (なめらかに止まる)
+    // 選ばれ具合は、目標 (選んでいれば 1) に向かって近づける (なめらかに止まる)。
+    // 前は「60 回/秒の1コマで 3割」だった。経過時間で決めて、画面の速さ (Hz) が違っても同じ速さにする
+    const auto approach = 1.0f - (float) std::pow (0.7, dt * 60.0);
     for (size_t i = 0; i < hoverAmounts.size(); ++i)
     {
         const auto targetAmount = (int) i == hovered ? 1.0f : 0.0f;
         auto& a = hoverAmounts[i];
         if (std::abs (targetAmount - a) > 0.002f)
         {
-            a += (targetAmount - a) * 0.3f;
+            a += (targetAmount - a) * approach;
             moving = true;
         }
         else

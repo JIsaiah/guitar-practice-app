@@ -34,7 +34,7 @@ public:
         startMs = juce::Time::getMillisecondCounterHiRes();
         finished = false;
         if (vblank == nullptr)
-            vblank = std::make_unique<juce::VBlankAttachment> (&component, [this] (double) { step(); });
+            vblank = std::make_unique<juce::VBlankAttachment> (&component, [this] (double timestampSec) { step (timestampSec * 1000.0); });
     }
 
     // 今の開き具合 (0〜1。動きの始めと終わりがゆっくりになるように曲げたもの)
@@ -42,11 +42,13 @@ public:
     bool isAnimating() const noexcept { return vblank != nullptr && ! finished; }
 
 private:
-    void step()
+    // frameMs: その書き換えの時刻 (VBlank が渡す時刻。getMillisecondCounterHiRes と同じ基準)。
+    // 合図が届いた時刻ではなく、この時刻で決める (届くまでの遅れは毎回ばらつき、動きのガタつきになるため。60章)
+    void step (double frameMs)
     {
         if (finished)
             return;   // 着いたあと、外すまでの間
-        const auto t = juce::jlimit (0.0, 1.0, (juce::Time::getMillisecondCounterHiRes() - startMs) / duration);
+        const auto t = juce::jlimit (0.0, 1.0, (frameMs - startMs) / duration);
         const auto eased = t * t * (3.0 - 2.0 * t);
         value = from + (to - from) * eased;
 

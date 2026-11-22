@@ -74,6 +74,8 @@ public:
 
     // アニメーションを1コマ進める (dtSeconds 秒)。まだ動いていれば true
     bool advance (double dtSeconds);
+    std::unique_ptr<juce::VBlankAttachment> frameVBlank;   // 画面の書き換えの合図ごとに advance を呼ぶ
+    double lastFrameSec = 0.0;
 
    #if JUCE_DEBUG
     // 開発用 (DevSnapshots): アニメーションを終えた状態で描く

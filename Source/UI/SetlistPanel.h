@@ -41,6 +41,15 @@ private:
 
     juce::Viewport viewport;
     juce::Component content;
+
+    // 「過去のセトリ」の区切り (作者のレイアウト: 真ん中に文字、左右に線)。ライブが終わったセットリストの前に出す
+    class PastHeading final : public juce::Component
+    {
+    public:
+        PastHeading() { setInterceptsMouseClicks (false, false); }
+        void paint (juce::Graphics& g) override;
+    };
+    PastHeading pastHeading;
     IconButton newButton { Icons::plus };   // 右下の「＋」(セッションの一覧の「＋」と同じ見た目)
     std::vector<std::unique_ptr<SetlistCard>> cards;
     std::set<juce::String> expandedIds;   // 開いていたカード。設定に保存し、練習画面から戻ったときや次の起動でも開いたままにする

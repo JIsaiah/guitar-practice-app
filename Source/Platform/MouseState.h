@@ -9,4 +9,10 @@ namespace MouseState
     bool isLeftDown();
     bool isRightDown();
     bool isMiddleDown();   // 真ん中のボタン (ホイールを押し込む)。トラックボールでもラジアルメニューを開けるように
+
+    // マウスのカーソルを、次にマウスを動かすまで隠す (Windows の SetCursor)。
+    // タブ譜・YouTube のページ (WebView) の上では、ページの CSS でカーソルを消しても、
+    // マウスを動かすまで画面のカーソルが変わらないため、Windows に直接「カーソル無し」を頼む。
+    // 動かすと、その下の窓がいつものカーソルに戻す
+    void hideCursorUntilMoved();
 }

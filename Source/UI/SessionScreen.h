@@ -375,7 +375,7 @@ private:
     RightClickableButton metronomeStartButton;
     bool isMetronomeStartActive() const;          // 開始位置を使うか (指定があり、動画モード)
     double getMetronomeOffsetSeconds() const;     // メトロノームの拍の起点 = 拍の位置 (+ 開始位置)
-    void setMetronomeStartHere();
+    void setMetronomeStartHere (double seconds = -1.0);   // seconds: その位置 (マイナスなら今の位置)
     void clearMetronomeStart();
     void updateMetronomeStart();                  // エンジンへの起点・ボタン・再生バーの目印を合わせる (タイマーから)
 
@@ -387,7 +387,7 @@ private:
     // 音源の開始・終了位置 (作者の指示: 音源のカードの、リンクの下の2つのボタン。メトロノームの「ここから開始」と同じ動き)。
     // この間だけ再生する: 頭へ・カウントダウンからの再生は開始位置から、終了位置に来たら曲の終わりとして止まる
     RightClickableButton sourceStartButton, sourceEndButton;
-    void setSourceRangeHere (bool start);
+    void setSourceRangeHere (bool start, double seconds = -1.0);   // seconds: その位置 (マイナスなら今の位置)
     void clearSourceRange (bool start);
     void updateSourceRangeButtons();
 

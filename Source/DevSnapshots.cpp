@@ -119,11 +119,15 @@ juce::String DevSnapshots::renderAll (const juce::File& folder)
             }
 
             auto empty = setlistStore.createNew();   // 空のセットリスト (先に保存し、見本のほうを一覧の先頭にする)
+            empty.name = "10月ライブ"_jp;            // ライブが終わったもの (「過去のセトリ」の下に薄く出る)
+            empty.liveDate = "2026-10-12";
+            empty.finished = true;
             setlistStore.save (empty);
             juce::Thread::sleep (20);
 
             auto setlist = setlistStore.createNew();
             setlist.name = "11月ライブ"_jp;
+            setlist.liveDate = "2026-11-28";
             setlist.addEntry (saved[1].sessionId).overrides.speed = 0.8;
             setlist.addEntry (saved[0].sessionId);
             setlist.addEntry ("missing-session");   // リンク切れ

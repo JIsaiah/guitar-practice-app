@@ -43,6 +43,15 @@ struct Setlist
     juce::String setlistId;
     juce::String name;
     juce::Time createdAt, updatedAt;
+    // ライブの日 (作者の指示。決めなくてもよい)。"2026-11-21" の形。空なら決めていない
+    juce::String liveDate;
+    // ライブが終わった (作者の指示: 一覧では薄くして、「過去のセトリ」として下に並べる)
+    bool finished = false;
+
+    // ライブの日を、画面に出す形 ("2026/11/21") にする・入力 ("2026/11/21" や "2026-11-21") から読む (読めなければ空)
+    static juce::String formatLiveDate (const juce::String& isoDate);
+    // 「月/日」だけなら defaultYear の年 (0 なら、今年) にする
+    static juce::String parseLiveDate (const juce::String& text, int defaultYear = 0);
     std::vector<SetlistEntry> entries;
 
     //==== 編集 ====
