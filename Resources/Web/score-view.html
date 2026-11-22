@@ -166,13 +166,15 @@
       for (const t of s.tracks)
         if (isGuitar(t) && t.playbackInfo) t.playbackInfo.program = 29;
       applyLayout();   // 描く前に、小節の幅の決め方を設定する
-      // 演奏する順の小節と、それぞれが何拍目から始まるかを求めておく (テンポは一定とみなす。設計書 3.1 の「一定テンポ」)
+      // 演奏する順の小節と、それぞれが何拍目から始まるか、テンポの変化 (tempoChanges) を求めておく
       computePlayOrder(s);
       send("loaded", {
         title: s.title || "", artist: s.artist || "", tempo: s.tempo || 0,
         bars: barStartBeats,   // 演奏する順の各小節が、曲の頭から何拍目で始まるか (アプリがループを小節の頭に合わせるのに使う)
         barIndex: barIndex,    // 演奏する順の各小節が、楽譜の何番目の小節か (アプリが小節の番号を出すのに使う)
         endBeats: scoreEndBeats,
+        // テンポの変化 [拍, BPM] (演奏する順。アプリが、拍と秒を行き来するのに使う。作者の指示: 途中のテンポの変化に合わせる)
+        tempos: tempoChanges.map(function (c) { return [c.beat, c.bpm]; }),
         // 各小節の拍子 [分子, 分母] (メトロノームのビジュアライザーのドットの数)
         sigs: barIndex.map(function (i) { const mb = s.masterBars[i]; return [mb.timeSignatureNumerator, mb.timeSignatureDenominator]; }),
         tuning: trackTuning(s, currentTrack),   // 弦の音の高さ (MIDI。1弦から)。名前はアプリが付ける
@@ -564,6 +566,14 @@
   // 位置は MIDI の単位 (4分音符 = 960) なので、960 で割って拍にする。うまくいかなければ、楽譜の順に並べる
   function computePlayOrder(s) {
     barStartBeats = []; barIndex = []; scoreEndBeats = 0;
+    tempoChanges = [{ beat: 0, bpm: s.tempo > 0 ? s.tempo : 120 }];
+    const addTempos = function (masterBar, startBeat, lengthBeats) {
+      // 小節の中のテンポの変化 (alphaTab の tempoAutomations。ratioPosition は小節の中の位置 0〜1)
+      const autos = masterBar && masterBar.tempoAutomations ? masterBar.tempoAutomations : [];
+      for (const a of autos)
+        if (a && a.value > 0)
+          tempoChanges.push({ beat: startBeat + (a.ratioPosition || 0) * lengthBeats, bpm: a.value });
+    };
     try {
       const midiFile = new alphaTab.midi.MidiFile();
       const generator = new alphaTab.midi.MidiFileGenerator(s, api.settings, new alphaTab.midi.AlphaSynthMidiFileHandler(midiFile));
@@ -572,19 +582,64 @@
         barStartBeats.push(m.start / 960);
         barIndex.push(m.masterBar.index);
         scoreEndBeats = Math.max(scoreEndBeats, m.end / 960);
+        addTempos(m.masterBar, m.start / 960, (m.end - m.start) / 960);
       }
     } catch (e) {
       barStartBeats = []; barIndex = [];
     }
+    normaliseTempos();
     if (barStartBeats.length > 0) return;
 
     let beats = 0;
+    tempoChanges = [{ beat: 0, bpm: s.tempo > 0 ? s.tempo : 120 }];
     s.masterBars.forEach(function (mb, i) {
       barStartBeats.push(beats);
       barIndex.push(i);
-      beats += mb.timeSignatureNumerator * 4 / mb.timeSignatureDenominator;
+      const length = mb.timeSignatureNumerator * 4 / mb.timeSignatureDenominator;
+      addTempos(mb, beats, length);
+      beats += length;
     });
     scoreEndBeats = beats;
+    normaliseTempos();
+  }
+
+  // ---- テンポの変化 (作者の指示: 曲の途中のテンポの変化に合わせる) ----
+  // アプリの TempoMap (Model/TempoMap.h) と同じ計算。アプリの BPM は「曲の最初のテンポ」で、途中のテンポも同じ割合で変える
+  let tempoChanges = [];   // [{ beat, bpm }] 拍の順
+  function normaliseTempos() {
+    tempoChanges.sort(function (a, b) { return a.beat - b.beat; });
+    const merged = [];
+    for (const c of tempoChanges) {
+      if (!(c.bpm > 0)) continue;
+      const last = merged[merged.length - 1];
+      if (last && Math.abs(last.beat - c.beat) < 1e-9) last.bpm = c.bpm;
+      else if (!last || Math.abs(last.bpm - c.bpm) > 1e-9) merged.push({ beat: c.beat, bpm: c.bpm });
+    }
+    if (merged.length > 0) merged[0].beat = 0;
+    tempoChanges = merged;
+  }
+  function tempoIsConstant() { return pdfDoc || tempoChanges.length < 2; }
+  // 秒 (起点から) → 拍。bpm はアプリの BPM (曲の最初のテンポ)
+  function beatsAt(seconds, bpm) {
+    if (!(bpm > 0)) return 0;
+    if (tempoIsConstant() || seconds <= 0) return seconds * bpm / 60;
+    const scale = bpm / tempoChanges[0].bpm;
+    let elapsed = 0;
+    for (let i = 0; i < tempoChanges.length; i++) {
+      const rate = tempoChanges[i].bpm * scale / 60;
+      const last = i + 1 === tempoChanges.length;
+      const segment = last ? 0 : (tempoChanges[i + 1].beat - tempoChanges[i].beat) / rate;
+      if (last || seconds < elapsed + segment) return tempoChanges[i].beat + (seconds - elapsed) * rate;
+      elapsed += segment;
+    }
+    return 0;
+  }
+  // その拍のテンポ (アプリの BPM の割合を掛けたもの)
+  function bpmAt(beats, bpm) {
+    if (tempoIsConstant()) return bpm;
+    let tempo = tempoChanges[0].bpm;
+    for (const c of tempoChanges) if (c.beat <= beats) tempo = c.bpm;
+    return tempo * bpm / tempoChanges[0].bpm;
   }
 
   // 当て直しの途中で、alphaTab が MIDI の知らせ (midiLoaded) を出すことがある。その中でまた当て直すと終わらないので、入れ子にしない
@@ -633,7 +688,7 @@
   function syncMidi(seconds, bpm, offset, rate, playing) {
     if (!api || !score || !midiReady || !api.isReadyForPlayback) return;
 
-    const beats = (seconds - offset) * bpm / 60;
+    const beats = beatsAt(seconds - offset, bpm);   // テンポの変化に合わせる
     const anyTrack = midiTracks.some(function (t) { return !t.muted && t.volume > 0; });
     const playingNow = api.playerState === 1;   // alphaTab の PlayerState.Playing
 
@@ -642,7 +697,8 @@
       return;
     }
 
-    const scoreTempo = score.tempo > 0 ? score.tempo : bpm;
+    // alphaTab は、タブ譜のテンポの変化のとおりに鳴らす。こちらは「アプリの BPM ÷ 曲の最初のテンポ」の割合だけ速さを変える
+    const scoreTempo = tempoChanges.length > 0 ? tempoChanges[0].bpm : (score.tempo > 0 ? score.tempo : bpm);
     const speed = Math.max(0.1, rate * bpm / scoreTempo);
     const tick = beats * 960;   // MIDI の位置 (4分音符 = 960)
 
@@ -663,7 +719,7 @@
     }
 
     // ずれ (秒)。プラス = MIDI が先に進んでいる。alphaTab の位置の知らせは飛び飛びなので、ならして見る
-    const drift = (api.tickPosition - tick) / 960 * 60 / bpm;
+    const drift = (api.tickPosition - tick) / 960 * 60 / bpmAt(beats, bpm);
     midiDrift = midiDrift * 0.7 + drift * 0.3;
 
     const now = performance.now();
@@ -715,7 +771,7 @@
     if (pdfDoc) { setPdfPosition(seconds, bpm, offset); return; }
     if (!api || !score || !api.renderer || !api.renderer.boundsLookup || barStartBeats.length === 0) return;
 
-    const beats = Math.max(0, (seconds - offset) * bpm / 60);
+    const beats = Math.max(0, beatsAt(seconds - offset, bpm));   // テンポの変化に合わせる
     let index = 0;
     while (index + 1 < barStartBeats.length && barStartBeats[index + 1] <= beats) index++;
 
@@ -789,7 +845,7 @@
     // 繰り返しのある曲では、同じ小節を何度も弾く。今の位置にいちばん近い回を選ぶ
     // (2回目を弾いているときにクリックしたら、2回目のその小節へ)
     const clicked = beat.voice.bar.masterBar.index;
-    const nowBeats = Math.max(0, (currentSeconds(performance.now()) - timing.offset) * timing.bpm / 60);
+    const nowBeats = Math.max(0, beatsAt(currentSeconds(performance.now()) - timing.offset, timing.bpm));
     let best = -1;
     for (let i = 0; i < barIndex.length; i++)
       if (barIndex[i] === clicked && (best < 0 || Math.abs(barStartBeats[i] - nowBeats) < Math.abs(barStartBeats[best] - nowBeats)))

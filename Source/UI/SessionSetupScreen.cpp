@@ -1,4 +1,5 @@
 #include "SessionSetupScreen.h"
+#include "AppDialog.h"
 #include "../Model/YouTubeUrl.h"
 #include "../Text.h"
 
@@ -106,7 +107,7 @@ void SessionSetupScreen::pasteYouTubeUrl()
 
     if (! looksLikeYouTubeUrl (text))
     {
-        juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::NoIcon,
+        AppDialog::showMessageBoxAsync (juce::MessageBoxIconType::NoIcon,
                                                 "YouTube の URL ではありません"_jp,
                                                 "YouTube の動画ページの URL をコピーしてから、もう一度押してください。"_jp);
         return;

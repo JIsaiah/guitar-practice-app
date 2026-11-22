@@ -30,6 +30,18 @@ public:
     juce::Rectangle<int> getListArea() const { return list.getBounds(); }
     void scrollToItem (int index) { list.scrollToEnsureRowIsOnscreen (index); }
     void chooseItem (int index) { list.selectRow (index); }   // クリックと同じ (絞り込む)
+
+    // キーボード操作のハイライト (作者の指示: 枠をやめ、後ろのハイライトだけで今の場所を見せる)。
+    // -2: キーボードで操作していない (選んでいるフォルダを塗る)。-1: 操作中だがフォルダの上にいない (どれも塗らない)。
+    // 0 以上: そのフォルダだけを塗る (選んでいるフォルダの塗りは消す)
+    void setKeyboardHighlight (int index)
+    {
+        if (index != keyboardIndex)
+        {
+            keyboardIndex = index;
+            list.repaint();
+        }
+    }
     juce::Button& getNewButton() noexcept { return newButton; }
 
 private:
@@ -45,4 +57,5 @@ private:
     juce::ListBox list { {}, this };
     IconButton newButton { Icons::plus };   // 「＋」(新しいフォルダ)
     bool updating = false;
+    int keyboardIndex = -2;   // setKeyboardHighlight
 };

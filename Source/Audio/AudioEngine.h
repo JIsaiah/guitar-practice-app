@@ -9,6 +9,7 @@
 #include "NamTone.h"
 #include "NoiseGate.h"
 #include "PluginTone.h"
+#include "../Model/TempoMap.h"
 
 // 音声処理の中心 (設計書 5.1)
 //
@@ -57,6 +58,8 @@ public:
     void setBpm (double bpm) noexcept { metronomeBpm.store (juce::jlimit (20.0, 400.0, bpm)); }
     // 1小節の拍の数 (1拍目を強く鳴らす)。手で決めた拍子 (例: 8/9 → 8)。ふつうは 4
     void setMetronomeBeatsPerBar (int beats) noexcept { metronomeBeatsPerBar.store (juce::jlimit (1, 64, beats)); }
+    // タブ譜のテンポの変化 (メッセージスレッドから)。メトロノームの拍を、これに合わせて数える (空なら BPM で一定)
+    void setTempoMap (const TempoMap& map);
     void setSyncOffsetSeconds (double seconds) noexcept { syncOffsetSeconds.store (seconds); }
 
     // メトロノームが拍を数えている時計 (秒。拍の位置のずらしを引いたもの)。ビジュアライザー用。
@@ -286,6 +289,8 @@ private:
     std::atomic<bool> metronomeEnabled { false }, metronomeResetRequested { false }, metronomeSolo { false };
     std::atomic<double> metronomeBpm { 120.0 };
     std::atomic<int> metronomeBeatsPerBar { 4 };
+    std::shared_ptr<TempoMap> ownedTempoMap;                     // メッセージスレッドだけが触る
+    std::atomic<const TempoMap*> currentTempoMap { nullptr };    // オーディオスレッドが読む
     std::atomic<double> syncOffsetSeconds { 0.0 };
     std::atomic<double> beatClockSeconds { 0.0 };   // オーディオスレッドが1ブロックごとに書く
     std::atomic<bool> beatClockRunning { false };

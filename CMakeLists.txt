@@ -87,6 +87,7 @@ target_sources(GuitarPractice PRIVATE
     Source/TimingLog.cpp
     Source/AppSettings.cpp
     Source/UI/SettingsPanel.cpp
+    Source/UI/AppDialog.cpp
     Source/Web/YouTubePlayer.cpp
     Source/Web/ScoreViewer.cpp
     Source/Web/GpScoreEdit.cpp
@@ -217,6 +218,7 @@ target_sources(GuitarPracticeTests PRIVATE
     Tests/SessionFileNameTests.cpp
     Tests/PdfScoreFilesTests.cpp
     Tests/SourceRangeTests.cpp
+    Tests/TempoMapTests.cpp
     Tests/TestMain.cpp
     Tests/SetlistTests.cpp
     Tests/PlaybackSettingsResolverTests.cpp

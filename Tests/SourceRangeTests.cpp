@@ -60,12 +60,12 @@ public:
 
             SetlistEntry::Overrides overrides;
             overrides.sourceStartSec = 2.0;
-            overrides.sourceEndSec = 0.0;   // 終了位置は指定なし
+            overrides.sourceEndSec = 0.0;   // 終了位置は指定なし → セッションの終了位置に従う (作者の指示)
 
             PlaybackSettingsResolver resolver (overrides);
             auto working = resolver.makeWorkingCopy (stored);
             expectEquals (working.sourceStartMs, 2000);
-            expectEquals (working.sourceEndMs, 0);
+            expectEquals (working.sourceEndMs, 5000);
 
             working.sourceEndMs = 9000;   // セットリストで弾いているときに変えた
             const auto split = resolver.split (working);
@@ -108,6 +108,22 @@ public:
             v.getDynamicObject()->removeProperty ("finished");
             const auto oldLoaded = Setlist::fromVar (v);
             expect (oldLoaded.has_value() && oldLoaded->liveDate.isEmpty() && ! oldLoaded->finished);
+        }
+
+        beginTest ("Preset names and part names are saved");
+        {
+            Session s;
+            s.toneSlots[1].tonePresetId = "clean-01";
+            s.toneSlots[1].name = "ソロ用";
+            s.leadName = "ギター1";
+            s.backingName = "ギター2";
+            const auto loaded = Session::fromVar (s.toVar());
+            expect (loaded.toneSlots[1].name == s.toneSlots[1].name);
+            expect (loaded.leadName == s.leadName && loaded.backingName == s.backingName);
+
+            auto v = s.toVar();   // 長すぎる名前 (手で書き換えられたファイル) は 16 字までにする
+            v["score"].getDynamicObject()->setProperty ("lead_name", juce::String::repeatedString ("a", 40));
+            expectEquals (Session::fromVar (v).leadName.length(), Session::maxPartNameLength);
         }
 
         beginTest ("Adding a session to a setlist copies its start/end");

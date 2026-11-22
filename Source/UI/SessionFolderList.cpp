@@ -35,7 +35,8 @@ void SessionFolderList::paintListBoxItem (int row, juce::Graphics& g, int width,
         return;
 
     const auto& item = items[(size_t) row];
-    if (selected)
+    const bool highlighted = keyboardIndex == -2 ? selected : row == keyboardIndex;   // キーボードで操作中は、その場所だけ
+    if (highlighted)
         AppLookAndFeel::fillListHighlight (g, { 0, 0, width, height }, list.findColour (ThemeColourIds::listSelection));
 
     const auto textColour = list.findColour (juce::ListBox::textColourId);

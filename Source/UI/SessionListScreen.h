@@ -2,6 +2,7 @@
 
 #include <juce_gui_basics/juce_gui_basics.h>
 #include "../AppSettings.h"
+#include "AppDialog.h"
 #include "../Library/SessionLibrary.h"
 #include "../Library/SetlistStore.h"
 #include "../Theme/MetalLogo/FixedTextButton.h"
@@ -150,6 +151,7 @@ private:
     std::optional<juce::Rectangle<float>> findNavTargetBounds();   // 今選んでいる場所 (無くなっていれば無し)
     void stepNavigationRing (double nowMs);   // 画面の書き換えの合図ごとに、経過時間から枠の場所を決める
     void paintNavigationRing (juce::Graphics& g);
+    void updateKeyboardHighlights();   // キーボード操作の場所に合わせて、一覧・フォルダの塗りを変える
     void revealInViewport (juce::Viewport& viewport, juce::Rectangle<int> boundsInScreen);
     void keepKeyboardFocus();    // キーの入力を、中のボタンや一覧ではなくこの画面で受け取る
 
@@ -189,6 +191,6 @@ private:
         SessionListScreen& owner;
     };
     NavMouseWatcher navMouseWatcher { *this };
-    std::unique_ptr<juce::AlertWindow> detailsWindow;   // 「詳細を編集…」のダイアログ
-    std::unique_ptr<juce::AlertWindow> folderNameWindow;   // フォルダの名前を入れるダイアログ
+    std::unique_ptr<AppDialog> detailsWindow;   // 「詳細を編集…」のダイアログ
+    std::unique_ptr<AppDialog> folderNameWindow;   // フォルダの名前を入れるダイアログ
 };

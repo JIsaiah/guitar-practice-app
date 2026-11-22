@@ -317,6 +317,16 @@ void AudioEngine::startPendingPluginLoad()
     });
 }
 
+void AudioEngine::setTempoMap (const TempoMap& map)
+{
+    // 古いものは、オーディオスレッドが使い終わってから解放する (音源・音色と同じ)
+    if (ownedTempoMap != nullptr)
+        retired.push_back ({ ownedTempoMap, callbackCount.load() });
+
+    ownedTempoMap = map.isConstant() ? nullptr : std::make_shared<TempoMap> (map);
+    currentTempoMap.store (ownedTempoMap.get());
+}
+
 void AudioEngine::clearPluginTone (int slot)
 {
     loadPluginToneAsync (slot, {}, {}, nullptr);
@@ -739,6 +749,7 @@ void AudioEngine::audioDeviceIOCallbackWithContext (const float* const* inputs, 
     const auto gainMetronome = metronomeGain.load();
     const bool metronomeOn = metronomeEnabled.load();
     const double bpm = metronomeBpm.load();
+    const auto* tempoMap = currentTempoMap.load();   // タブ譜のテンポの変化 (無ければ一定)
     const auto beatsPerBar = (juce::int64) juce::jmax (1, metronomeBeatsPerBar.load());
     const double offset = syncOffsetSeconds.load();
 
@@ -854,7 +865,7 @@ void AudioEngine::audioDeviceIOCallbackWithContext (const float* const* inputs, 
         // 「曲に合わせる」(metronomeOn) は再生中だけ。「単体」は「曲に合わせる」と独立して鳴る (作者の指示)
         if ((metronomeOn && (sourcePlaying || externalRunning)) || soloRunning)
         {
-            const auto beat = (juce::int64) std::floor (musicTime * bpm / 60.0);
+            const auto beat = (juce::int64) std::floor (tempoMap != nullptr ? tempoMap->beatsAt (musicTime, bpm) : musicTime * bpm / 60.0);
 
             // 1拍進んだときだけ鳴らす (シークやループで飛んだときは鳴らさない)
             if (musicTime >= 0.0 && beat == lastBeat + 1)

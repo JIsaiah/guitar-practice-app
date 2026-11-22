@@ -4,6 +4,7 @@
 #include "../Theme/Palette.h"
 #include "../Model/ScoreParts.h"
 #include "../Model/MusicInfo.h"
+#include "../Model/TempoMap.h"
 #include "GpScoreEdit.h"
 
 // タブ譜の表示 (設計書 #5、PoC-3)
@@ -68,6 +69,9 @@ public:
     int getBarNumber (int index) const;
     // 曲の終わり (最後の小節の終わり) が、曲の頭から何拍目か。タブ譜がなければ 0
     double getScoreEndBeats() const noexcept { return scoreEndBeats; }
+    // タブ譜のテンポの変化 (演奏する順。作者の指示: 曲の途中のテンポの変化に合わせる)。変わったら番号が増える
+    const TempoMap& getTempoMap() const noexcept { return tempoMap; }
+    int getTempoMapVersion() const noexcept { return tempoMapVersion; }
 
     // タブ譜に書かれている曲の情報 (読み込めたあと)。無ければ空
     const juce::String& getScoreTitle() const noexcept { return scoreTitle; }
@@ -124,6 +128,8 @@ private:
     std::vector<MusicInfo::TimeSignature> barSignatures;
     std::vector<int> barNumbers;     // 演奏する順の小節ごとの、楽譜の小節の番号 (1 から)
     double scoreEndBeats = 0.0;
+    TempoMap tempoMap;
+    int tempoMapVersion = 0;
     juce::String scoreTitle, scoreArtist, scoreTuning;
     std::vector<ScoreParts::Track> tracks;
     double lastSentSeconds = -1.0, lastSentBpm = 0.0, lastSentOffset = 0.0, lastSentRate = 1.0, lastSentAtMs = 0.0;

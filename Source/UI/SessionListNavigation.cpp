@@ -311,6 +311,7 @@ void SessionListScreen::selectNavTarget (const NavTarget& target)
 
     // 画面の書き換えの合図 (60 回/秒・144 回/秒など、画面に合わせた間隔) ごとに、経過時間から枠の場所を決める
     ensureFrameVBlank();
+    updateKeyboardHighlights();
     stepNavigationRing (now);
     repaint (navRing.getSmallestIntegerContainer().expanded (8));   // 出したばかりのとき (場所が変わらなくても描く)
 }
@@ -325,6 +326,7 @@ void SessionListScreen::hideNavigation()
 
     navVisible = false;
     navId = {};   // 次は、マウスで選んだ行から始める
+    updateKeyboardHighlights();   // 選んでいるフォルダ・行の塗りを戻す
     // 画面の書き換えの合図 (frameVBlank) は残しておく (合図の中から呼ばれることがあり、そこで消すと危ないため。枠が無い間は何もしない)
 }
 
@@ -367,13 +369,31 @@ void SessionListScreen::paintNavigationRing (juce::Graphics& g)
     if (! navClip.isEmpty())
         g.reduceClipRegion (navClip.expanded (4.0f).getSmallestIntegerContainer());
 
-    // アクセントの色の細い枠と、外側のうっすらした光 (作者の指示で細くした)
-    const auto accent = findColour (ThemeColourIds::accent).withMultipliedAlpha (navAlpha);
-    const auto ring = navRing.expanded (2.0f);
-    g.setColour (accent.withMultipliedAlpha (0.18f));
-    g.drawRoundedRectangle (ring.expanded (1.5f), 9.5f, 2.0f);
-    g.setColour (accent);
-    g.drawRoundedRectangle (ring, 8.0f, 1.5f);
+    // 枠は描かない (作者の指示: 後ろのハイライトだけにする)。
+    // セッションの行・フォルダは、一覧が自分で塗る (文字の後ろに。updateKeyboardHighlights)。
+    // それ以外 (タブ・ボタン・セットリストのカードなど) は、一覧の選んだ行と同じ色の、薄い塗りを重ねる
+    if (navId.startsWith ("row:") || (navId.startsWith ("folder:") && navId != "folder:new"))
+        return;
+
+    AppLookAndFeel::fillListHighlight (g, navRing.getSmallestIntegerContainer(),
+                                       findColour (ThemeColourIds::listSelection).withMultipliedAlpha (0.55f * navAlpha));
+}
+
+void SessionListScreen::updateKeyboardHighlights()
+{
+    // フォルダ: キーボードで操作していない → 選んでいるフォルダを塗る。操作中 → その場所のフォルダだけ (無ければどれも塗らない)
+    int folderIndex = -2;
+    if (navVisible)
+    {
+        folderIndex = -1;
+        for (int i = 0; i < folderList.getNumItems(); ++i)
+            if (navId == "folder:" + folderList.getItemKey (i))
+                folderIndex = i;
+    }
+    folderList.setKeyboardHighlight (folderIndex);
+
+    // セッションの行: paintListBoxItem が navVisible・navId を見て塗る
+    listBox.repaint();
 }
 
 void SessionListScreen::showKeyboardNavigationForSnapshot()

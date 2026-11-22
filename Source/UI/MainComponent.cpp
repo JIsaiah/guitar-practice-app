@@ -1,4 +1,5 @@
 #include "MainComponent.h"
+#include "AppDialog.h"
 #include <juce_audio_utils/juce_audio_utils.h>
 #include "../Text.h"
 #include "../Audio/PluginLocator.h"
@@ -22,6 +23,14 @@ MainComponent::MainComponent (AudioEngine& e, SessionLibrary& l, SetlistStore& s
     {
         if (listShownAtMs > 0.0)
             TimingLog::mark ("2. 一覧の表示 → WebView (YouTube) の準備完了"_jp, listShownAtMs);
+    };
+
+    // アプリの中に重ねた画面 (確認・入力・設定) を開いた・閉じたら、練習画面のタブ譜・動画・プラグインの画面を隠す・出す
+    // (それらは Windows の別の窓として、アプリの部品の上に描かれるため)
+    AppOverlay::onOpenCountChanged = [this]
+    {
+        if (auto* screen = dynamic_cast<SessionScreen*> (currentScreen.get()))
+            screen->refreshNativeViews();
     };
 
     setSize (1280, 800);
@@ -57,6 +66,7 @@ MainComponent::~MainComponent()
     // 画面を先に消す。練習画面のデストラクタは、YouTube のプレイヤーやタブ譜の WebView (このクラスのメンバー) を使って
     // 後片付けをする。メンバーは宣言と逆の順に消えるので、何もしないとプレイヤーが先に消え、
     // アプリを閉じるときに落ちる (クラッシュダンプで確認)
+    AppOverlay::onOpenCountChanged = nullptr;
     currentScreen.reset();
 }
 
@@ -112,7 +122,7 @@ void MainComponent::openSessionLater (std::function<std::optional<Session> (Main
         auto session = load (m);
         if (! session.has_value())
         {
-            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::NoIcon,
+            AppDialog::showMessageBoxAsync (juce::MessageBoxIconType::NoIcon,
                                                     "開けませんでした"_jp,
                                                     "セッションファイルが壊れているか、見つかりません。"_jp);
             return;
@@ -165,7 +175,7 @@ void MainComponent::checkBeforeOpening (Session session, std::function<void (Ses
                        .withAssociatedComponent (this);
 
     // 3ボタンの戻り値: 1番目 = 1、2番目 = 2、3番目 = 0
-    juce::AlertWindow::showAsync (options, [safe = juce::Component::SafePointer (this), session, folders,
+    AppDialog::showAsync (options, [safe = juce::Component::SafePointer (this), session, folders,
                                             proceed = std::move (proceed)] (int result)
     {
         if (safe == nullptr || result == 0)
@@ -230,7 +240,7 @@ void MainComponent::openSetlistEntryLater (const juce::String& setlistId, int en
             }
         }
 
-        juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::NoIcon,
+        AppDialog::showMessageBoxAsync (juce::MessageBoxIconType::NoIcon,
                                                 "開けませんでした"_jp,
                                                 "セットリストか、その曲のセッションが見つかりません。"_jp);
     });
@@ -347,7 +357,7 @@ void MainComponent::showSetup()
             // 作った時点で保存し、一覧に出るようにする (作ってそのまま練習画面を開くので、最後に開いた日時も今)
             session.lastOpened = juce::Time::getCurrentTime();
             if (! m.store.save (session))
-                juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::NoIcon,
+                AppDialog::showMessageBoxAsync (juce::MessageBoxIconType::NoIcon,
                                                         "保存できませんでした"_jp,
                                                         m.store.getDirectory().getFullPathName());
             m.showSession (std::move (session));
@@ -399,8 +409,8 @@ void MainComponent::showSession (Session session, SessionOpenContext context, Pl
 
 void MainComponent::openSettings()
 {
-    // 上: 一般 (テーマ、戻る・進むの秒数、ホイールの量)、下: 詳細設定 (オーディオ)
-    juce::DialogWindow::LaunchOptions options;
+    // 上: 一般 (テーマ、戻る・進むの秒数、ホイールの量)、下: 詳細設定 (オーディオ)。
+    // アプリの中に重ねて出す (作者の指示: 別のウィンドウで開かない。AppPanelOverlay)
     // 設定画面は縦に長いので、スクロールできる枠に入れる
     auto* panel = new SettingsPanel (settings, theme, engine.getDeviceManager());
     panel->onOpenLogoTuner = [this] { openLogoTuner(); };
@@ -410,26 +420,16 @@ void MainComponent::openSettings()
     viewport->setViewedComponent (panel, true);
     viewport->setScrollBarsShown (true, false);
     viewport->setSize (panel->getWidth() + viewport->getScrollBarThickness(), juce::jmin (panel->getHeight(), 760));
-    options.content.setOwned (viewport);
-    options.dialogTitle = "設定"_jp;
-    options.dialogBackgroundColour = getLookAndFeel().findColour (juce::ResizableWindow::backgroundColourId);
-    options.useNativeTitleBar = true;
-    options.resizable = false;
-    options.componentToCentreAround = this;
-    options.launchAsync();
+    auto* overlay = new AppPanelOverlay ("設定"_jp, viewport, viewport->getWidth(), viewport->getHeight());
+    overlay->showOver (this);   // 閉じると消える
 }
 
 void MainComponent::openDebugLog()
 {
-    // 設定画面と同じく、別のウィンドウ (閉じると消える)
-    juce::DialogWindow::LaunchOptions options;
-    options.content.setOwned (new DebugLogPanel());
-    options.dialogTitle = "動作ログ・クラッシュの記録"_jp;
-    options.dialogBackgroundColour = getLookAndFeel().findColour (juce::ResizableWindow::backgroundColourId);
-    options.useNativeTitleBar = true;
-    options.resizable = true;
-    options.componentToCentreAround = this;
-    options.launchAsync();
+    // 設定画面と同じく、アプリの中に重ねて出す (閉じると消える)。設定画面の上に重なる
+    auto* panel = new DebugLogPanel();
+    auto* overlay = new AppPanelOverlay ("動作ログ・クラッシュの記録"_jp, panel, juce::jmax (700, panel->getWidth()), juce::jmax (500, panel->getHeight()));
+    overlay->showOver (this);
 }
 
 void MainComponent::openLogoTuner()

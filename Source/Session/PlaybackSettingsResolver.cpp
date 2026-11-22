@@ -22,8 +22,9 @@ Session PlaybackSettingsResolver::makeWorkingCopy (const Session& stored, bool s
     working.loopStartMs = juce::roundToInt (overrides->loopStartSec * 1000.0);
     working.loopEndMs = juce::roundToInt (overrides->loopEndSec * 1000.0);
     working.loopEnabled = overrides->loopEnabled;
-    working.sourceStartMs = juce::roundToInt (overrides->sourceStartSec * 1000.0);
-    working.sourceEndMs = juce::roundToInt (overrides->sourceEndSec * 1000.0);
+    // 曲順の専用の開始・終了位置。決めていなければ (0)、セッションの位置に従う (作者の指示: 通し再生でも音源の開始・終了位置に従う)
+    working.sourceStartMs = overrides->sourceStartSec > 0.0 ? juce::roundToInt (overrides->sourceStartSec * 1000.0) : stored.sourceStartMs;
+    working.sourceEndMs = overrides->sourceEndSec > 0.0 ? juce::roundToInt (overrides->sourceEndSec * 1000.0) : stored.sourceEndMs;
 
     loopSuspended = suspendLoop && overrides->loopEnabled;
     overrideLoopEnabled = overrides->loopEnabled;

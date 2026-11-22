@@ -1,4 +1,5 @@
 #include "SessionListScreen.h"
+#include "AppDialog.h"
 #include "../Text.h"
 #include "../TimingLog.h"
 
@@ -335,7 +336,7 @@ void SessionListScreen::updateEntry (const Session& updated)
 void SessionListScreen::askFolderName (const juce::String& title, const juce::String& initial,
                                        std::function<void (juce::String)> onOk)
 {
-    folderNameWindow = std::make_unique<juce::AlertWindow> (title, juce::String(), juce::MessageBoxIconType::NoIcon, this);
+    folderNameWindow = std::make_unique<AppDialog> (title, juce::String(), juce::MessageBoxIconType::NoIcon, this);
     folderNameWindow->addTextEditor ("name", initial, "フォルダの名前"_jp);
     folderNameWindow->addButton ("OK", 1, juce::KeyPress (juce::KeyPress::returnKey));
     folderNameWindow->addButton ("キャンセル"_jp, 0, juce::KeyPress (juce::KeyPress::escapeKey));
@@ -361,7 +362,7 @@ void SessionListScreen::createFolder (std::function<void (juce::String)> then)
         auto names = getFolderNames();
         if (const auto problem = SessionFolders::checkName (name, names); problem.isNotEmpty())
         {
-            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::NoIcon, "フォルダを作れませんでした"_jp, problem);
+            AppDialog::showMessageBoxAsync (juce::MessageBoxIconType::NoIcon, "フォルダを作れませんでした"_jp, problem);
             return;
         }
 
@@ -392,7 +393,7 @@ void SessionListScreen::renameFolder (const juce::String& oldName)
         names.removeString (oldName);
         if (const auto problem = SessionFolders::checkName (newName, names); problem.isNotEmpty())
         {
-            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::NoIcon, "名前を変えられませんでした"_jp, problem);
+            AppDialog::showMessageBoxAsync (juce::MessageBoxIconType::NoIcon, "名前を変えられませんでした"_jp, problem);
             return;
         }
 
@@ -431,7 +432,7 @@ void SessionListScreen::deleteFolder (const juce::String& name)
                        .withButton ("キャンセル"_jp)
                        .withAssociatedComponent (this);
 
-    juce::AlertWindow::showAsync (options, [safe = juce::Component::SafePointer (this), name] (int result)
+    AppDialog::showAsync (options, [safe = juce::Component::SafePointer (this), name] (int result)
     {
         if (safe == nullptr || result != 1)
             return;
@@ -520,7 +521,7 @@ void SessionListScreen::deleteSelected()
                        .withButton ("キャンセル"_jp)
                        .withAssociatedComponent (this);
 
-    juce::AlertWindow::showAsync (options, [safe = juce::Component::SafePointer (this), entry] (int result)
+    AppDialog::showAsync (options, [safe = juce::Component::SafePointer (this), entry] (int result)
     {
         if (safe != nullptr && result == 1)
         {
@@ -623,7 +624,9 @@ void SessionListScreen::paintListBoxItem (int row, juce::Graphics& g, int width,
     const auto& entry = entries[(size_t) row];
     const auto columns = layoutColumns (width, height);
 
-    if (selected)
+    // キーボードで操作している間は、その場所の行だけを塗る (ほかの場所にいるときは、選んでいる行も塗らない。作者の指示)
+    const bool highlighted = navVisible ? navId == "row:" + entry.id : selected;
+    if (highlighted)
         AppLookAndFeel::fillListHighlight (g, { 0, 0, width, height }, listBox.findColour (ThemeColourIds::listSelection));
 
     const auto textColour = listBox.findColour (juce::ListBox::textColourId);
@@ -756,7 +759,7 @@ void SessionListScreen::editDetails (int row)
 {
     const auto entry = entries[(size_t) row];
 
-    detailsWindow = std::make_unique<juce::AlertWindow> ("詳細を編集"_jp, juce::String(), juce::MessageBoxIconType::NoIcon, this);
+    detailsWindow = std::make_unique<AppDialog> ("詳細を編集"_jp, juce::String(), juce::MessageBoxIconType::NoIcon, this);
     detailsWindow->addTextEditor ("title", entry.title, "曲名"_jp);
     detailsWindow->addTextEditor ("artist", entry.artist, "アーティスト"_jp);
     detailsWindow->addTextEditor ("bpm", juce::String (juce::roundToInt (entry.bpm)), "BPM (20〜400)"_jp);
@@ -789,7 +792,7 @@ void SessionListScreen::editDetails (int row)
         const auto bpm = bpmText.getDoubleValue();
         if (bpm < 20.0 || bpm > 400.0)
         {
-            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::NoIcon, "BPM の値"_jp,
+            AppDialog::showMessageBoxAsync (juce::MessageBoxIconType::NoIcon, "BPM の値"_jp,
                                                     "BPM は 20〜400 の数で入力してください。変更は保存していません。"_jp);
             return;
         }
@@ -808,7 +811,7 @@ void SessionListScreen::editDetails (int row)
 
         if (! updated.has_value())
         {
-            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::NoIcon, "保存できませんでした"_jp, {});
+            AppDialog::showMessageBoxAsync (juce::MessageBoxIconType::NoIcon, "保存できませんでした"_jp, {});
             return;
         }
 

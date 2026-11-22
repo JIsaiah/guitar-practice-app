@@ -1,4 +1,5 @@
 #include "SetlistPanel.h"
+#include "AppDialog.h"
 #include "../Text.h"
 
 namespace
@@ -89,7 +90,7 @@ void SetlistPanel::createSetlist()
     auto setlist = store.createNew();
     if (! store.save (setlist))
     {
-        juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::NoIcon,
+        AppDialog::showMessageBoxAsync (juce::MessageBoxIconType::NoIcon,
                                                 "保存できませんでした"_jp,
                                                 store.getDirectory().getFullPathName());
         return;

@@ -149,7 +149,8 @@ juce::var Session::toVar() const
                                     // リード・バッキング
                                     { "lead_track", leadTrack }, { "backing_track", backingTrack },
                                     { "active", backingActive ? "backing" : "lead" },
-                                    { "lead_preset", leadPreset }, { "backing_preset", backingPreset } }) },
+                                    { "lead_preset", leadPreset }, { "backing_preset", backingPreset },
+                                    { "lead_name", leadName }, { "backing_name", backingName } }) },
         { "tone_changes", [this]
             {
                 // 音色の自動切り替え: [位置 (ms), プリセット] の並び
@@ -167,7 +168,8 @@ juce::var Session::toVar() const
                                               : makeObject ({ { "preset_id", slot.tonePresetId }, { "nam_model", slot.namModelPath },
                                                               { "ir", slot.irPath }, { "input_gain_db", slot.inputGainDb },
                                                               { "noise_gate_db", slot.noiseGateDb },
-                                                              { "plugin_path", slot.pluginPath }, { "plugin_state", slot.pluginState } }));
+                                                              { "plugin_path", slot.pluginPath }, { "plugin_state", slot.pluginState },
+                                                              { "name", slot.name } }));
                 return juce::var (slots);
             }() },
         { "tempo",    makeObject ({ { "bpm", bpm }, { "origin", toString (tempoOrigin) },
@@ -279,6 +281,8 @@ Session Session::fromVar (const juce::var& value)
     s.backingActive = getOr<juce::String> (parts["active"], "lead") == "backing";
     s.leadPreset = juce::jlimit (0, numToneSlots, getOr<int> (parts["lead_preset"], 0));
     s.backingPreset = juce::jlimit (0, numToneSlots, getOr<int> (parts["backing_preset"], 0));
+    s.leadName = getOr<juce::String> (parts["lead_name"], {}).substring (0, maxPartNameLength);
+    s.backingName = getOr<juce::String> (parts["backing_name"], {}).substring (0, maxPartNameLength);
 
     if (const auto* changes = value["tone_changes"].getArray())
         for (const auto& item : *changes)
@@ -303,6 +307,7 @@ Session Session::fromVar (const juce::var& value)
             t.noiseGateDb = getOr<double> (slot["noise_gate_db"], -90.0);
             t.pluginPath = getOr<juce::String> (slot["plugin_path"], {});
             t.pluginState = getOr<juce::String> (slot["plugin_state"], {});
+            t.name = getOr<juce::String> (slot["name"], {}).substring (0, ToneSlot::maxNameLength);
         }
 
     if (const auto* plugins = tone["vst3"].getArray(); plugins != nullptr && ! plugins->isEmpty())

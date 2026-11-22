@@ -1,4 +1,5 @@
 #include "SetlistCard.h"
+#include "AppDialog.h"
 #include "../Text.h"
 
 SetlistCard::SetlistCard (Setlist s, SessionLibrary& l, SetlistStore& st, ThemeManager& theme)
@@ -111,7 +112,7 @@ juce::Rectangle<int> SetlistCard::getAddRowArea() const
 void SetlistCard::save()
 {
     if (! store.save (setlist))
-        juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::NoIcon,
+        AppDialog::showMessageBoxAsync (juce::MessageBoxIconType::NoIcon,
                                                 "保存できませんでした"_jp,
                                                 store.getDirectory().getFullPathName());
 }
@@ -319,7 +320,7 @@ void SetlistCard::showHeaderMenu()
 void SetlistCard::rename()
 {
     // 名前の変更だけは、キーボードでの入力を使う (4.5)
-    auto* window = new juce::AlertWindow ("セットリストの名前"_jp, {}, juce::MessageBoxIconType::NoIcon, this);
+    auto* window = new AppDialog ("セットリストの名前"_jp, {}, juce::MessageBoxIconType::NoIcon, this);
     window->addTextEditor ("name", setlist.name);
     window->addButton ("OK", 1, juce::KeyPress (juce::KeyPress::returnKey));
     window->addButton ("キャンセル"_jp, 0, juce::KeyPress (juce::KeyPress::escapeKey));
@@ -476,7 +477,7 @@ void SetlistCard::requestDelete()
                        .withButton ("キャンセル"_jp)
                        .withAssociatedComponent (this);
 
-    juce::AlertWindow::showAsync (options, [safe = juce::Component::SafePointer (this)] (int result)
+    AppDialog::showAsync (options, [safe = juce::Component::SafePointer (this)] (int result)
     {
         if (safe == nullptr || result != 1)
             return;

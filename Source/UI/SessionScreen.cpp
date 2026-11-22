@@ -1,4 +1,5 @@
 #include "SessionScreen.h"
+#include "AppDialog.h"
 #include "../Platform/MouseState.h"
 #include "../Model/TonePresets.h"
 #include "../Model/YouTubeUrl.h"
@@ -82,7 +83,7 @@ SessionScreen::SessionScreen (AudioEngine& e, SessionStore& s, ThemeManager& t, 
     {
         b->setClickingTogglesState (true);
         b->setRadioGroupId (2);
-        b->onRightClick = [this, b] { if (session.isPdfScore()) showPdfPartMenu (b == &backingButton); else chooseParts (false); };
+        b->onRightClick = [this, b] { if (session.isPdfScore()) showPdfPartMenu (b == &backingButton); else showPartMenu (b == &backingButton); };
     }
     // ラジオボタンは「オフになった」ときにも onClick が来るので、オンになったときだけ切り替える (音色のボタンと同じ)
     leadButton.onClick = [this] { if (leadButton.getToggleState()) switchPart (false, true); };
@@ -884,7 +885,7 @@ void SessionScreen::requestRemoveSource()
                        .withButton ("キャンセル"_jp)
                        .withAssociatedComponent (this);
 
-    juce::AlertWindow::showAsync (options, [safe = juce::Component::SafePointer (this)] (int result)
+    AppDialog::showAsync (options, [safe = juce::Component::SafePointer (this)] (int result)
     {
         if (safe != nullptr && result == 1)
             safe->removeSource();
@@ -944,7 +945,7 @@ void SessionScreen::pasteYouTubeUrl()
 
     if (YouTubeUrl::extractVideoId (text).isEmpty())
     {
-        juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::NoIcon,
+        AppDialog::showMessageBoxAsync (juce::MessageBoxIconType::NoIcon,
                                                 "YouTube の URL ではありません"_jp,
                                                 "YouTube の動画ページの URL をコピーしてから、もう一度押してください。"_jp);
         return;
@@ -1266,9 +1267,66 @@ void SessionScreen::choosePdfPart (bool backing)
     });
 }
 
+// リード・バッキングのボタンの右クリック (作者の指示: 名前を変える・トラックを選ぶ)
+void SessionScreen::showPartMenu (bool backing)
+{
+    juce::PopupMenu menu;
+    menu.addItem (1, "名前を変更"_jp);
+    menu.addItem (2, "トラックを選ぶ"_jp);
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (backing ? &backingButton : &leadButton),
+                        [safe = juce::Component::SafePointer (this), backing] (int result)
+    {
+        if (safe == nullptr)
+            return;
+        if (result == 1)
+            safe->renamePart (backing);
+        if (result == 2)
+            safe->chooseParts (false);
+    });
+}
+
+juce::String SessionScreen::partName (bool backing) const
+{
+    const auto& custom = backing ? session.backingName : session.leadName;
+    return custom.isNotEmpty() ? custom : (backing ? "バッキング"_jp : "リード"_jp);
+}
+
+void SessionScreen::renamePart (bool backing)
+{
+    askName ((backing ? "バッキング"_jp : "リード"_jp) + "のボタンの名前"_jp,
+             backing ? session.backingName : session.leadName, Session::maxPartNameLength,
+             [safe = juce::Component::SafePointer (this), backing] (const juce::String& name)
+    {
+        if (safe == nullptr)
+            return;
+        (backing ? safe->session.backingName : safe->session.leadName) = name;
+        safe->updatePartButtons();
+    });
+}
+
+// 名前を入れてもらう (アプリの中の入力画面。maxLength 字まで。空にすると、元の名前に戻る)
+void SessionScreen::askName (const juce::String& title, const juce::String& initial, int maxLength,
+                             std::function<void (const juce::String&)> onOk)
+{
+    auto* dialog = new AppDialog (title, juce::String (maxLength) + " 字まで。空にすると、元の名前に戻ります"_jp,
+                                  juce::MessageBoxIconType::NoIcon, this);
+    dialog->addTextEditor ("name", initial);
+    if (auto* editor = dialog->getTextEditor ("name"))
+        editor->setInputRestrictions (maxLength);
+    dialog->addButton ("OK", 1, juce::KeyPress (juce::KeyPress::returnKey));
+    dialog->addButton ("キャンセル"_jp, 0, juce::KeyPress (juce::KeyPress::escapeKey));
+    dialog->enterModalState (true, juce::ModalCallbackFunction::create ([dialog, onOk] (int result)
+    {
+        if (result == 1 && onOk != nullptr)
+            onOk (dialog->getTextEditorContents ("name").trim().substring (0, 64));
+    }), true);
+}
+
 void SessionScreen::showPdfPartMenu (bool backing)
 {
     juce::PopupMenu menu;
+    menu.addItem (10, "名前を変更"_jp);   // 作者の指示: リード・バッキングの名前を変えられる
+    menu.addSeparator();
     if (backing)
     {
         menu.addItem (1, session.hasPdfBacking() ? "バッキングの PDF を選び直す…"_jp : "バッキングの PDF を選ぶ…"_jp);
@@ -1284,6 +1342,9 @@ void SessionScreen::showPdfPartMenu (bool backing)
     {
         if (safe == nullptr)
             return;
+
+        if (result == 10)
+            safe->renamePart (backing);
 
         if (result == 1)
             safe->choosePdfPart (backing);
@@ -1489,7 +1550,28 @@ double SessionScreen::getScoreLengthSeconds() const
         const auto last = signatures.empty() ? MusicInfo::TimeSignature {} : signatures.back();
         endBeats = bars.back() + (last.denominator > 0 ? last.numerator * 4.0 / last.denominator : 4.0);
     }
-    return getScoreOffsetSeconds() + endBeats * 60.0 / session.bpm;
+    return getScoreOffsetSeconds() + beatsToSeconds (endBeats);   // テンポの変化に合わせる
+}
+
+// テンポの変化 (作者の指示: .gp の曲の途中のテンポの変化に合わせる)。タブ譜の小節を使うときだけ (それ以外は BPM で一定)
+const TempoMap& SessionScreen::activeTempoMap() const
+{
+    static const TempoMap constant;
+    return usesScoreBars() ? scoreViewer.getTempoMap() : constant;
+}
+
+double SessionScreen::beatsToSeconds (double beats) const { return activeTempoMap().secondsAt (beats, session.bpm); }
+double SessionScreen::secondsToBeats (double seconds) const { return activeTempoMap().beatsAt (seconds, session.bpm); }
+
+void SessionScreen::updateEngineTempoMap()
+{
+    // メトロノームがタブ譜の小節に合わせて鳴るとき (タブ譜モード) だけ、テンポの変化を渡す
+    const bool use = isBarMode();
+    const auto version = use ? scoreViewer.getTempoMapVersion() : -1;
+    if (version == sentTempoMapVersion)
+        return;
+    sentTempoMapVersion = version;
+    engine.setTempoMap (use ? scoreViewer.getTempoMap() : TempoMap {});
 }
 
 void SessionScreen::updateScoreOnly (double nowMs)
@@ -1659,7 +1741,7 @@ void SessionScreen::requestBackToList()
                        .withAssociatedComponent (this);
 
     // 3ボタンの戻り値: 1番目 = 1、2番目 = 2、3番目 = 0
-    juce::AlertWindow::showAsync (options, [safe = juce::Component::SafePointer (this)] (int result)
+    AppDialog::showAsync (options, [safe = juce::Component::SafePointer (this)] (int result)
     {
         if (safe == nullptr || result == 0)
             return;
@@ -2071,7 +2153,7 @@ void SessionScreen::updateMetronomeDots (double positionBeats)
     const bool metronomeActive = metronomeOn || engine.isMetronomeSolo();
     const auto clock = engine.getBeatClock();
     const bool running = metronomeActive && clock.running && clock.seconds >= 0.0;
-    const auto beats = running ? clock.seconds * session.bpm / 60.0 : positionBeats;
+    const auto beats = running ? (isBarMode() ? secondsToBeats (clock.seconds) : clock.seconds * session.bpm / 60.0) : positionBeats;
 
     auto where = MusicInfo::locateBeat (beats, bars, signatures);
     if (! scoreBars)
@@ -2148,6 +2230,7 @@ double SessionScreen::barStartSeconds (int index) const
         const auto last = (int) bars.size() - 1;
         beats = index <= last ? bars[(size_t) index] : bars.back() + (index - last) * 4.0;
         offset = getScoreOffsetSeconds();
+        return juce::jmax (0.0, beatsToSeconds (beats) + offset);   // テンポの変化に合わせる
     }
 
     return juce::jmax (0.0, beats * 60.0 / juce::jmax (1.0, session.bpm) + offset);
@@ -2304,7 +2387,7 @@ void SessionScreen::showMeterMenu()
         }
 
         // ほかの拍子: 「8/9」のように入れる
-        auto* window = new juce::AlertWindow ("メトロノームの拍子"_jp, "「8/9」のように、分子/分母 を入れてください (分子が1小節の拍の数)"_jp,
+        auto* window = new AppDialog ("メトロノームの拍子"_jp, "「8/9」のように、分子/分母 を入れてください (分子が1小節の拍の数)"_jp,
                                               juce::MessageBoxIconType::NoIcon, safe.getComponent());
         window->addTextEditor ("meter", juce::String (safe->session.meterNumerator) + "/" + juce::String (safe->session.meterDenominator));
         window->addButton ("OK", 1, juce::KeyPress (juce::KeyPress::returnKey));
@@ -2617,7 +2700,7 @@ void SessionScreen::seekToBar (double barStartBeats)
         return;
 
     // カーソルの式 (拍 = (位置 − ずらし) × BPM ÷ 60) を逆にして、小節の頭の位置 (秒) を求める
-    const auto seconds = barStartBeats * 60.0 / session.bpm + getScoreOffsetSeconds();
+    const auto seconds = beatsToSeconds (barStartBeats) + getScoreOffsetSeconds();   // テンポの変化に合わせる
     seekTo (clampToLength (seconds));
     grabKeyboardFocus();   // タブ譜 (WebView) に移ったキー操作を、練習画面に戻す
 }
@@ -2801,7 +2884,7 @@ void SessionScreen::chooseParts (bool required)
 
     const auto message = (required ? "タブ譜を読み込みました。"_jp : juce::String())
                        + "このタブ譜のギターのトラックを、リードとバッキングのどちらにするか選んでください (最大2つ。どちらか1つでもよい)。"_jp;
-    partsWindow = std::make_unique<juce::AlertWindow> ("リードとバッキング"_jp, message, juce::MessageBoxIconType::NoIcon, this);
+    partsWindow = std::make_unique<AppDialog> ("リードとバッキング"_jp, message, juce::MessageBoxIconType::NoIcon, this);
 
     // どちらも「なし」を選べる (1トラックのタブ譜をバッキングにするとき)。両方「なし」なら、最初のトラックをリードにする
     juce::StringArray choices { "なし"_jp };
@@ -2949,6 +3032,8 @@ void SessionScreen::updatePartButtons()
     // PDF: リードは1つ目の PDF、バッキングは2つ目の PDF。バッキングが無くても押せる (押すと PDF を選ぶ)
     if (session.isPdfScore())
     {
+        leadButton.setButtonText (partName (false));
+        backingButton.setButtonText (partName (true));
         const auto showingBacking = session.hasPdfBacking() && session.backingActive;
         leadButton.setEnabled (true);
         backingButton.setEnabled (true);
@@ -2967,6 +3052,8 @@ void SessionScreen::updatePartButtons()
     const auto hasBacking = hasScore && session.backingTrack >= 0;
     const auto showingBacking = hasBacking && (session.backingActive || ! hasLead);
 
+    leadButton.setButtonText (partName (false));   // 作者が付けた名前 (右クリックで変える)
+    backingButton.setButtonText (partName (true));
     leadButton.setEnabled (hasLead);
     backingButton.setEnabled (hasBacking);
     leadButton.setToggleState (hasLead && ! showingBacking, juce::dontSendNotification);
@@ -3287,9 +3374,10 @@ void SessionScreen::showPresetMenu (int slot)
 {
     const auto empty = session.toneSlots[(size_t) slot - 1].isEmpty();
 
+    // 作者の指示: 「名前を変更」と「空にする」
     juce::PopupMenu menu;
-    menu.addItem (1, "今の音色をプリセット "_jp + juce::String (slot) + " に保存"_jp);
-    menu.addItem (2, "プリセット "_jp + juce::String (slot) + " を空にする"_jp, ! empty);
+    menu.addItem (1, "名前を変更"_jp, ! empty);
+    menu.addItem (2, "空にする"_jp, ! empty);
 
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&presetButtons[(size_t) slot - 1]),
                         [safe = juce::Component::SafePointer (this), slot] (int result)
@@ -3299,10 +3387,15 @@ void SessionScreen::showPresetMenu (int slot)
 
         if (result == 1)
         {
-            safe->savePreset (slot);
-            safe->currentPartPreset() = slot;
-            safe->updatePresetButtons();
-            safe->setStatus ("今の音色をプリセット "_jp + juce::String (slot) + " に保存しました"_jp);
+            auto& s = safe->session.toneSlots[(size_t) slot - 1];
+            safe->askName ("プリセット "_jp + juce::String (slot) + " の名前"_jp, s.name, ToneSlot::maxNameLength,
+                           [safe, slot] (const juce::String& name)
+            {
+                if (safe == nullptr)
+                    return;
+                safe->session.toneSlots[(size_t) slot - 1].name = name;
+                safe->updatePresetButtons();
+            });
         }
         else if (result == 2)
         {
@@ -3326,7 +3419,7 @@ void SessionScreen::updatePresetButtons()
         button.setToggleState (slot == current, juce::dontSendNotification);
         button.setAlpha (s.isEmpty() ? 0.6f : 1.0f);   // 空きは薄く
         // 作者のレイアウト: 「1：プリセット名」(VST はプラグインの名前、NAM はモデルの名前)
-        button.setButtonText (juce::String (slot) + "："_jp + (s.isEmpty() ? "空き"_jp : shortToneSlotName (s)));
+        button.setButtonText (juce::String (slot) + "："_jp + (s.isEmpty() ? "空き"_jp : s.name.isNotEmpty() ? s.name : shortToneSlotName (s)));
         button.setTooltip (s.isEmpty()
             ? "プリセット "_jp + juce::String (slot) + " (空き)。押すと今の音色を保存して、"_jp + part + "に割り当てます"_jp
             : "プリセット "_jp + juce::String (slot) + ": "_jp + describeToneSlot (s) + "。押すと"_jp + part
@@ -3449,11 +3542,20 @@ void SessionScreen::toggleMetronomeSolo()
     setStatus (solo ? "メトロノームだけを鳴らしています。再生を始めると止まります"_jp : juce::String());
 }
 
+// 今の音色の種類 (セッションの音色から。チューナーを閉じたときに戻すのに使う)
+ToneType SessionScreen::currentToneType() const
+{
+    if (session.tonePresetId == namTonePresetId)    return ToneType::nam;
+    if (session.tonePresetId == pluginTonePresetId) return ToneType::plugin;
+    return getTonePresets()[(size_t) findTonePresetIndex (session.tonePresetId)].type;
+}
+
 void SessionScreen::toggleTuner()
 {
     if (tunerPanel != nullptr)
     {
         tunerPanel = nullptr;
+        engine.setTone (currentToneType());   // チューナーの前の音色に戻す (作者の指示)
         showOverlay (nullptr);
         tunerButton.setToggleState (false, juce::dontSendNotification);
         resized();   // 隠していた動画とタブ譜を戻す
@@ -3464,6 +3566,7 @@ void SessionScreen::toggleTuner()
         toggleTonePanel();   // 重ねるパネルは1つだけ
 
     tunerPanel = std::make_unique<TunerPanel> (engine);
+    engine.setTone (ToneType::clean);   // チューナーの間はクリーンの音にする (作者の指示: 歪みで音程が分かりにくくならないように)。セッションの音色は変えない
     tunerPanel->onClose = [this]
     {
         // 自分のボタンの onClick の中で破棄しないよう、後で閉じる
@@ -3699,7 +3802,7 @@ void SessionScreen::updatePluginEditorVisibility()
     // 左の大きな枠に出したプラグインの画面は Windows の別の窓として描かれ、ほかの部品の上に出る。
     // チューナー・音色の設定・暗くする幕を重ねているとき、読み込み中は隠す (WebView と同じ)
     const bool allowed = pluginCard.isMainOpen() && tunerPanel == nullptr && tonePanel == nullptr
-                      && ! dimOverlay.isVisible() && ! loading;
+                      && ! dimOverlay.isVisible() && ! loading && AppOverlay::getNumOpen() == 0;
     auto& mainView = pluginCard.getMainView();
     if (mainView.isVisible() != allowed)
         mainView.setVisible (allowed);
@@ -3895,7 +3998,9 @@ void SessionScreen::timerCallback()
     applyToneChanges (position, playing);
 
     // 小節・拍 (一定テンポ + ずらし。設計書 3.1)。動画モードでメトロノームの開始位置があれば、そこが 1小節目
-    const auto beats = (position - getMetronomeOffsetSeconds()) * session.bpm / 60.0;
+    updateEngineTempoMap();
+    const auto beats = isBarMode() ? secondsToBeats (position - getMetronomeOffsetSeconds())   // テンポの変化に合わせる
+                                   : (position - getMetronomeOffsetSeconds()) * session.bpm / 60.0;
     const auto beatsPerBar = usesScoreBars() ? 4 : juce::jmax (1, session.meterNumerator);   // 手で決めた拍子 (.gp が無いとき)
     const auto bar = beats >= 0.0 ? (int) std::floor (beats / beatsPerBar) + 1 : 0;
     const auto beat = beats >= 0.0 ? (int) std::floor (beats) % beatsPerBar + 1 : 0;
@@ -4016,7 +4121,8 @@ void SessionScreen::placeWebViews()
     // WebView (動画・タブ譜) は、ほかの部品より手前に描かれる。
     // チューナーを開いている間と、右のパネルを隠しているとき (動画) は隠す
     // 入れ替え中は、動画を左の大きな枠に、タブ譜を右のパネルの枠に重ねる
-    const bool canShow = tunerPanel == nullptr && tonePanel == nullptr && ! loading
+    // アプリの中に重ねた画面 (確認・入力・設定。AppOverlay) が開いている間も隠す (重ねた画面が、この窓の後ろに隠れないように)
+    const bool canShow = tunerPanel == nullptr && tonePanel == nullptr && ! loading && AppOverlay::getNumOpen() == 0
                       && getParentComponent() != nullptr && ! getBounds().isEmpty();
     const bool swapped = isSwapped();
     auto& videoTarget = swapped ? static_cast<juce::Component&> (scoreView) : static_cast<juce::Component&> (videoView);

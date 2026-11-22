@@ -174,6 +174,8 @@ void ScoreViewer::loadInternal (const juce::File& file, int trackIndex, const ju
     barSignatures.clear();
     barNumbers.clear();
     scoreEndBeats = 0.0;
+    tempoMap = {};
+    ++tempoMapVersion;
     scoreTitle = scoreArtist = scoreTuning = {};
     lastSentSeconds = -1.0;
     pending.erase (std::remove_if (pending.begin(), pending.end(),
@@ -331,6 +333,15 @@ void ScoreViewer::handleEvent (const juce::var& event)
                 barNumbers.push_back ((int) n + 1);
 
         scoreEndBeats = (double) event["endBeats"];
+
+        // テンポの変化 [拍, BPM] (PDF・テンポが一定のタブ譜では 1つか空)
+        tempoMap = {};
+        if (const auto* tempos = event["tempos"].getArray())
+            for (const auto& t : *tempos)
+                if (const auto* pair = t.getArray(); pair != nullptr && pair->size() >= 2)
+                    tempoMap.changes.push_back ({ (double) (*pair)[0], (double) (*pair)[1] });
+        tempoMap.normalise();
+        ++tempoMapVersion;
 
         std::vector<int> strings;
         if (const auto* notes = event["tuning"].getArray())

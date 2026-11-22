@@ -1,3 +1,4 @@
+#include "UI/AppDialog.h"
 #include "DevSnapshots.h"
 
 #if JUCE_DEBUG
@@ -165,6 +166,27 @@ juce::String DevSnapshots::renderAll (const juce::File& folder)
             const auto file = folder.getChildFile (colour == ColourTheme::Light ? "dialog_light.png" : "dialog_dark.png");
             if (savePng (alert.createComponentSnapshot (alert.getLocalBounds(), true, 1.0f), file))
                 log << "wrote " << file.getFullPathName() << "\n";
+        }
+
+        // アプリの中に重ねる画面 (AppDialog。前は別のウィンドウだった): 確認と、名前の入力
+        for (auto colour : { ColourTheme::Light, ColourTheme::Dark })
+        {
+            theme.setColourTheme (colour);
+            AppDialog confirm ("フォルダの削除"_jp,
+                               "フォルダ「ライブ」を削除しますか？中の 2 件のセッションは消さずに、「フォルダなし」に移します。"_jp);
+            confirm.addButton ("削除"_jp, 1);
+            confirm.addButton ("キャンセル"_jp, 0);
+            confirm.setSize (900, 520);
+            const auto suffix = colour == ColourTheme::Light ? juce::String ("_light.png") : juce::String ("_dark.png");
+            savePng (confirm.createComponentSnapshot (confirm.getLocalBounds(), true, 1.0f), folder.getChildFile ("appdialog" + suffix));
+
+            AppDialog input ("プリセット 2 の名前"_jp, "16 字まで。空にすると、元の名前に戻ります"_jp);
+            input.addTextEditor ("name", "ソロ用"_jp);
+            input.addButton ("OK", 1);
+            input.addButton ("キャンセル"_jp, 0);
+            input.validator = [] (int) { return juce::String(); };
+            input.setSize (900, 520);
+            savePng (input.createComponentSnapshot (input.getLocalBounds(), true, 1.0f), folder.getChildFile ("appdialog_input" + suffix));
         }
 
         // ライト・ダークで、一覧・練習画面・チューナー・設定画面

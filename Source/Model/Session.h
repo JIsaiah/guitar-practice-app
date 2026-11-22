@@ -27,6 +27,8 @@ struct ToneSlot
     juce::String namModelPath, irPath, pluginPath, pluginState;
     double inputGainDb = 0.0;
     double noiseGateDb = -90.0;   // ノイズゲートのしきい値 (-90 = オフ)
+    juce::String name;            // 作者が付けた名前 (右クリックの「名前を変更」。16字まで)。空なら音色から作った名前を出す
+    static constexpr int maxNameLength = 16;
 
     bool isEmpty() const noexcept { return tonePresetId.isEmpty(); }
 };
@@ -81,6 +83,9 @@ struct Session
 
     // リード・バッキング (タブ譜のトラックの番号。-1 = 決めていない・なし)
     int leadTrack = -1, backingTrack = -1;
+    // リード・バッキングのボタンの名前 (作者の指示: 右クリックで変えられる。16字まで)。空なら「リード」「バッキング」
+    juce::String leadName, backingName;
+    static constexpr int maxPartNameLength = 16;
     bool backingActive = false;          // バッキングを表示している
     int leadPreset = 0, backingPreset = 0;   // それぞれが使う音色のプリセット (1〜3。0 = 割り当てなし)
 

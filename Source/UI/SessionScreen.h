@@ -2,6 +2,7 @@
 
 #include <juce_gui_basics/juce_gui_basics.h>
 #include "../Audio/AudioEngine.h"
+#include "AppDialog.h"
 #include "../Audio/TapTempo.h"
 #include "../AppSettings.h"
 #include "../Model/SessionStore.h"
@@ -31,6 +32,8 @@ class SessionScreen final : public juce::Component,
                             private juce::ChangeListener
 {
 public:
+    // アプリの中に重ねた画面 (AppOverlay) を開いた・閉じたとき: タブ譜・動画・プラグインの画面 (別の窓) を隠す・出す
+    void refreshNativeViews() { placeWebViews(); }
     // session: 画面で使う値 (Setlist で開くときは、resolver.makeWorkingCopy() で速度・ループを専用設定にしたもの)
     SessionScreen (AudioEngine& engine, SessionStore& store, ThemeManager& theme, AppSettings& settings,
                    YouTubePlayer& youtube, ScoreViewer& scoreViewer, Session session,
@@ -144,7 +147,13 @@ private:
 
     // 小節の頭 (ループの A・B を合わせる先)。タブ譜があればその拍子で、なければ 4/4 とみなす
     bool usesScoreBars() const;
-    void updateMetronomeDots (double positionBeats);   // positionBeats: 止まっているときに拍子を見る位置 (4分音符の数)
+    void updateMetronomeDots (double positionBeats);
+    // テンポの変化 (タブ譜の小節を使うとき)。拍 ⇄ 秒 (起点からの)
+    const TempoMap& activeTempoMap() const;
+    double beatsToSeconds (double beats) const;
+    double secondsToBeats (double seconds) const;
+    void updateEngineTempoMap();   // メトロノームに渡す (変わったときだけ。タイマーから)
+    int sentTempoMapVersion = -2;   // positionBeats: 止まっているときに拍子を見る位置 (4分音符の数)
     int barIndexNear (double seconds) const;     // いちばん近い小節の頭の番号 (0 = 1小節目)
     int barIndexAt (double seconds) const;       // その位置を含む小節の番号
     double barStartSeconds (int index) const;   // 小節の頭の位置 (秒)
@@ -205,7 +214,12 @@ private:
     void switchPart (bool backing, bool fromUser);
     juce::File currentScoreFile() const { return juce::File (session.currentScorePath()); }   // 今表示するタブ譜
     void choosePdfPart (bool backing);        // PDF のリード・バッキングの PDF を選ぶ
-    void showPdfPartMenu (bool backing);      // PDF のリード・バッキングのボタンの右クリック
+    void showPdfPartMenu (bool backing);
+    void showPartMenu (bool backing);         // リード・バッキングの右クリック: 名前を変更・トラックを選ぶ
+    juce::String partName (bool backing) const;   // ボタンの名前 (作者が付けた名前。無ければ「リード」「バッキング」)
+    void renamePart (bool backing);
+    void askName (const juce::String& title, const juce::String& initial, int maxLength, std::function<void (const juce::String&)> onOk);
+    ToneType currentToneType() const;      // PDF のリード・バッキングのボタンの右クリック
     void sendPdfRepeats();                    // 今の PDF の繰り返しをページに送る
     void showPdfRepeatMenu (double position, int repeat);   // PDF の右クリック: 繰り返しを置く・消す
     void showInsertMenu (const GpScoreEdit::NoteEdit& place);   // タブ譜の編集中の右クリック: 拍・小節を後ろに挿入
@@ -215,7 +229,7 @@ private:
     void resetParts();                         // 別のタブ譜にしたとき
     int activePartTrack() const;               // 今のパートのトラック (-1 = なし)
     void updatePartButtons();
-    std::unique_ptr<juce::AlertWindow> partsWindow;
+    std::unique_ptr<AppDialog> partsWindow;
     bool partsChoiceWasClean = false;   // 選ぶ画面を出したとき、ほかに未保存の変更が無かった (選んだらそのまま保存する)
 
     //==== 音色のプリセット 1・2・3 ====
