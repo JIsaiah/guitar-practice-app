@@ -1,5 +1,6 @@
 #include "GpScoreEdit.h"
 #include "../Text.h"
+#include "ScoreFileData.h"
 
 namespace GpScoreEdit
 {
@@ -679,7 +680,7 @@ namespace
         if (gpifIndex < 0)
             return juce::Result::fail ("Guitar Pro 7 以降の .gp ではないので、保存できません"_jp);
 
-        std::unique_ptr<juce::InputStream> gpifStream (zip.createStreamForEntry (gpifIndex));
+        auto gpifStream = ScoreFileData::openEntryLimited (zip, gpifIndex);   // 大きさを偽った zip でも、書かれた大きさまで
         if (gpifStream == nullptr)
             return juce::Result::fail ("タブ譜のファイルを読めませんでした"_jp);
 
@@ -701,7 +702,7 @@ namespace
                 builder.addEntry (std::make_unique<juce::MemoryInputStream> (text.toRawUTF8(), text.getNumBytesAsUTF8(), true),
                                   6, entry->filename, entry->fileTime);
             }
-            else if (std::unique_ptr<juce::InputStream> stream (zip.createStreamForEntry (i)); stream != nullptr)
+            else if (auto stream = ScoreFileData::openEntryLimited (zip, i); stream != nullptr)
             {
                 // 大きいもの (音声) は、圧縮し直さずにそのまま入れる (音声はほとんど縮まないうえ、圧縮に時間がかかり、保存の間アプリが止まるため)
                 builder.addEntry (std::move (stream), entry->uncompressedSize > 4 * 1024 * 1024 ? 0 : 6, entry->filename, entry->fileTime);

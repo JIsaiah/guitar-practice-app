@@ -18,6 +18,21 @@ namespace ScoreFileData
         return entryName.startsWith ("Content/Assets/");
     }
 
+    // zip の中の1つのファイルを読む stream。目次 (セントラルディレクトリ) に書かれた「展開後の大きさ」までしか読まない。
+    // JUCE の展開は、書かれた大きさを超えても最後まで展開するので、大きさを偽った zip (「1 KB」と書いて 4 GB に
+    // 展開されるもの) だと、isWithinLimits の確かめをすり抜けて、メモリや時間を使い切る。偽っていれば、途中で切れる (壊れた楽譜になる)
+    inline std::unique_ptr<juce::InputStream> openEntryLimited (juce::ZipFile& zip, int index)
+    {
+        const auto* entry = zip.getEntry (index);
+        auto* stream = zip.createStreamForEntry (index);
+        if (entry == nullptr || stream == nullptr)
+        {
+            delete stream;
+            return nullptr;
+        }
+        return std::make_unique<juce::SubregionStream> (stream, 0, (juce::int64) entry->uncompressedSize, true);
+    }
+
     // 音声などの素材を抜いた zip を作る。zip でない (.gp5・.gpx・MusicXML など)、抜くものが無い、作れなかったときは nullopt
     inline std::optional<juce::MemoryBlock> withoutEmbeddedAssets (const juce::File& file)
     {
@@ -40,7 +55,7 @@ namespace ScoreFileData
                 continue;
 
             // 中身は writeToStream のときに読まれる。stream は zip を使うので、zip は builder より長く生きる (先に宣言している)
-            std::unique_ptr<juce::InputStream> stream (zip.createStreamForEntry (i));
+            auto stream = openEntryLimited (zip, i);
             if (stream == nullptr)
                 return std::nullopt;
             builder.addEntry (std::move (stream), 6, entry->filename, entry->fileTime);

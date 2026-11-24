@@ -3,6 +3,7 @@
 #include <map>
 #include <juce_core/juce_core.h>
 #include <juce_cryptography/juce_cryptography.h>
+#include "SafeJson.h"
 
 // 「この PC で書いたセッションか」を覚える (セキュリティ。SessionRisk.h)
 //
@@ -60,7 +61,7 @@ private:
 
     void load()
     {
-        const auto parsed = juce::JSON::parse (file);   // 変数に持つ (一時の値のままだと、中身が先に消える)
+        const auto parsed = SafeJson::parseFile (file);   // 大きすぎる・入れ子が深すぎるものは読まない。変数に持つ (一時の値のままだと、中身が先に消える)
         if (auto* object = parsed.getDynamicObject())
             for (const auto& p : object->getProperties())
                 hashes[p.name.toString()] = p.value.toString();

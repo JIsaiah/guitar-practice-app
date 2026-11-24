@@ -237,6 +237,7 @@ target_sources(GuitarPracticeTests PRIVATE
     Tests/GpScoreEditTests.cpp
     Tests/SessionTrustTests.cpp
     Tests/SessionRiskTests.cpp
+    Tests/RobustnessTests.cpp
     Source/Web/GpScoreEdit.cpp
     Source/Model/Session.cpp
     Source/Model/SessionStore.cpp

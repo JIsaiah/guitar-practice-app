@@ -1,6 +1,7 @@
 #include "ThemeManager.h"
 #include <BinaryData.h>
 #include "../Text.h"
+#include "../Model/SafeJson.h"
 
 namespace
 {
@@ -49,7 +50,7 @@ ThemeManager::ThemeManager (juce::PropertiesFile& s)
     customGood = parseHex (settings.getValue (goodKey));
 
     // ロゴ調整ウィンドウで保存した値があれば使う
-    if (const auto saved = juce::JSON::parse (settings.getValue (logoParamsKey)); saved.isObject())
+    if (const auto saved = SafeJson::parse (settings.getValue (logoParamsKey)); saved.isObject())
         logoCache.setParams (MetalLogoParams::fromVar (saved));
 
     juce::Desktop::getInstance().addDarkModeSettingListener (this);

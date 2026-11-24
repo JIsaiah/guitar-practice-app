@@ -1,5 +1,6 @@
 #include "AudioEngine.h"
 #include "PluginLocator.h"
+#include "SourceLimits.h"
 #include "../AppLog.h"
 #include "../Text.h"
 
@@ -475,22 +476,31 @@ std::shared_ptr<AudioEngine::LoadedAudio> AudioEngine::readAudioFile (const juce
         return {};
     }
 
-    constexpr double maxSeconds = 30.0 * 60.0;
-    if (reader->lengthInSamples <= 0 || reader->lengthInSamples > (juce::int64) (maxSeconds * reader->sampleRate))
+    // 長さとサンプルレートを確かめる。作り変えたファイル (サンプルレートが何十億) で、
+    // 何 GB ものメモリを取ろうとして落ちないように (SourceLimits.h)
+    if (! SourceLimits::isLoadable (reader->lengthInSamples, reader->sampleRate))
     {
         error = "音源の長さが対応範囲外です (30分まで)"_jp;
         return {};
     }
 
-    auto loaded = std::make_shared<LoadedAudio>();
-    loaded->sampleRate = reader->sampleRate;
-
     const auto numChannels = (int) juce::jlimit (1u, 2u, reader->numChannels);
     const auto numSamples = (int) reader->lengthInSamples;
-    loaded->buffer.setSize (numChannels, numSamples);
-    reader->read (&loaded->buffer, 0, numSamples, 0, true, numChannels > 1);
 
-    return loaded;
+    // メモリが足りないとき: 読み込みのスレッドで例外が出ると、アプリごと落ちる。ここで受け止めて「読めない」にする
+    try
+    {
+        auto loaded = std::make_shared<LoadedAudio>();
+        loaded->sampleRate = reader->sampleRate;
+        loaded->buffer.setSize (numChannels, numSamples);
+        reader->read (&loaded->buffer, 0, numSamples, 0, true, numChannels > 1);
+        return loaded;
+    }
+    catch (const std::bad_alloc&)
+    {
+        error = "音源が大きすぎて、メモリに読み込めません"_jp;
+        return {};
+    }
 }
 
 void AudioEngine::installSource (std::shared_ptr<LoadedAudio> newSource)

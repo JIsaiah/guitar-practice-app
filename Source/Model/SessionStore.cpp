@@ -2,6 +2,7 @@
 #include "../Text.h"
 #include "../AppPaths.h"
 #include "../Library/SessionFormat.h"
+#include "SafeJson.h"
 
 SessionStore::SessionStore()
     : SessionStore (AppPaths::documentsFolder().getChildFile ("Sessions"),
@@ -60,8 +61,8 @@ std::vector<SessionStore::Entry> SessionStore::list() const
 
     for (const auto& file : directory.findChildFiles (juce::File::findFiles, false, juce::String ("*") + fileExtension))
     {
-        const auto parsed = juce::JSON::parse (file.loadFileAsString());
-        if (! parsed.isObject())
+        const auto parsed = SafeJson::parseFile (file);   // 大きすぎる・入れ子が深すぎるものは読まない (SafeJson.h)
+        if (parsed.getDynamicObject() == nullptr)          // isObject() は配列でも true になるので、オブジェクトかを見る
             continue;
 
         Entry entry;
@@ -92,8 +93,8 @@ std::optional<Session> SessionStore::load (const juce::String& id)
     if (! file.existsAsFile())
         return std::nullopt;
 
-    auto parsed = juce::JSON::parse (file.loadFileAsString());
-    if (! parsed.isObject())
+    auto parsed = SafeJson::parseFile (file);
+    if (parsed.getDynamicObject() == nullptr)
         return std::nullopt;
 
     ensureSessionId (file, parsed);
@@ -169,10 +170,13 @@ juce::String SessionStore::readableIdFor (const Session& session, const juce::St
 {
     const auto base = baseNameFor (session.title, session.artist, session.created);
 
-    // 今の名前が、すでにこの名前 (か、ぶつかったときに番号を付けた名前) なら変えない
-    if (currentId == base)
+    // 今の名前が、すでにこの名前 (か、ぶつかったときに番号を付けた名前) なら変えない。
+    // Windows のファイル名は大文字・小文字を区別しないので、大文字・小文字だけの違いも「同じ」とする
+    // (区別すると、自分自身のファイルとぶつかったとみなして「 2」が付いてしまう。
+    //  名前を付け直すと、古い名前のファイル = 同じファイルを消してしまうので、名前はそのまま使う)
+    if (currentId.equalsIgnoreCase (base))
         return currentId;
-    if (currentId.startsWith (base + " ") && currentId.fromLastOccurrenceOf (" ", false, false).containsOnly ("0123456789"))
+    if (currentId.startsWithIgnoreCase (base + " ") && currentId.fromLastOccurrenceOf (" ", false, false).containsOnly ("0123456789"))
         return currentId;
 
     for (int n = 1;; ++n)
@@ -187,8 +191,8 @@ void SessionStore::renameToReadableNames()
 {
     for (const auto& file : directory.findChildFiles (juce::File::findFiles, false, juce::String ("*") + fileExtension))
     {
-        auto parsed = juce::JSON::parse (file.loadFileAsString());
-        if (! parsed.isObject())
+        auto parsed = SafeJson::parseFile (file);
+        if (parsed.getDynamicObject() == nullptr)
             continue;
 
         // 前の名前 (英数字 32 文字の ID) のファイルだけを直す。
@@ -265,8 +269,8 @@ void SessionStore::assignMissingSessionIds()
 
     for (const auto& file : directory.findChildFiles (juce::File::findFiles, false, juce::String ("*") + fileExtension))
     {
-        auto parsed = juce::JSON::parse (file.loadFileAsString());
-        if (parsed.isObject())
+        auto parsed = SafeJson::parseFile (file);
+        if (parsed.getDynamicObject() != nullptr)
             byId[ensureSessionId (file, parsed).toLowerCase()].add (file);
     }
 
@@ -289,7 +293,7 @@ void SessionStore::assignMissingSessionIds()
             if (i == keep)
                 continue;
 
-            auto parsed = juce::JSON::parse (files[i].loadFileAsString());
+            auto parsed = SafeJson::parseFile (files[i]);
             if (auto* object = parsed.getDynamicObject())
             {
                 object->setProperty ("session_id", juce::Uuid().toString());

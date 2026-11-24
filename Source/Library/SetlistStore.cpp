@@ -1,6 +1,7 @@
 #include "SetlistStore.h"
 #include "../Text.h"
 #include "../AppPaths.h"
+#include "../Model/SafeJson.h"
 
 SetlistStore::SetlistStore()
     : SetlistStore (AppPaths::documentsFolder().getChildFile ("Setlists"))
@@ -18,8 +19,13 @@ std::vector<Setlist> SetlistStore::list() const
     std::vector<Setlist> setlists;
 
     for (const auto& file : directory.findChildFiles (juce::File::findFiles, false, juce::String ("*") + fileExtension))
-        if (auto setlist = Setlist::fromVar (juce::JSON::parse (file.loadFileAsString())))
+        if (auto setlist = Setlist::fromVar (SafeJson::parseFile (file)))
+        {
+            // ファイルの中の ID がファイル名に使えないもの (フォルダの外を指すなど) なら、ファイル名を ID にする
+            if (! isSafeId (setlist->setlistId))
+                setlist->setlistId = file.getFileNameWithoutExtension();
             setlists.push_back (std::move (*setlist));
+        }
 
     std::sort (setlists.begin(), setlists.end(),
                [] (const Setlist& a, const Setlist& b) { return a.updatedAt > b.updatedAt; });
@@ -32,14 +38,17 @@ std::optional<Setlist> SetlistStore::load (const juce::String& setlistId) const
     if (! file.existsAsFile())
         return std::nullopt;
 
-    return Setlist::fromVar (juce::JSON::parse (file.loadFileAsString()));
+    auto setlist = Setlist::fromVar (SafeJson::parseFile (file));
+    if (setlist.has_value() && ! isSafeId (setlist->setlistId))
+        setlist->setlistId = setlistId;   // 上の list() と同じ (ファイル名を ID にする)
+    return setlist;
 }
 
 bool SetlistStore::save (Setlist& setlist)
 {
     const auto now = juce::Time::getCurrentTime();
 
-    if (setlist.setlistId.isEmpty())
+    if (! isSafeId (setlist.setlistId))
         setlist.setlistId = juce::Uuid().toString();
 
     if (setlist.createdAt.toMilliseconds() == 0)
@@ -55,6 +64,8 @@ bool SetlistStore::save (Setlist& setlist)
 
 bool SetlistStore::remove (const juce::String& setlistId)
 {
+    if (! isSafeId (setlistId))
+        return false;   // File() の deleteFile は「無いので成功」を返すため、先に断る
     return fileFor (setlistId).deleteFile();
 }
 
@@ -86,7 +97,16 @@ int SetlistStore::countSetlistsUsing (const juce::String& sessionId) const
     return count;
 }
 
+bool SetlistStore::isSafeId (const juce::String& setlistId)
+{
+    return setlistId.isNotEmpty() && setlistId.length() <= 64
+        && setlistId.containsOnly ("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_{}");
+}
+
 juce::File SetlistStore::fileFor (const juce::String& setlistId) const
 {
+    // 使えない ID は、どのファイルも指さない (保存は失敗し、削除は何もしない)
+    if (! isSafeId (setlistId))
+        return {};
     return directory.getChildFile (setlistId + fileExtension);
 }

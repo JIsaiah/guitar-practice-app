@@ -26,6 +26,11 @@ public:
 
     static constexpr const char* fileExtension = ".gpsetlist";
 
+    // ファイル名に使ってよい setlistId か (英数字と - _ { } だけ、64 字まで)。
+    // setlistId はファイルの中に書かれているので、人から受け取ったファイルで「../../x」のように書かれると、
+    // 保存・削除でセットリストのフォルダの外のファイルを書き換え・削除できてしまう (パストラバーサル)
+    static bool isSafeId (const juce::String& setlistId);
+
 private:
     juce::File fileFor (const juce::String& setlistId) const;
 
